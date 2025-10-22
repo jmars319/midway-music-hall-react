@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+// LoginPage: admin login form; lightweight demo auth + DB lookup
 import { API_BASE } from '../App';
 
 export default function LoginPage({ onLogin, onBack }) {

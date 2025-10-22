@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+// SeatRequestsModule: admin list view for seat requests (simpler alternative to RequestsModule)
 import { CheckCircle, XCircle } from 'lucide-react';
 import { API_BASE } from '../App';
 

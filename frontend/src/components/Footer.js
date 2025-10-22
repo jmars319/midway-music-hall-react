@@ -1,4 +1,5 @@
 import React from 'react';
+// Footer: small presentational component rendered at bottom of site
 import { MapPin, Phone, Mail, Facebook, Instagram, Twitter } from 'lucide-react';
 
 const business = {

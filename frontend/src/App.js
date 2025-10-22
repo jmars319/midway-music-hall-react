@@ -7,6 +7,8 @@ export const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5001
 
 export default function App() {
   const [currentView, setCurrentView] = useState('home'); // 'home' | 'login' | 'admin'
+  // App entry: wires up routes and provides a shared API_BASE constant
+  // Keep this file minimal; most UI is in components/ and admin/
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
 

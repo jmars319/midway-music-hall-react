@@ -1,4 +1,5 @@
 import React from 'react';
+// Index (app bootstrap): mounts React app into DOM
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import './index.css';

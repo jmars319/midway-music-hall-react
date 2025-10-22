@@ -1,4 +1,5 @@
 import React from 'react';
+// Hero: large header/hero section used on the home page
 import { Music2, Calendar, MapPin } from 'lucide-react';
 
 export default function Hero() {

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Menu, X, Music } from 'lucide-react';
 
+// Navigation: top site navigation and admin access button
 export default function Navigation({ onAdminClick }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 

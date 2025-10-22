@@ -1,4 +1,5 @@
 import React from 'react';
+// Schedule: simple list of upcoming events used on the home page
 import { Calendar, Clock, DollarSign, Users } from 'lucide-react';
 
 const formatDate = (dateString) => {

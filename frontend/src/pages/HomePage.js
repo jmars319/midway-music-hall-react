@@ -6,6 +6,7 @@ import SeatingChart from '../components/SeatingChart';
 import ArtistSuggestion from '../components/ArtistSuggestion';
 import About from '../components/About';
 import Footer from '../components/Footer';
+// HomePage: main public landing page that composes Hero, Schedule, SeatingChart, etc.
 import { API_BASE } from '../App';
 
 export default function HomePage({ onAdminClick }) {
