@@ -80,10 +80,38 @@ export default function SuggestionsModule(){
               </div>
 
               <div className="grid grid-cols-1 gap-2 mb-3">
-                <div><strong>Contact:</strong> {s.contact_name} — <a className="text-blue-400" href={`mailto:${s.contact_email}`}>{s.contact_email}</a></div>
-                {s.contact_phone && <div><strong>Phone:</strong> {s.contact_phone}</div>}
-                {s.music_links && <div><strong>Music:</strong> <div className="text-blue-400 break-words">{s.music_links}</div></div>}
-                {s.social_media && <div><strong>Social:</strong> <div className="text-blue-400 break-words">{s.social_media}</div></div>}
+                {(s.contact_name || s.contact_email || s.contact || s.message) ? (
+                  <div>
+                    <strong>Contact:</strong>{' '}
+                    {s.contact_name ? <span>{s.contact_name}</span> : (s.contact && s.contact.name ? <span>{s.contact.name}</span> : <span className="text-gray-400">(no name)</span>)}
+                    {' '}
+                    {s.contact_email ? (
+                      <a className="text-blue-400" href={`mailto:${s.contact_email}`}>{s.contact_email}</a>
+                    ) : (s.contact && s.contact.email ? (
+                      <a className="text-blue-400" href={`mailto:${s.contact.email}`}>{s.contact.email}</a>
+                    ) : null)}
+                    {!s.contact_email && !s.contact?.email && !s.message && !s.contact && !s.contact_name && (
+                      <span className="text-gray-400 ml-2">No contact info provided</span>
+                    )}
+                  </div>
+                ) : null}
+
+                {(s.contact_phone || (s.contact && s.contact.phone)) && (
+                  <div><strong>Phone:</strong> {s.contact_phone || s.contact.phone}</div>
+                )}
+
+                {(s.music_links || (s.contact && s.contact.music_links)) && (
+                  <div><strong>Music:</strong> <div className="text-blue-400 break-words">{s.music_links || s.contact.music_links}</div></div>
+                )}
+
+                {(s.social_media || (s.contact && s.contact.social_media)) && (
+                  <div><strong>Social:</strong> <div className="text-blue-400 break-words">{s.social_media || s.contact.social_media}</div></div>
+                )}
+
+                {/* Fallback: show raw notes/message if no contact fields present */}
+                {!s.contact_name && !s.contact_email && !s.contact_phone && !s.music_links && !s.social_media && s.message && (
+                  <div><strong>Notes:</strong> <div className="text-gray-300">{s.message}</div></div>
+                )}
               </div>
 
               {s.message && (

@@ -468,7 +468,45 @@ app.put('/api/seat-requests/:id', async (req, res) => {
 app.get('/api/suggestions', async (req, res) => {
 	try {
 		const [rows] = await pool.query('SELECT * FROM suggestions ORDER BY created_at DESC');
-		res.json({ success: true, suggestions: rows });
+		// Normalize rows to include fields the frontend admin expects
+		const normalized = rows.map(r => {
+			const out = { ...r };
+			// Artist name was stored in `name` column
+			out.artist_name = r.name;
+
+			// Parse contact JSON if present and expose common fields
+			let contactObj = null;
+			if (r.contact) {
+				try {
+					contactObj = typeof r.contact === 'string' ? JSON.parse(r.contact) : r.contact;
+				} catch (e) {
+					contactObj = null;
+				}
+			}
+			if (contactObj) {
+				out.contact_name = contactObj.name || contactObj.contact_name || null;
+				out.contact_email = contactObj.email || contactObj.contact_email || null;
+				out.contact_phone = contactObj.phone || contactObj.contact_phone || null;
+				out.music_links = contactObj.music_links || null;
+				out.social_media = contactObj.social_media || null;
+				// genre may be provided by the public form; prefer contactObj.genre if available
+				out.genre = contactObj.genre || null;
+			} else {
+				out.contact_name = null;
+				out.contact_email = null;
+				out.contact_phone = null;
+				out.music_links = null;
+				out.social_media = null;
+				out.genre = null;
+			}
+
+			// Notes / message
+			out.message = r.notes || null;
+
+			return out;
+		});
+
+		res.json({ success: true, suggestions: normalized });
 	} catch (error) {
 		console.error('GET /api/suggestions error:', error);
 		res.status(500).json({ success: false, message: 'Failed to fetch suggestions' });
@@ -477,10 +515,34 @@ app.get('/api/suggestions', async (req, res) => {
 
 app.post('/api/suggestions', async (req, res) => {
 	try {
-		const { name, contact, notes, submission_type } = req.body;
+		// Accept both legacy and newer flattened payloads from the frontend
+		const body = req.body || {};
+		const artistName = body.artist_name || body.name || 'Unknown Artist';
+		const submission_type = body.submission_type || body.type || 'general';
+
+		// Build contact object from either a provided `contact` object/string or flattened fields
+		let contactObj = null;
+		if (body.contact) {
+			if (typeof body.contact === 'string') {
+				try { contactObj = JSON.parse(body.contact); } catch (e) { contactObj = { raw: body.contact }; }
+			} else if (typeof body.contact === 'object') {
+				contactObj = body.contact;
+			}
+		}
+		contactObj = contactObj || {};
+		// Map flattened contact fields if present
+		if (!contactObj.name && body.contact_name) contactObj.name = body.contact_name;
+		if (!contactObj.email && body.contact_email) contactObj.email = body.contact_email;
+		if (!contactObj.phone && body.contact_phone) contactObj.phone = body.contact_phone;
+		if (!contactObj.music_links && body.music_links) contactObj.music_links = body.music_links;
+		if (!contactObj.social_media && body.social_media) contactObj.social_media = body.social_media;
+		if (!contactObj.genre && body.genre) contactObj.genre = body.genre;
+
+		const notes = body.notes || body.message || '';
+
 		const [result] = await pool.query(
 			'INSERT INTO suggestions (name, contact, notes, submission_type, created_at) VALUES (?, ?, ?, ?, NOW())',
-			[name, contact, notes, submission_type]
+			[artistName, Object.keys(contactObj).length ? JSON.stringify(contactObj) : null, notes, submission_type]
 		);
 		res.json({ success: true, id: result.insertId });
 	} catch (error) {
