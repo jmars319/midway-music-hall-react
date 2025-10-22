@@ -1,7 +1,8 @@
 # node
 node_modules/
+frontend/node_modules/
 npm-debug.log
-/yarn-error.log
+yarn-error.log
 # Env
 .env
 .env.local
@@ -17,9 +18,11 @@ build/
 # Editor temp
 *~
 # PID and temp files
-backend/backend_pid.txt
-frontend/frontend_pid.txt
+backend_pid.txt
+frontend_dev.log
 /tmp/
 # Logs
 logs/
 *.log
+# Do not commit copilot instructions
+copilot-instructions/
