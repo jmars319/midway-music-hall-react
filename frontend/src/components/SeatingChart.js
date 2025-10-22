@@ -43,6 +43,22 @@ export default function SeatingChart({ seatingConfig = [], events = [] }) {
     setSelectedSeats(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
   };
 
+  /* Developer commentary - selection lifecycle and UX decisions
+     - `selectedSeats` holds the user's current selection in-memory only.
+     - When the user clicks "Request Seats" we POST a new seat_request with
+       the selected seat ids. That request enters a 'pending' state and must
+       be approved by an admin to become reserved.
+     - Why keep selection client-side? This avoids needing a server-side
+       reservation hold mechanism and keeps the UX responsive. Tradeoffs:
+       * Concurrency: two users may select the same seat at once. The
+         approval transaction detects conflicts and prevents double-booking.
+       * UX clarity: we show pending seats (requests in the DB with status
+         'pending') as dashed/purple to reduce user confusion.
+     - If you later want temporary holds (e.g., 10-minute holds when a user
+       initiates checkout), add a 'holds' table and a server endpoint to
+       create a hold with an expiry; then update the UI to display holds.
+  */
+
   const openRequestModal = () => {
     if (selectedSeats.length === 0) {
       setErrorMessage('Please select at least one seat before requesting.');
@@ -129,6 +145,12 @@ export default function SeatingChart({ seatingConfig = [], events = [] }) {
                       const reserved = (row.selected_seats && typeof row.selected_seats === 'string') ? (()=>{try{return JSON.parse(row.selected_seats);}catch(e){return []}})() : (row.selected_seats || []);
                       // pending seats specific to this row
                       const pendingForRow = Array.isArray(pendingSeats) ? pendingSeats.filter(s => s.startsWith(`${row.section_name || row.section}-${row.row_label}-`)) : [];
+                      // For table layouts we pass three categories of seats into
+                      // the `Table6` component: reserved seats (persisted in DB),
+                      // pending seats (requests in 'pending' state) and the
+                      // user's current selection (selectedSeats). The Table6
+                      // component is responsible for rendering states with
+                      // appropriate priority: reserved > pending > selected.
                       return (
                         <Table6
                           row={row}

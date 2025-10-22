@@ -79,6 +79,20 @@ export default function RequestsModule(){
     }catch(e){ console.error('Action failed', e); alert('Action failed'); }
   };
 
+  /* Developer guidance - approval flow and error handling
+     - When approving a request we may receive a 409 response listing
+       specific seat ids that could not be reserved because they were
+       reserved by another flow. The UI surfaces these in `ConflictModal`.
+     - After reviewing conflicts admins may:
+         * Refresh the requests list (to see updated reservation states)
+         * Manually coordinate with the customer to select alternate seats
+     - Considerations for improvements:
+         * Add optimistic UI: mark request as 'processing' while awaiting
+           server confirmation to prevent double-clicks.
+         * Add a bulk-approve workflow with dry-run conflict detection
+           that pre-checks many requests before committing.
+  */
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">

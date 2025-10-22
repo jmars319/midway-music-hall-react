@@ -292,6 +292,31 @@ app.delete('/api/seating/:id', async (req, res) => {
 // Seat requests are created by customers and reviewed by admins. The
 // approval flow checks for conflicts and merges seat ids into the
 // corresponding `seating.selected_seats` JSON column when approved.
+/*
+	Developer notes - seat request approval contract
+
+	- Endpoint: POST /api/seat-requests/:id/approve
+	- Input: request id in the URL path. No body required.
+	- Behavior: within a DB transaction, the server will:
+			1) load the seat_request row and parse its `selected_seats` JSON
+			2) for each requested seat, verify the corresponding seating row's
+				 `selected_seats` does not already include that seat id
+			3) if any conflict is detected, return 409 with a list of conflicts
+			4) otherwise, merge each seat id into the seating.selected_seats JSON
+				 field for the appropriate seating row and mark the request approved
+	- Output: 200 on success { success: true } or 409 { success: false, conflicts: [...] }
+
+	Important edge-cases & notes:
+	- Seat id format is SECTION-ROW-<seatNumber> (e.g. "Main-A-3"); the code
+		splits on '-' to recover section and row_label. This is simple but fragile
+		for section or row names that contain hyphens; keep this in mind if you
+		change naming conventions.
+	- The transaction uses `SELECT` then `UPDATE` per seating row. This is
+		intentionally simple and portable across MySQL versions; if you expect
+		very high concurrency consider SELECT ... FOR UPDATE to lock rows.
+	- The handler normalizes JSON stored as string in DB; defensive parsing
+		is used throughout to avoid crashing on malformed data.
+*/
 app.get('/api/seat-requests', async (req, res) => {
 	try {
 		// optional filters
@@ -333,9 +358,13 @@ app.get('/api/seat-requests', async (req, res) => {
 				conn.release();
 				return res.status(404).json({ success: false, message: 'Request not found' });
 			}
+				// Parse the selected_seats on the request row. It may be stored as
+				// a JSON string or already as an array depending on how it was inserted.
 				let seats = [];
 				try { seats = JSON.parse(reqRow.selected_seats || '[]'); } catch(e) { seats = []; }
-				// Check for conflicts first: if any seat is already reserved, abort
+				// Check for conflicts first: if any seat is already reserved, abort.
+				// We iterate seats and map each to the seating row. Note: this is a
+				// conservative check — it doesn't reserve seats until the commit step.
 				const conflicts = [];
 				for (const seatId of seats) {
 					const parts = seatId.split('-');

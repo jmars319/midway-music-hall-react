@@ -28,6 +28,20 @@ const seatTypeClass = (type, selected) => {
 // - interactive: when false, renders static view
 // - shape: 'rect' or 'round'
 export default function Table6({ row, size = 80, selectedSeats = [], pendingSeats = [], onToggleSeat, interactive = true, shape = 'rect' }){
+  /* Developer notes - rendering and data shapes
+     - `row` is the seating row model from the backend. Important fields:
+         * section_name / section: textual section identifier
+         * row_label: label for the row/group (e.g., 'A')
+         * selected_seats: JSON array (or JSON string) stored in DB for
+           seats already reserved on this row
+         * seat_type: used to determine color/visual treatment
+     - `selectedSeats` (prop) represents the user's current in-memory
+       selection across the chart and may include seats from multiple rows.
+     - `pendingSeats` (prop) is a list of seatIds which are part of
+       outstanding seat_requests with status 'pending'; they should be
+       considered temporarily unavailable for selection.
+     - Visual state priority is: reserved (DB) > pending (requests) > user-selected.
+  */
   // shape: 'rect' (two rows of 3) or 'round' (circle with 6 around)
   const isRound = shape === 'round';
   const center = size/2;
