@@ -1,4 +1,8 @@
 // Midway Music Hall - Express server with full API endpoints
+// Developer notes: This file contains the API surface for the app. Keep
+// handlers small and descriptive; database access is done via the mysql2
+// promise pool defined below. Sensitive config values are read from
+// backend/.env (not checked into git).
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2');
@@ -29,9 +33,13 @@ const pool = mysql.createPool({
 }).promise();
 
 // Health
+// Simple health endpoint (useful for readiness checks)
 app.get('/api/health', (req, res) => res.json({ success: true, status: 'ok' }));
 
 // --- Authentication (demo + DB lookup) ---
+// Authentication endpoint (development/demo + DB-backed)
+// Input: { email, password }
+// Output: { success: true, user } or 401 on failure
 app.post('/api/login', async (req, res) => {
 	const { email, password } = req.body || {};
 	try {
@@ -58,6 +66,9 @@ app.post('/api/login', async (req, res) => {
 });
 
 // --- Events CRUD ---
+// The events endpoints are simple CRUD handlers used by the frontend to
+// list and manage events. They return JSON objects with a `success` flag
+// and the requested data.
 app.get('/api/events', async (req, res) => {
 	try {
 		const [events] = await pool.query('SELECT * FROM events ORDER BY start_datetime ASC');
@@ -118,6 +129,9 @@ app.delete('/api/events/:id', async (req, res) => {
 });
 
 // --- Seating ---
+// Seating rows represent either linear seat rows or grouped seat types
+// (e.g., table-6). The `selected_seats` column stores a JSON array of
+// reserved seat identifiers like "SECTION-ROW-1".
 app.get('/api/seating', async (req, res) => {
 	try {
 		const [rows] = await pool.query('SELECT id, event_id, section as section_name, row_label, seat_number, total_seats, seat_type, is_active, selected_seats, pos_x, pos_y, rotation, status FROM seating ORDER BY section, row_label, seat_number');
@@ -150,7 +164,8 @@ app.get('/api/seating', async (req, res) => {
 	}
 });
 
-// Partial update for seating rows (patch only provided fields)
+// Partial update for seating rows (PATCH accepts only the fields provided)
+// This is used by admin tools to update position, rotation, selected_seats, etc.
 app.patch('/api/seating/:id', async (req, res) => {
 	try {
 		const id = req.params.id;
@@ -206,6 +221,8 @@ app.put('/api/stage-settings', async (req, res) => {
 });
 
 // Layout history endpoints (server-side snapshots)
+// The admin layout editor can POST snapshots here. Server prunes older
+// snapshots by count and age to avoid unbounded growth.
 app.post('/api/layout-history', async (req, res) => {
 	try {
 		const { snapshot } = req.body || {};
@@ -272,6 +289,9 @@ app.delete('/api/seating/:id', async (req, res) => {
 });
 
 // --- Seat Requests ---
+// Seat requests are created by customers and reviewed by admins. The
+// approval flow checks for conflicts and merges seat ids into the
+// corresponding `seating.selected_seats` JSON column when approved.
 app.get('/api/seat-requests', async (req, res) => {
 	try {
 		// optional filters
@@ -300,6 +320,8 @@ app.get('/api/seat-requests', async (req, res) => {
 });
 
 	// Approve a seat request: mark request approved and merge seats into seating.selected_seats
+	// This handler runs inside a DB transaction to avoid race conditions.
+	// If any requested seat is already reserved, it returns 409 with conflicts.
 	app.post('/api/seat-requests/:id/approve', async (req, res) => {
 		const rid = req.params.id;
 		const conn = await pool.getConnection();
@@ -361,7 +383,7 @@ app.get('/api/seat-requests', async (req, res) => {
 		}
 	});
 
-	// Deny a seat request
+	// Deny a seat request (simple state change)
 	app.post('/api/seat-requests/:id/deny', async (req, res) => {
 		try {
 			const rid = req.params.id;

@@ -28,6 +28,11 @@ function ConflictModal({ conflicts = [], onClose = () => {}, onRefresh = () => {
   );
 }
 
+// RequestsModule (admin)
+// Shows customer seat requests, allows admin to approve or deny requests.
+// - Polls `/api/seat-requests` periodically when polling is enabled
+// - Approve action will call `/api/seat-requests/:id/approve` and may
+//   return a 409 with conflicts if seats were already reserved
 export default function RequestsModule(){
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);

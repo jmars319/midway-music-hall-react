@@ -18,6 +18,15 @@ const seatTypeClass = (type, selected) => {
   }
 };
 
+// Table6 component
+// Renders a 6-seat table in either rectangular (two rows of 3) or circular layout.
+// Props:
+// - row: seating row object (contains section_name, row_label, selected_seats, seat_type, etc.)
+// - selectedSeats: array of seat ids the user has selected
+// - pendingSeats: seats with pending requests (rendered with dashed border)
+// - onToggleSeat(seatId): callback when user clicks a seat
+// - interactive: when false, renders static view
+// - shape: 'rect' or 'round'
 export default function Table6({ row, size = 80, selectedSeats = [], pendingSeats = [], onToggleSeat, interactive = true, shape = 'rect' }){
   // shape: 'rect' (two rows of 3) or 'round' (circle with 6 around)
   const isRound = shape === 'round';

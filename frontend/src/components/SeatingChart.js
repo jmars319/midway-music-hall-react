@@ -20,6 +20,14 @@ const seatTypeClass = (type, selected) => {
   }
 };
 
+// SeatingChart component
+// Props:
+// - seatingConfig: array of seating rows from the backend
+// - events: array of events to choose from when submitting a seat request
+// Behavior:
+// - Renders seats positioned by pos_x/pos_y when available
+// - Allows users to select seats (unless they are pending/reserved)
+// - Can submit a seat request payload to the backend
 export default function SeatingChart({ seatingConfig = [], events = [] }) {
   const activeRows = useMemo(() => seatingConfig.filter(r => r.is_active !== false), [seatingConfig]);
 
@@ -89,7 +97,8 @@ export default function SeatingChart({ seatingConfig = [], events = [] }) {
     }
   };
 
-  // Determine whether spatial data exists
+  // Determine whether spatial data exists (pos_x/pos_y set)
+  // If spatial data is missing, we show a list view message instead.
   const hasPositions = activeRows.some(r => r.pos_x !== null && r.pos_y !== null && r.pos_x !== undefined && r.pos_y !== undefined);
 
   return (
