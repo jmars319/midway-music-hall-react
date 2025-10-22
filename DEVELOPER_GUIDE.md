@@ -1,3 +1,64 @@
+## Developer notes
+
+### Suggestions API — contact normalization
+
+Summary:
+
+- The `suggestions` table stores submitter contact/details in a JSON column named `contact`.
+- The backend API now normalizes/returns flattened contact fields so the admin UI can render them consistently.
+
+What the API accepts (POST /api/suggestions):
+
+- Either a `contact` object inside the payload, e.g.:
+
+```json
+{
+  "artist_name": "The Example Band",
+  "submission_type": "artist",
+  "contact": {
+    "name": "Jane Doe",
+    "email": "jane@example.com",
+    "phone": "555-1234",
+    "music_links": ["https://soundcloud.com/example"],
+    "social_media": {"instagram":"@example"},
+    "genre": "indie"
+  },
+  "message": "We'd love to play at Midway."
+}
+```
+
+- Or the same data as flattened fields (the public form uses this shape):
+
+```json
+{
+  "artist_name": "The Example Band",
+  "submission_type": "artist",
+  "contact_name": "Jane Doe",
+  "contact_email": "jane@example.com",
+  "contact_phone": "555-1234",
+  "music_links": ["https://soundcloud.com/example"],
+  "social_media": {"instagram":"@example"},
+  "genre": "indie",
+  "message": "We'd love to play at Midway."
+}
+```
+
+What the API returns (GET /api/suggestions):
+
+- The response items include both the raw `contact` JSON (if present) and flattened helper fields for easy rendering:
+
+- `artist_name`, `contact_name`, `contact_email`, `contact_phone`, `music_links`, `social_media`, `genre`, `message`.
+
+Frontend notes:
+
+- The admin component `frontend/src/admin/SuggestionsModule.js` reads the flattened fields and falls back to the `contact` object if necessary. If a field is missing, the UI will show nothing for that entry (no placeholder email links are rendered unless an email exists).
+- The public `frontend/src/components/ArtistSuggestion.js` sends the flattened fields by default; the backend will pack them into the `contact` JSON column.
+
+Migration/backfill:
+
+- A migration was added earlier to consolidate `name`/`notes` into `artist_name`/`message` and to ensure `start_datetime` is canonical for events. See `backend/scripts` for the migration scripts used in development.
+
+If you want this documented elsewhere (in the admin docs or inline component comments), tell me where and I will add it.
 Midway Music Hall — Developer Guide
 
 This developer guide documents the codebase, runtime setup, important data
