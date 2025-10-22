@@ -1,3 +1,4 @@
+// About: static about section used on the homepage
 import React from 'react';
 import { Music, Users, Star, Heart } from 'lucide-react';
 

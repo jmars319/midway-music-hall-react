@@ -1,3 +1,4 @@
+// EventsModule: admin UI to create and manage events
 import React, { useEffect, useState } from 'react';
 import { Plus, Edit, Trash2 } from 'lucide-react';
 import { API_BASE } from '../App';

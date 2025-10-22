@@ -1,3 +1,4 @@
+// ArtistSuggestion: public form for users to suggest artists
 import React, { useState } from 'react';
 import { Music, Send, CheckCircle } from 'lucide-react';
 import { API_BASE } from '../App';

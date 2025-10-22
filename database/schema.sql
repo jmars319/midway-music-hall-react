@@ -1,4 +1,7 @@
 -- SQL schema placeholder for midway_music_hall
+-- This file contains DDL statements to create the application's MySQL
+-- schema. Run these statements in your development database before
+-- starting the backend.
 CREATE DATABASE IF NOT EXISTS midway_music_hall;
 USE midway_music_hall;
 

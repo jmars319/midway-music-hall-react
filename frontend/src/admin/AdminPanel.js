@@ -1,3 +1,4 @@
+// AdminPanel: top-level admin container and navigation for admin modules
 import React, { useState } from 'react';
 import {
   DashboardModule,

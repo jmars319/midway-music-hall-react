@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { API_BASE } from '../App';
 
+// SettingsModule: admin UI for business/stage settings
+
 export default function SettingsModule(){
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);

@@ -1,3 +1,4 @@
+// SeatingModule: admin layout editor and seating management UI
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, Edit } from 'lucide-react';
 import Table6 from '../components/Table6';

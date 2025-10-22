@@ -33,6 +33,7 @@ function ConflictModal({ conflicts = [], onClose = () => {}, onRefresh = () => {
 // - Polls `/api/seat-requests` periodically when polling is enabled
 // - Approve action will call `/api/seat-requests/:id/approve` and may
 //   return a 409 with conflicts if seats were already reserved
+// This module presents a table view and a small seat-preview for each request.
 export default function RequestsModule(){
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);

@@ -1,3 +1,4 @@
+// DashboardModule: admin summary and quick stats
 import React, { useEffect, useState } from 'react';
 import { Activity, Calendar, Music, Mail } from 'lucide-react';
 import { API_BASE } from '../App';

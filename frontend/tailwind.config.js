@@ -1,3 +1,5 @@
+// Tailwind configuration used by the frontend build.
+// Edit theme extensions and content globs here.
 module.exports = {
   content: ['./src/**/*.{js,jsx,ts,tsx}', './public/index.html'],
   theme: {

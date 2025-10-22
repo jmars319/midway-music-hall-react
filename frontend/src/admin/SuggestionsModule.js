@@ -1,3 +1,4 @@
+// SuggestionsModule: admin interface for reviewing artist suggestions
 import React, { useEffect, useState } from 'react';
 import { CheckCircle, XCircle } from 'lucide-react';
 import { API_BASE } from '../App';
