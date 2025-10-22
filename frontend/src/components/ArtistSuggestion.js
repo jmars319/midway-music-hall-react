@@ -84,7 +84,7 @@ export default function ArtistSuggestion() {
             <div className="text-sm text-gray-300">Submission type</div>
             <div className="ml-auto flex gap-2">
               <button onClick={() => setSubmissionType('self')} className={`px-3 py-1 rounded ${submissionType === 'self' ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-300'}`}>I am the artist</button>
-              <button onClick={() => setSubmissionType('fan')} className={`px-3 py-1 rounded ${submissionType === 'fan' ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-300'}`}>I suggest a fan</button>
+              <button onClick={() => setSubmissionType('fan')} className={`px-3 py-1 rounded ${submissionType === 'fan' ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-300'}`}>Recommend an artist</button>
             </div>
           </div>
 
