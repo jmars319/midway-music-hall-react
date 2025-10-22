@@ -71,8 +71,12 @@ app.post('/api/login', async (req, res) => {
 // and the requested data.
 app.get('/api/events', async (req, res) => {
 	try {
-		const [events] = await pool.query('SELECT * FROM events ORDER BY start_datetime ASC');
-		res.json({ success: true, events });
+		// Select a computed start_datetime so clients receive a usable datetime even
+		// when start_datetime is NULL (fallback to event_date + event_time).
+		const [events] = await pool.query("SELECT *, COALESCE(start_datetime, CAST(CONCAT(event_date, ' ', event_time) AS DATETIME)) AS computed_start_datetime FROM events ORDER BY computed_start_datetime ASC");
+		// Normalize response to include start_datetime field
+		const normalized = events.map(e => ({ ...e, start_datetime: e.computed_start_datetime }));
+		res.json({ success: true, events: normalized });
 	} catch (error) {
 		console.error('GET /api/events error:', error);
 		res.status(500).json({ success: false, message: 'Failed to fetch events' });
@@ -92,10 +96,14 @@ app.get('/api/events/:id', async (req, res) => {
 
 app.post('/api/events', async (req, res) => {
 	try {
-		const { title, description, start_datetime, end_datetime, venue_section } = req.body;
+		let { title, description, start_datetime, end_datetime, venue_section, event_date, event_time } = req.body;
+		// If start_datetime isn't provided but event_date and event_time are, combine them
+		if ((!start_datetime || start_datetime === '') && event_date && event_time) {
+			start_datetime = `${event_date} ${event_time}`; // assume valid date and time strings
+		}
 		const [result] = await pool.query(
-			'INSERT INTO events (title, description, start_datetime, end_datetime, venue_section) VALUES (?, ?, ?, ?, ?)',
-			[title, description, start_datetime, end_datetime, venue_section]
+			'INSERT INTO events (title, description, start_datetime, end_datetime, venue_section, event_date, event_time) VALUES (?, ?, ?, ?, ?, ?, ?)',
+			[title, description, start_datetime || null, end_datetime || null, venue_section || null, event_date || null, event_time || null]
 		);
 		res.json({ success: true, id: result.insertId });
 	} catch (error) {
@@ -106,10 +114,13 @@ app.post('/api/events', async (req, res) => {
 
 app.put('/api/events/:id', async (req, res) => {
 	try {
-		const { title, description, start_datetime, end_datetime, venue_section } = req.body;
+		let { title, description, start_datetime, end_datetime, venue_section, event_date, event_time } = req.body;
+		if ((!start_datetime || start_datetime === '') && event_date && event_time) {
+			start_datetime = `${event_date} ${event_time}`;
+		}
 		await pool.query(
-			'UPDATE events SET title = ?, description = ?, start_datetime = ?, end_datetime = ?, venue_section = ? WHERE id = ?',
-			[title, description, start_datetime, end_datetime, venue_section, req.params.id]
+			'UPDATE events SET title = ?, description = ?, start_datetime = ?, end_datetime = ?, venue_section = ?, event_date = ?, event_time = ? WHERE id = ?',
+			[title, description, start_datetime || null, end_datetime || null, venue_section || null, event_date || null, event_time || null, req.params.id]
 		);
 		res.json({ success: true });
 	} catch (error) {
@@ -491,12 +502,54 @@ app.put('/api/suggestions/:id', async (req, res) => {
 
 // --- Dashboard stats ---
 app.get('/api/dashboard-stats', async (req, res) => {
+	let conn;
 	try {
-		const [[{ total_events }]] = await pool.query('SELECT COUNT(*) AS total_events FROM events');
-		const [[{ pending_requests }]] = await pool.query("SELECT COUNT(*) AS pending_requests FROM seat_requests WHERE status = 'pending'");
-		const [[{ total_suggestions }]] = await pool.query('SELECT COUNT(*) AS total_suggestions FROM suggestions');
-		res.json({ success: true, stats: { total_events, pending_requests, total_suggestions } });
+		// Compute local timezone offset (hours:minutes) based on the Node process tz
+		// new Date().getTimezoneOffset() returns minutes behind UTC (negative = ahead)
+		const offsetMinutes = -new Date().getTimezoneOffset();
+		const sign = offsetMinutes >= 0 ? '+' : '-';
+		const pad = n => String(Math.abs(n)).padStart(2, '0');
+		const hh = pad(Math.floor(Math.abs(offsetMinutes) / 60));
+		const mm = pad(Math.abs(offsetMinutes) % 60);
+		const tzOffset = `${sign}${hh}:${mm}`; // e.g. +02:00 or -07:00
+
+		// Use a single connection so the session time_zone applies to subsequent queries
+		conn = await pool.getConnection();
+		await conn.query('SET time_zone = ?', [tzOffset]);
+
+				// Upcoming events: next 2 months from now (inclusive)
+				// Some rows store date/time separately (event_date + event_time) and may have NULL start_datetime.
+				// Use COALESCE to prefer start_datetime and fall back to the combined date+time value.
+						const [[{ upcoming_events }]] = await conn.query(
+								`SELECT COUNT(*) AS upcoming_events FROM events
+								 WHERE start_datetime >= NOW()
+									 AND start_datetime < DATE_ADD(NOW(), INTERVAL 2 MONTH)`
+						);
+
+		// Pending seat requests
+		const [[{ pending_requests }]] = await conn.query("SELECT COUNT(*) AS pending_requests FROM seat_requests WHERE status = 'pending'");
+
+		// Pending suggestions (try to filter by status, fall back to total count)
+		let pending_suggestions = 0;
+		try {
+			const [[r]] = await conn.query("SELECT COUNT(*) AS pending_suggestions FROM suggestions WHERE status = 'pending'");
+			pending_suggestions = r.pending_suggestions || 0;
+		} catch (e) {
+			const [[r2]] = await conn.query('SELECT COUNT(*) AS pending_suggestions FROM suggestions');
+			pending_suggestions = r2.pending_suggestions || 0;
+		}
+
+				// Events this calendar month (based on session timezone)
+						const [[{ events_this_month }]] = await conn.query(
+								`SELECT COUNT(*) AS events_this_month FROM events
+								 WHERE YEAR(start_datetime) = YEAR(CURDATE())
+									 AND MONTH(start_datetime) = MONTH(CURDATE())`
+						);
+
+		conn.release();
+		res.json({ success: true, stats: { upcoming_events, pending_requests, pending_suggestions, events_this_month } });
 	} catch (error) {
+		if (conn) try { conn.release(); } catch (e) {}
 		console.error('GET /api/dashboard-stats error:', error);
 		res.status(500).json({ success: false, message: 'Failed to fetch dashboard stats' });
 	}

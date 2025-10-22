@@ -65,3 +65,23 @@ CREATE TABLE IF NOT EXISTS layout_history (
   snapshot JSON NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Suggestions table (artist/band suggestions submitted from public site)
+CREATE TABLE IF NOT EXISTS suggestions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  contact JSON DEFAULT NULL,
+  notes TEXT,
+  submission_type VARCHAR(50) DEFAULT 'general',
+  status VARCHAR(50) DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Business settings (general settings for the application)
+CREATE TABLE IF NOT EXISTS business_settings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  setting_key VARCHAR(191) UNIQUE NOT NULL,
+  setting_value TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);

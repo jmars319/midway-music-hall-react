@@ -5,7 +5,12 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "migrate:events": "node scripts/backfill_start_datetime.js",
+    "migrate:run": "node scripts/run_migrations.js",
+    "migrate": "npm run migrate:run",
+    "seed:events": "node scripts/seed_sample_events.js"
+    ,"migrate:to-start-datetime": "node scripts/migrate_events_to_start_datetime.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

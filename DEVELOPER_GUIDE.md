@@ -78,6 +78,42 @@ USE midway_music_hall;
 SOURCE path/to/database/schema.sql;
 ```
 
+## Migrations
+
+We provide a small set of migration and helper scripts in `backend/scripts` to manage safe schema transitions for development.
+
+- Backfill and consolidation: `migrate_events_to_start_datetime.js`
+  - Purpose: consolidate `event_date` + `event_time` into `start_datetime`, backfill missing values, and optionally drop the old columns.
+  - Dry-run (preview):
+    ```bash
+    cd backend
+    node scripts/migrate_events_to_start_datetime.js
+    ```
+  - Apply schema changes (destructive):
+    ```bash
+    cd backend
+    node scripts/migrate_events_to_start_datetime.js --confirm
+    ```
+  - Script creates a backup table `events_backup_<timestamp>` before making destructive changes.
+
+- Convenience scripts
+  - Run all migrations in `backend/scripts` (alphabetical):
+    ```bash
+    cd backend
+    npm run migrate
+    ```
+  - Backfill only:
+    ```bash
+    npm run migrate:events
+    ```
+  - Seed sample events (dev):
+    ```bash
+    npm run seed:events
+    ```
+
+Always review dry-run output before running with `--confirm`. Backups are created but it's still recommended to snapshot your DB before running destructive steps on production.
+```
+
 If you prefer Docker you can run a MySQL container and point `.env` at it.
 
 API reference (summary)
