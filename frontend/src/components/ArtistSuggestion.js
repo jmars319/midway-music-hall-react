@@ -1,4 +1,10 @@
 // ArtistSuggestion: public form for users to suggest artists
+// Developer note: This component sends flattened contact fields to the
+// suggestions API (contact_name, contact_email, contact_phone, music_links,
+// social_media, genre). The backend accepts either a `contact` object or
+// these flattened fields and will persist them into the `contact` JSON
+// column. The admin UI reads flattened helper fields (e.g. contact_name,
+// contact_email) and falls back to the raw `contact` JSON when necessary.
 import React, { useState } from 'react';
 import { Music, Send, CheckCircle } from 'lucide-react';
 import { API_BASE } from '../App';

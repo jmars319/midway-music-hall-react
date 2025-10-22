@@ -1,4 +1,11 @@
 // SuggestionsModule: admin interface for reviewing artist suggestions
+// Developer note: The suggestions API returns a normalized object where
+// contact details are provided both as a raw `contact` JSON column and as
+// flattened helper fields for easy rendering. Frontend expects fields like
+// `contact_name`, `contact_email`, `contact_phone`, `music_links`,
+// `social_media`, and `genre`. The component falls back to `contact` when
+// flattened fields are missing — avoid rendering mailto: links unless an
+// email value is present.
 import React, { useEffect, useState } from 'react';
 import { CheckCircle, XCircle } from 'lucide-react';
 import { API_BASE } from '../App';

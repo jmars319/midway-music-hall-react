@@ -2,22 +2,28 @@ import React from 'react';
 // Schedule: simple list of upcoming events used on the home page
 import { Calendar, Clock, DollarSign, Users } from 'lucide-react';
 
-const formatDate = (dateString) => {
-  if (!dateString) return '';
-  const date = new Date(dateString);
+const formatDate = (dateInput) => {
+  if (!dateInput) return '';
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return '';
   return date.toLocaleDateString('en-US', {
     weekday: 'short', year: 'numeric', month: 'short', day: 'numeric'
   });
 };
 
-const formatTime = (timeString) => {
-  if (!timeString) return '';
-  // Expecting HH:MM:SS
-  const [hours, minutes] = timeString.split(':');
-  const hour = parseInt(hours, 10);
-  const ampm = hour >= 12 ? 'PM' : 'AM';
-  const displayHour = hour % 12 || 12;
-  return `${displayHour}:${minutes} ${ampm}`;
+const formatTime = (dateInput) => {
+  if (!dateInput) return '';
+  // Accept either a time string (HH:MM:SS) or a full datetime
+  if (dateInput.includes && dateInput.includes(':') && dateInput.split(' ').length === 1) {
+    const [hours, minutes] = dateInput.split(':');
+    const hour = parseInt(hours, 10);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour % 12 || 12;
+    return `${displayHour}:${minutes} ${ampm}`;
+  }
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 };
 
 export default function Schedule({ events = [], loading = false }){
@@ -58,16 +64,17 @@ export default function Schedule({ events = [], loading = false }){
 
                   <div className="flex-1">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xl font-semibold">{event.artist_name}</h3>
-                      <span className="text-sm text-gray-400">{event.genre}</span>
+                      <h3 className="text-xl font-semibold">{event.artist_name || event.title || event.name || 'Untitled'}</h3>
+                      <span className="text-sm text-gray-400">{event.genre || event.venue_section || ''}</span>
                     </div>
 
-                    <p className="text-gray-300 mt-2 text-sm">{event.description}</p>
+                    <p className="text-gray-300 mt-2 text-sm">{event.description || event.notes || ''}</p>
 
                     <div className="mt-4 flex items-center text-sm text-gray-300 space-x-4">
-                      <div className="flex items-center"><Calendar className="h-4 w-4 mr-2" /> {formatDate(event.event_date)}</div>
-                      <div className="flex items-center"><Clock className="h-4 w-4 mr-2" /> {formatTime(event.event_time)}</div>
-                      <div className="flex items-center"><DollarSign className="h-4 w-4 mr-2" /> ${event.ticket_price}</div>
+                      {/* Prefer canonical start_datetime, fall back to event_date/event_time */}
+                      <div className="flex items-center"><Calendar className="h-4 w-4 mr-2" /> {formatDate(event.start_datetime || event.event_date)}</div>
+                      <div className="flex items-center"><Clock className="h-4 w-4 mr-2" /> {formatTime(event.start_datetime || event.event_time)}</div>
+                      {event.ticket_price ? <div className="flex items-center"><DollarSign className="h-4 w-4 mr-2" /> ${event.ticket_price}</div> : null}
                     </div>
 
                     <div className="mt-6 flex items-center justify-between">

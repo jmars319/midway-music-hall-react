@@ -71,9 +71,9 @@ app.post('/api/login', async (req, res) => {
 // and the requested data.
 app.get('/api/events', async (req, res) => {
 	try {
-		// Select a computed start_datetime so clients receive a usable datetime even
-		// when start_datetime is NULL (fallback to event_date + event_time).
-		const [events] = await pool.query("SELECT *, COALESCE(start_datetime, CAST(CONCAT(event_date, ' ', event_time) AS DATETIME)) AS computed_start_datetime FROM events ORDER BY computed_start_datetime ASC");
+		// Prefer canonical start_datetime. The older columns event_date/event_time
+		// may have been removed by migrations; avoid referencing them directly.
+		const [events] = await pool.query("SELECT *, start_datetime AS computed_start_datetime FROM events ORDER BY computed_start_datetime ASC");
 		// Normalize response to include start_datetime field
 		const normalized = events.map(e => ({ ...e, start_datetime: e.computed_start_datetime }));
 		res.json({ success: true, events: normalized });
@@ -465,6 +465,14 @@ app.put('/api/seat-requests/:id', async (req, res) => {
 });
 
 // --- Artist Suggestions ---
+// Developer note: Suggestions/contact normalization
+// The `suggestions` table stores submitter contact/details in a JSON column
+// named `contact`. API handlers normalize this by parsing the JSON and
+// exposing flattened helper fields such as `contact_name`, `contact_email`,
+// `contact_phone`, `music_links`, `social_media`, and `genre` so the admin UI
+// can render consistently. The POST handler accepts either a `contact`
+// object or flattened fields (e.g., contact_name/contact_email) and will
+// persist a JSON `contact` when any contact fields are present.
 app.get('/api/suggestions', async (req, res) => {
 	try {
 		const [rows] = await pool.query('SELECT * FROM suggestions ORDER BY created_at DESC');
