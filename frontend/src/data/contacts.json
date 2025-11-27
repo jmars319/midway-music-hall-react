@@ -1,0 +1,50 @@
+[
+  {
+    "contact_type": "Primary",
+    "name": "Donna Cheek",
+    "phone": "336-793-4218",
+    "email": "Via Facebook Messenger",
+    "role": "Venue Manager",
+    "notes": "Main contact for all events"
+  },
+  {
+    "contact_type": "Ticketing",
+    "name": "Carol Parrish Rousseau",
+    "phone": "336-618-9169",
+    "email": "N/A",
+    "role": "Ticket Contact",
+    "notes": "December 6 Christmas Show"
+  },
+  {
+    "contact_type": "Beach Music Series",
+    "name": "Sandra Marshall",
+    "phone": "336-223-5570",
+    "email": "mmhbeachbands@gmail.com",
+    "role": "Beach Music Coordinator",
+    "notes": "2026 Carolina Beach Music Series"
+  },
+  {
+    "contact_type": "Instructor",
+    "name": "Jackie Phillips",
+    "phone": "727-776-1555",
+    "email": "N/A",
+    "role": "Line Dance Instructor",
+    "notes": "Monday night classes"
+  },
+  {
+    "contact_type": "Instructor",
+    "name": "Brenda Holcomb",
+    "phone": "336-816-5544",
+    "email": "N/A",
+    "role": "Line Dance Instructor",
+    "notes": "Wednesday beginner classes - Ages 55+"
+  },
+  {
+    "contact_type": "Instructor",
+    "name": "Vickie Chambers",
+    "phone": "336-989-0156",
+    "email": "N/A",
+    "role": "Shag Dance Instructor",
+    "notes": "Tuesday night classes"
+  }
+]
