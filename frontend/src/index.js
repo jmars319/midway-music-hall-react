@@ -2,6 +2,7 @@ import React from 'react';
 // Index (app bootstrap): mounts React app into DOM
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import SinglePageLanding from './SinglePageLanding';
 import './index.css';
 
 /*
@@ -16,8 +17,10 @@ import './index.css';
 const rootElement = document.getElementById('root');
 const root = createRoot(rootElement);
 
+const isSingle = process.env.REACT_APP_SINGLE_PAGE === 'true';
+
 root.render(
 	<React.StrictMode>
-		<App />
+		{isSingle ? <SinglePageLanding /> : <App />}
 	</React.StrictMode>
 );
