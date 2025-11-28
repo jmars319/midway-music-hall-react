@@ -115,6 +115,9 @@ a:focus, button:focus, iframe:focus {
 .sp-ongoing-item { display:flex; justify-content:space-between; padding:0.4rem 0; border-top:1px solid rgba(255,255,255,0.02); }
 .sp-ongoing-meta { color:#9ca3af; font-size:0.95rem; text-align:right; }
 
+.sp-beach-bands-list { margin-top: 0.5rem; padding-top: 0.75rem; border-top: 2px solid rgba(192, 132, 252, 0.2); }
+.sp-beach-bands-list .sp-schedule-date { color: #a78bfa; }
+
 .sp-footer { text-align: center; padding: 1rem 0; color: #9ca3af; }
 
 @media (min-width: 768px) {

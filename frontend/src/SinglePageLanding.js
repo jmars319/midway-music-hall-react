@@ -65,6 +65,26 @@ function SinglePageLanding() {
     return `mailto:${email}`;
   };
 
+  // Beach Bands 2026 events
+  const beachBands2026 = [
+    { name: 'THE EMBERS', date: '2026-01-25' },
+    { name: 'SPECIAL OCCASION BAND', date: '2026-02-15' },
+    { name: 'GARY LOWDER AND SMOKIN HOT', date: '2026-03-15' },
+    { name: 'THE ENTERTAINERS', date: '2026-04-19' },
+    { name: 'JIM QUICK AND COASTLINE', date: '2026-09-20' },
+    { name: 'TOO MUCH SYLVIA', date: '2026-10-18' },
+    { name: 'BAND OF OZ', date: '2026-11-15' },
+  ].map((e) => ({
+    ...e,
+    _parsedDate: parseDateSafe(e.date),
+  })).sort((a, b) => a._parsedDate - b._parsedDate);
+
+  // Helper to format full date (Month Day, Year)
+  const formatFullDate = (d) => {
+    if (!d) return '';
+    return d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+  };
+
   return (
     <div className="single-page-root">
       <a href="#main-content" className="skip-link">Skip to main content</a>
@@ -108,6 +128,23 @@ function SinglePageLanding() {
                       <div><strong>{o.name}</strong></div>
                       <div className="sp-ongoing-meta">{o.day_of_week ? <span>{o.day_of_week} · </span> : null}{o.time}</div>
                     </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {beachBands2026.length > 0 && (
+            <>
+              <h3 id="beach-bands-2026-heading">Beach Bands 2026</h3>
+              <ul className="sp-schedule-list sp-beach-bands-list">
+                {beachBands2026.map((band, idx) => (
+                  <li key={idx} className="sp-schedule-item">
+                    <time className="sp-schedule-date" dateTime={band.date}>{formatShortDate(band._parsedDate)}</time>
+                    <div className="sp-schedule-info">
+                      <strong className="sp-schedule-name">{band.name}</strong>
+                      <span className="sp-schedule-time">{` (${formatFullDate(band._parsedDate)})`}</span>
+                    </div>
+                  </li>
                 ))}
               </ul>
             </>
