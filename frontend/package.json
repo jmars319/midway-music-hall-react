@@ -39,6 +39,6 @@
     "css-select": "4.1.0",
     "svgo": "2.8.0",
     "resolve-url-loader": "5.0.0",
-    "webpack-dev-server": "5.2.2"
+    "webpack-dev-server": "4.15.1"
   }
 }

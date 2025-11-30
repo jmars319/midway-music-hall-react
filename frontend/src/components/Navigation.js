@@ -17,7 +17,11 @@ export default function Navigation({ onAdminClick }) {
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center space-x-3">
             <div className="flex items-center text-white">
-              <Music className="h-7 w-7 text-purple-400 mr-2" />
+              <img 
+                src="/logo.png" 
+                alt="Midway Music Hall" 
+                className="h-8 w-8 mr-2"
+              />
               <span className="font-bold text-lg">Midway Music Hall</span>
             </div>
           </div>
