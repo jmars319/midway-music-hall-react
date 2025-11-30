@@ -1,0 +1,8 @@
+# Robots.txt for Midway Music Hall
+# Allow all search engines to crawl and index the site
+
+User-agent: *
+Allow: /
+
+# Sitemap location (update with your actual domain)
+# Sitemap: https://yourdomain.com/sitemap.xml
