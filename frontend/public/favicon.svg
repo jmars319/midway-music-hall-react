@@ -1,0 +1,6 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Simple music note favicon for Midway Music Hall -->
+  <rect width="64" height="64" fill="#7C3AED"/>
+  <path d="M40 20V42C40 45.866 36.866 49 33 49C29.134 49 26 45.866 26 42C26 38.134 29.134 35 33 35C34.657 35 36.195 35.595 37.391 36.586V20H40Z" fill="white"/>
+  <path d="M40 20L48 18V28L40 30V20Z" fill="white"/>
+</svg>

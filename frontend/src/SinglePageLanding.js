@@ -90,6 +90,11 @@ function SinglePageLanding() {
       <a href="#main-content" className="skip-link">Skip to main content</a>
       <header className="bg-gradient-to-br from-purple-900 via-gray-900 to-blue-900 text-white relative overflow-hidden py-16" role="banner">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <img 
+            src="/logo.png" 
+            alt="Midway Music Hall Logo" 
+            className="mx-auto h-20 md:h-24 mb-4"
+          />
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
             Midway Music Hall
           </h1>
