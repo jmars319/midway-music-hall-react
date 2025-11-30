@@ -1,7 +1,7 @@
 // EventsModule: admin UI to create and manage events
 import React, { useEffect, useState } from 'react';
 import { Plus, Edit, Trash2 } from 'lucide-react';
-import { API_BASE } from '../App';
+import { API_BASE, getImageUrl } from '../App';
 
 const initialForm = {
   artist_name: '',
@@ -14,14 +14,18 @@ const initialForm = {
   door_price: '',
   age_restriction: 'All Ages',
   venue_section: '',
+  layout_id: '',
 };
 
 export default function EventsModule(){
   const [events, setEvents] = useState([]);
+  const [layouts, setLayouts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [formData, setFormData] = useState(initialForm);
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -43,11 +47,28 @@ export default function EventsModule(){
     }
   };
 
-  useEffect(() => { fetchEvents(); }, []);
+  const fetchLayouts = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/seating-layouts`);
+      const data = await res.json();
+      if (data && data.success && Array.isArray(data.layouts)) {
+        setLayouts(data.layouts);
+      }
+    } catch (err) {
+      console.error('Failed to fetch layouts', err);
+    }
+  };
+
+  useEffect(() => { 
+    fetchEvents();
+    fetchLayouts();
+  }, []);
 
   const openAdd = () => {
     setEditing(null);
     setFormData(initialForm);
+    setImageFile(null);
+    setImagePreview(null);
     setShowForm(true);
   };
 
@@ -64,7 +85,10 @@ export default function EventsModule(){
       door_price: event.door_price || '',
       age_restriction: event.age_restriction || 'All Ages',
       venue_section: event.venue_section || '',
+      layout_id: event.layout_id || '',
     });
+    setImageFile(null);
+    setImagePreview(event.image_url || null);
     setShowForm(true);
   };
 
@@ -73,17 +97,57 @@ export default function EventsModule(){
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const clearImage = () => {
+    setImageFile(null);
+    setImagePreview(null);
+    setFormData(prev => ({ ...prev, image_url: '' }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     setError('');
     try {
+      let finalImageUrl = formData.image_url;
+
+      // If a new image file is selected, upload it
+      if (imageFile) {
+        const formDataUpload = new FormData();
+        formDataUpload.append('image', imageFile);
+        
+        try {
+          const uploadRes = await fetch(`${API_BASE}/upload-image`, {
+            method: 'POST',
+            body: formDataUpload,
+          });
+          const uploadData = await uploadRes.json();
+          if (uploadData.success && uploadData.url) {
+            finalImageUrl = uploadData.url;
+          }
+        } catch (uploadErr) {
+          console.error('Image upload error', uploadErr);
+          setError('Image upload failed, but event will be saved without image');
+        }
+      }
+
       const method = editing ? 'PUT' : 'POST';
       const url = editing ? `${API_BASE}/events/${editing.id}` : `${API_BASE}/events`;
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, image_url: finalImageUrl }),
       });
       const data = await res.json();
       if (data && data.success) {
@@ -220,9 +284,69 @@ export default function EventsModule(){
                 <input name="venue_section" value={formData.venue_section} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
               </div>
 
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Seating Layout</label>
+                <select name="layout_id" value={formData.layout_id} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded">
+                  <option value="">Use Default Layout</option>
+                  {layouts.map(layout => (
+                    <option key={layout.id} value={layout.id}>
+                      {layout.name} {layout.is_default === 1 ? '(Default)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="md:col-span-2">
-                <label className="block text-sm text-gray-300 mb-1">Image URL</label>
-                <input name="image_url" value={formData.image_url} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
+                <label className="block text-sm text-gray-300 mb-2">Event Image</label>
+                <div className="space-y-3">
+                  {/* Image Preview */}
+                  {(imagePreview || formData.image_url) && (
+                    <div className="relative inline-block">
+                      <img 
+                        src={imagePreview || getImageUrl(formData.image_url)} 
+                        alt="Event preview"
+                        className="w-32 h-32 object-cover rounded-lg border-2 border-gray-600"
+                        onError={(e) => { e.target.src = '/android-chrome-192x192.png'; }}
+                      />
+                      <button
+                        type="button"
+                        onClick={clearImage}
+                        className="absolute -top-2 -right-2 bg-red-600 hover:bg-red-700 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                  
+                  {/* File Input */}
+                  <div>
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      onChange={handleImageChange}
+                      className="block w-full text-sm text-gray-300
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded file:border-0
+                        file:text-sm file:font-medium
+                        file:bg-purple-600 file:text-white
+                        hover:file:bg-purple-700
+                        file:cursor-pointer cursor-pointer"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Upload a custom image or leave empty to use the default logo</p>
+                  </div>
+                  
+                  {/* URL Input (fallback) */}
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Or enter image URL:</label>
+                    <input 
+                      name="image_url" 
+                      value={formData.image_url} 
+                      onChange={handleChange} 
+                      className="w-full px-3 py-2 bg-gray-700 text-white rounded text-sm" 
+                      placeholder="https://example.com/image.jpg"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="md:col-span-2">

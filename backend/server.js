@@ -8,6 +8,9 @@ const cors = require('cors');
 const mysql = require('mysql2');
 const dotenv = require('dotenv');
 const bcrypt = require('bcryptjs');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 dotenv.config();
 
@@ -20,6 +23,39 @@ const LAYOUT_HISTORY_RETENTION_DAYS = parseInt(process.env.LAYOUT_HISTORY_RETENT
 
 app.use(cors());
 app.use(express.json());
+
+// Serve uploaded images statically
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+	fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsDir));
+
+// Configure multer for image uploads
+const storage = multer.diskStorage({
+	destination: (req, file, cb) => {
+		cb(null, uploadsDir);
+	},
+	filename: (req, file, cb) => {
+		const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+		cb(null, 'event-' + uniqueSuffix + path.extname(file.originalname));
+	}
+});
+
+const upload = multer({
+	storage: storage,
+	limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+	fileFilter: (req, file, cb) => {
+		const allowedTypes = /jpeg|jpg|png|gif|webp/;
+		const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+		const mimetype = allowedTypes.test(file.mimetype);
+		if (extname && mimetype) {
+			cb(null, true);
+		} else {
+			cb(new Error('Only image files are allowed'));
+		}
+	}
+});
 
 // Create MySQL connection pool (promise wrapper)
 const pool = mysql.createPool({
@@ -35,6 +71,24 @@ const pool = mysql.createPool({
 // Health
 // Simple health endpoint (useful for readiness checks)
 app.get('/api/health', (req, res) => res.json({ success: true, status: 'ok' }));
+
+// --- Image Upload ---
+// Upload image endpoint
+// Accepts multipart/form-data with 'image' field
+// Returns: { success: true, url: '/uploads/filename' }
+app.post('/api/upload-image', upload.single('image'), (req, res) => {
+	try {
+		if (!req.file) {
+			return res.status(400).json({ success: false, message: 'No file uploaded' });
+		}
+		// Return the URL path to access the uploaded file
+		const fileUrl = `/uploads/${req.file.filename}`;
+		res.json({ success: true, url: fileUrl, filename: req.file.filename });
+	} catch (err) {
+		console.error('Upload error:', err);
+		res.status(500).json({ success: false, message: 'Upload failed' });
+	}
+});
 
 // --- Authentication (demo + DB lookup) ---
 // Authentication endpoint (development/demo + DB-backed)
@@ -143,6 +197,68 @@ app.delete('/api/events/:id', async (req, res) => {
 // Seating rows represent either linear seat rows or grouped seat types
 // (e.g., table-6). The `selected_seats` column stores a JSON array of
 // reserved seat identifiers like "SECTION-ROW-1".
+
+// Get seating for a specific event (uses event's layout_id) or default layout
+app.get('/api/seating/event/:eventId', async (req, res) => {
+	try {
+		const eventId = req.params.eventId;
+		
+		// Get the event to find its layout_id
+		const [eventRows] = await pool.query('SELECT layout_id FROM events WHERE id = ?', [eventId]);
+		
+		let layoutData = [];
+		
+		if (eventRows && eventRows.length > 0 && eventRows[0].layout_id) {
+			// Event has a specific layout assigned
+			const [layoutRows] = await pool.query(
+				'SELECT layout_data FROM seating_layouts WHERE id = ?',
+				[eventRows[0].layout_id]
+			);
+			if (layoutRows && layoutRows.length > 0) {
+				// MySQL JSON type is already parsed as object
+				layoutData = layoutRows[0].layout_data || [];
+			}
+		} else {
+			// Use default layout
+			const [defaultRows] = await pool.query(
+				'SELECT layout_data FROM seating_layouts WHERE is_default = 1 LIMIT 1'
+			);
+			if (defaultRows && defaultRows.length > 0) {
+				// MySQL JSON type is already parsed as object
+				layoutData = defaultRows[0].layout_data || [];
+			}
+		}
+		
+		// Get reserved/pending seats for this event from seat_requests
+		const [requests] = await pool.query(
+			'SELECT selected_seats, status FROM seat_requests WHERE event_id = ? AND status IN ("pending", "approved")',
+			[eventId]
+		);
+		
+		// Collect all reserved seat IDs
+		const reservedSeats = new Set();
+		const pendingSeats = new Set();
+		requests.forEach(req => {
+			// MySQL JSON type is already parsed as object/array
+			const seats = req.selected_seats || [];
+			seats.forEach(seat => {
+				if (req.status === 'approved') reservedSeats.add(seat);
+				if (req.status === 'pending') pendingSeats.add(seat);
+			});
+		});
+		
+		res.json({ 
+			success: true, 
+			seating: layoutData,
+			reservedSeats: Array.from(reservedSeats),
+			pendingSeats: Array.from(pendingSeats)
+		});
+	} catch (error) {
+		console.error('GET /api/seating/event/:eventId error:', error);
+		res.status(500).json({ success: false, message: 'Failed to fetch event seating' });
+	}
+});
+
 app.get('/api/seating', async (req, res) => {
 	try {
 		const [rows] = await pool.query('SELECT id, event_id, section as section_name, row_label, seat_number, total_seats, seat_type, is_active, selected_seats, pos_x, pos_y, rotation, status FROM seating ORDER BY section, row_label, seat_number');
@@ -286,6 +402,135 @@ app.get('/api/layout-history/:id', async (req, res) => {
 	} catch (err) {
 		console.error('GET /api/layout-history/:id error:', err);
 		res.status(500).json({ success: false, message: 'Failed to fetch snapshot' });
+	}
+});
+
+// --- Seating Layout Templates ---
+// Manage saved seating layouts that can be assigned to events
+
+// Get all seating layouts
+app.get('/api/seating-layouts', async (req, res) => {
+	try {
+		const [rows] = await pool.query(
+			'SELECT id, name, description, is_default, layout_data, created_at, updated_at FROM seating_layouts ORDER BY is_default DESC, name ASC'
+		);
+		res.json({ success: true, layouts: rows });
+	} catch (err) {
+		console.error('GET /api/seating-layouts error:', err);
+		res.status(500).json({ success: false, message: 'Failed to fetch seating layouts' });
+	}
+});
+
+// Get the default seating layout (must come before /:id route)
+app.get('/api/seating-layouts/default', async (req, res) => {
+	try {
+		const [rows] = await pool.query(
+			'SELECT id, name, description, is_default, layout_data, created_at, updated_at FROM seating_layouts WHERE is_default = 1 LIMIT 1'
+		);
+		if (!rows || rows.length === 0) {
+			return res.status(404).json({ success: false, message: 'No default layout found' });
+		}
+		res.json({ success: true, layout: rows[0] });
+	} catch (err) {
+		console.error('GET /api/seating-layouts/default error:', err);
+		res.status(500).json({ success: false, message: 'Failed to fetch default layout' });
+	}
+});
+
+// Get a specific seating layout by ID (must come after /default route)
+app.get('/api/seating-layouts/:id', async (req, res) => {
+	try {
+		const [rows] = await pool.query(
+			'SELECT id, name, description, is_default, layout_data, created_at, updated_at FROM seating_layouts WHERE id = ?',
+			[req.params.id]
+		);
+		if (!rows || rows.length === 0) {
+			return res.status(404).json({ success: false, message: 'Layout not found' });
+		}
+		res.json({ success: true, layout: rows[0] });
+	} catch (err) {
+		console.error('GET /api/seating-layouts/:id error:', err);
+		res.status(500).json({ success: false, message: 'Failed to fetch layout' });
+	}
+});
+
+// Create a new seating layout
+app.post('/api/seating-layouts', async (req, res) => {
+	try {
+		const { name, description, is_default, layout_data } = req.body;
+		
+		if (!name || !layout_data) {
+			return res.status(400).json({ success: false, message: 'Name and layout_data are required' });
+		}
+
+		// If setting as default, unset other defaults first
+		if (is_default) {
+			await pool.query('UPDATE seating_layouts SET is_default = 0');
+		}
+
+		const [result] = await pool.query(
+			'INSERT INTO seating_layouts (name, description, is_default, layout_data) VALUES (?, ?, ?, ?)',
+			[name, description || '', is_default ? 1 : 0, JSON.stringify(layout_data)]
+		);
+
+		res.json({ success: true, id: result.insertId });
+	} catch (err) {
+		console.error('POST /api/seating-layouts error:', err);
+		res.status(500).json({ success: false, message: 'Failed to create seating layout' });
+	}
+});
+
+// Update a seating layout
+app.put('/api/seating-layouts/:id', async (req, res) => {
+	try {
+		const { name, description, is_default, layout_data } = req.body;
+		const layoutId = req.params.id;
+
+		// If setting as default, unset other defaults first
+		if (is_default) {
+			await pool.query('UPDATE seating_layouts SET is_default = 0 WHERE id != ?', [layoutId]);
+		}
+
+		const [result] = await pool.query(
+			'UPDATE seating_layouts SET name = ?, description = ?, is_default = ?, layout_data = ? WHERE id = ?',
+			[name, description || '', is_default ? 1 : 0, JSON.stringify(layout_data), layoutId]
+		);
+
+		if (result.affectedRows === 0) {
+			return res.status(404).json({ success: false, message: 'Layout not found' });
+		}
+
+		res.json({ success: true });
+	} catch (err) {
+		console.error('PUT /api/seating-layouts/:id error:', err);
+		res.status(500).json({ success: false, message: 'Failed to update seating layout' });
+	}
+});
+
+// Delete a seating layout
+app.delete('/api/seating-layouts/:id', async (req, res) => {
+	try {
+		const layoutId = req.params.id;
+
+		// Check if it's the default layout
+		const [layout] = await pool.query('SELECT is_default FROM seating_layouts WHERE id = ?', [layoutId]);
+		if (layout && layout[0] && layout[0].is_default) {
+			return res.status(400).json({ success: false, message: 'Cannot delete the default layout' });
+		}
+
+		// Unlink from any events using this layout
+		await pool.query('UPDATE events SET layout_id = NULL WHERE layout_id = ?', [layoutId]);
+
+		const [result] = await pool.query('DELETE FROM seating_layouts WHERE id = ?', [layoutId]);
+
+		if (result.affectedRows === 0) {
+			return res.status(404).json({ success: false, message: 'Layout not found' });
+		}
+
+		res.json({ success: true });
+	} catch (err) {
+		console.error('DELETE /api/seating-layouts/:id error:', err);
+		res.status(500).json({ success: false, message: 'Failed to delete seating layout' });
 	}
 });
 

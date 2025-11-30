@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 // Schedule: simple list of upcoming events used on the home page
 import { Calendar, Clock, DollarSign, Users } from 'lucide-react';
+import EventSeatingModal from './EventSeatingModal';
+import { getImageUrl } from '../App';
 
 const formatDate = (dateInput) => {
   if (!dateInput) return '';
@@ -27,12 +29,25 @@ const formatTime = (dateInput) => {
 };
 
 export default function Schedule({ events = [], loading = false }){
-  const scrollToSeating = () => {
-    const el = document.getElementById('seating');
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const [selectedEvent, setSelectedEvent] = useState(null);
+
+  const handleRequestSeats = (event) => {
+    setSelectedEvent(event);
+  };
+
+  const closeModal = () => {
+    setSelectedEvent(null);
   };
 
   return (
+    <>
+      {selectedEvent && (
+        <EventSeatingModal 
+          event={selectedEvent} 
+          onClose={closeModal}
+        />
+      )}
+    
     <section className="py-6">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-8">
@@ -56,9 +71,13 @@ export default function Schedule({ events = [], loading = false }){
               <div key={event.id} className="bg-gray-800 rounded-xl p-6 border border-purple-500/20 hover:border-purple-500/60 transition transform hover:scale-105">
                 <div className="flex items-start space-x-4">
                   <div className="flex-shrink-0">
-                    <div className="w-20 h-20 bg-gray-700 rounded-lg flex items-center justify-center">
-                      {/* Image placeholder */}
-                      <span className="text-sm text-gray-300">Image</span>
+                    <div className="w-20 h-20 bg-gray-700 rounded-lg overflow-hidden flex items-center justify-center">
+                      <img 
+                        src={getImageUrl(event.image_url)} 
+                        alt={event.artist_name || 'Event'}
+                        className="w-full h-full object-cover"
+                        onError={(e) => { e.target.src = '/android-chrome-192x192.png'; }}
+                      />
                     </div>
                   </div>
 
@@ -79,7 +98,7 @@ export default function Schedule({ events = [], loading = false }){
 
                     <div className="mt-6 flex items-center justify-between">
                       <div className="text-sm text-gray-400">{event.age_restriction || 'All Ages'}</div>
-                      <button onClick={scrollToSeating} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg">Request Seats</button>
+                      <button onClick={() => handleRequestSeats(event)} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition">Request Seats</button>
                     </div>
                   </div>
                 </div>
@@ -89,5 +108,6 @@ export default function Schedule({ events = [], loading = false }){
         )}
       </div>
     </section>
+    </>
   );
 }

@@ -17,7 +17,7 @@ export default function HomePage({ onAdminClick }) {
 
   useEffect(() => {
     fetchEvents();
-    fetchSeating();
+    fetchDefaultSeating();
   }, []);
 
   const fetchEvents = async () => {
@@ -38,18 +38,18 @@ export default function HomePage({ onAdminClick }) {
     }
   };
 
-  const fetchSeating = async () => {
+  const fetchDefaultSeating = async () => {
     setLoadingSeating(true);
     try {
-      const res = await fetch(`${API_BASE}/seating`);
+      const res = await fetch(`${API_BASE}/seating-layouts/default`);
       const data = await res.json();
-      if (data.success && Array.isArray(data.seating)) {
-        setSeatingConfig(data.seating);
+      if (data.success && data.layout) {
+        setSeatingConfig(data.layout.layout_data || []);
       } else {
         setSeatingConfig([]);
       }
     } catch (err) {
-      console.error('Failed to fetch seating', err);
+      console.error('Failed to fetch default seating layout', err);
       setSeatingConfig([]);
     } finally {
       setLoadingSeating(false);
@@ -71,7 +71,11 @@ export default function HomePage({ onAdminClick }) {
 
         <section id="seating" className="py-12">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <SeatingChart seatingConfig={seatingConfig} events={events} />
+            <SeatingChart 
+              seatingConfig={seatingConfig} 
+              events={events}
+              interactive={false}
+            />
           </div>
         </section>
 

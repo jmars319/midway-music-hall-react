@@ -24,22 +24,39 @@ const seatTypeClass = (type, selected) => {
 // Props:
 // - seatingConfig: array of seating rows from the backend
 // - events: array of events to choose from when submitting a seat request
+// - interactive: boolean - controls if seats can be selected (default: true)
+// - reservedSeats: array of reserved seat IDs
+// - pendingSeats: array of pending seat IDs
+// - eventId: specific event ID for seat requests
 // Behavior:
 // - Renders seats positioned by pos_x/pos_y when available
-// - Allows users to select seats (unless they are pending/reserved)
+// - Allows users to select seats (unless they are pending/reserved) when interactive=true
 // - Can submit a seat request payload to the backend
-export default function SeatingChart({ seatingConfig = [], events = [] }) {
+export default function SeatingChart({ 
+  seatingConfig = [], 
+  events = [],
+  interactive = true,
+  reservedSeats = [],
+  pendingSeats: externalPendingSeats = [],
+  eventId = null
+}) {
   const activeRows = useMemo(() => seatingConfig.filter(r => r.is_active !== false), [seatingConfig]);
 
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ customerName: '', customerEmail: '', customerPhone: '', specialRequests: '', eventId: events && events[0] ? events[0].id : '' });
+  const [form, setForm] = useState({ customerName: '', customerEmail: '', customerPhone: '', specialRequests: '', eventId: eventId || (events && events[0] ? events[0].id : '') });
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  const [pendingSeats, setPendingSeats] = useState([]);
+  const [pendingSeats, setPendingSeats] = useState(externalPendingSeats);
+
+  // Update pending seats when external prop changes
+  useEffect(() => {
+    setPendingSeats(externalPendingSeats);
+  }, [externalPendingSeats]);
 
   const toggleSeat = (id) => {
+    if (!interactive) return; // Don't allow selection in non-interactive mode
     setSelectedSeats(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
   };
 
@@ -197,12 +214,14 @@ export default function SeatingChart({ seatingConfig = [], events = [] }) {
               <div className="flex items-center gap-2 mb-1"><span className="w-5 h-5 rounded bg-purple-500/80 border-2 border-dashed border-purple-300" /> Pending request</div>
               <div className="flex items-center gap-2"><span className="w-5 h-5 rounded bg-red-600 ring-2 ring-red-400" /> Reserved</div>
             </div>
-            <div className="absolute right-4 bottom-4 flex items-center gap-3">
-              {errorMessage && <div className="text-sm text-red-400">{errorMessage}</div>}
-              <button onClick={openRequestModal} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-2">
-                <Send className="h-4 w-4" /> Request Seats
-              </button>
-            </div>
+            {interactive && (
+              <div className="absolute right-4 bottom-4 flex items-center gap-3">
+                {errorMessage && <div className="text-sm text-red-400">{errorMessage}</div>}
+                <button onClick={openRequestModal} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-2">
+                  <Send className="h-4 w-4" /> Request Seats
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

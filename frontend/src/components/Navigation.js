@@ -12,27 +12,27 @@ export default function Navigation({ onAdminClick }) {
   };
 
   return (
-    <nav className="sticky top-0 z-50 bg-gray-900 border-b border-purple-500/15">
+    <nav className="sticky top-0 z-50 bg-black border-b border-purple-500/30 shadow-lg">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between h-24">
           <div className="flex items-center space-x-3">
             <div className="flex items-center text-white">
               <img 
                 src="/logo.png" 
                 alt="Midway Music Hall" 
-                className="h-8 w-8 mr-2"
+                className="h-20 w-auto mr-3"
               />
-              <span className="font-bold text-lg">Midway Music Hall</span>
+              <span className="font-bold text-xl">Midway Music Hall</span>
             </div>
           </div>
 
           {/* Desktop links */}
           <div className="hidden md:flex items-center space-x-6">
-            <button onClick={() => scrollToSection('schedule')} className="text-gray-300 hover:text-purple-400 transition">Schedule</button>
-            <button onClick={() => scrollToSection('seating')} className="text-gray-300 hover:text-purple-400 transition">Seating</button>
-            <button onClick={() => scrollToSection('suggest')} className="text-gray-300 hover:text-purple-400 transition">Suggest Artist</button>
-            <button onClick={() => scrollToSection('about')} className="text-gray-300 hover:text-purple-400 transition">About</button>
-            <button onClick={onAdminClick} className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition">Admin</button>
+            <button onClick={() => scrollToSection('schedule')} className="text-gray-300 hover:text-purple-400 transition font-medium">Schedule</button>
+            <button onClick={() => scrollToSection('seating')} className="text-gray-300 hover:text-purple-400 transition font-medium">Seating</button>
+            <button onClick={() => scrollToSection('suggest')} className="text-gray-300 hover:text-purple-400 transition font-medium">Suggest Artist</button>
+            <button onClick={() => scrollToSection('about')} className="text-gray-300 hover:text-purple-400 transition font-medium">About</button>
+            <button onClick={onAdminClick} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition font-medium">Admin</button>
           </div>
 
           {/* Mobile menu button */}
@@ -40,7 +40,7 @@ export default function Navigation({ onAdminClick }) {
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
               aria-label="Toggle menu"
-              className="p-2 rounded-md text-gray-300 hover:text-white hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="p-2 rounded-md text-gray-300 hover:text-white hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
             >
               {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
             </button>
@@ -50,13 +50,13 @@ export default function Navigation({ onAdminClick }) {
 
       {/* Mobile dropdown */}
       {mobileOpen && (
-        <div className="md:hidden bg-gray-900 border-t border-purple-500/10">
+        <div className="md:hidden bg-black border-t border-purple-500/30">
           <div className="px-4 pt-4 pb-6 space-y-3">
-            <button onClick={() => scrollToSection('schedule')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2">Schedule</button>
-            <button onClick={() => scrollToSection('seating')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2">Seating</button>
-            <button onClick={() => scrollToSection('suggest')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2">Suggest Artist</button>
-            <button onClick={() => scrollToSection('about')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2">About</button>
-            <button onClick={() => { setMobileOpen(false); onAdminClick && onAdminClick(); }} className="w-full text-left px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg">Admin</button>
+            <button onClick={() => scrollToSection('schedule')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Schedule</button>
+            <button onClick={() => scrollToSection('seating')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Seating</button>
+            <button onClick={() => scrollToSection('suggest')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Suggest Artist</button>
+            <button onClick={() => scrollToSection('about')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">About</button>
+            <button onClick={() => { setMobileOpen(false); onAdminClick && onAdminClick(); }} className="w-full text-left px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium">Admin</button>
           </div>
         </div>
       )}

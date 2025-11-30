@@ -9,14 +9,15 @@
     "migrate:events": "node scripts/backfill_start_datetime.js",
     "migrate:run": "node scripts/run_migrations.js",
     "migrate": "npm run migrate:run",
-    "seed:events": "node scripts/seed_sample_events.js"
-    ,"migrate:to-start-datetime": "node scripts/migrate_events_to_start_datetime.js"
+    "seed:events": "node scripts/seed_sample_events.js",
+    "migrate:to-start-datetime": "node scripts/migrate_events_to_start_datetime.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.1.4",
     "express": "^4.18.2",
+    "multer": "^2.0.2",
     "mysql2": "^3.3.2"
   },
   "devDependencies": {

@@ -4,6 +4,15 @@ import LoginPage from './pages/LoginPage';
 import AdminPanel from './admin/AdminPanel';
 
 export const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5001/api';
+export const SERVER_BASE = process.env.REACT_APP_API_BASE ? process.env.REACT_APP_API_BASE.replace('/api', '') : 'http://localhost:5001';
+
+// Helper to get full image URL
+export const getImageUrl = (imageUrl) => {
+  if (!imageUrl) return '/android-chrome-192x192.png';
+  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) return imageUrl;
+  if (imageUrl.startsWith('/uploads/')) return `${SERVER_BASE}${imageUrl}`;
+  return imageUrl;
+};
 
 export default function App() {
   const [currentView, setCurrentView] = useState('home'); // 'home' | 'login' | 'admin'
