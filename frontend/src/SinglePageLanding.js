@@ -118,7 +118,11 @@ function SinglePageLanding() {
               {upcoming.map((item, idx) => (
                 <li key={idx} className="sp-schedule-item">
                   <time className="sp-schedule-date" dateTime={item.date}>{formatShortDate(item._parsedDate)}</time>
-                  <div className="sp-schedule-info"><strong className="sp-schedule-name">{item.name}</strong>{item.time ? <span className="sp-schedule-time">{` (${item.time})`}</span> : null}</div>
+                  <div className="sp-schedule-info">
+                    <strong className="sp-schedule-name">{item.name}</strong>
+                    {item.time ? <span className="sp-schedule-time">{` (${item.time})`}</span> : null}
+                    {item.location && item.location !== 'Main Hall' ? <span className="sp-schedule-location">{` - ${item.location}`}</span> : null}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -131,7 +135,11 @@ function SinglePageLanding() {
                 {ongoing.map((o, i) => (
                   <li key={i} className="sp-ongoing-item">
                       <div><strong>{o.name}</strong></div>
-                      <div className="sp-ongoing-meta">{o.day_of_week ? <span>{o.day_of_week} · </span> : null}{o.time}</div>
+                      <div className="sp-ongoing-meta">
+                        {o.day_of_week ? <span>{o.day_of_week} · </span> : null}
+                        {o.time}
+                        {o.location && o.location !== 'Main Hall' ? <span> · {o.location}</span> : null}
+                      </div>
                     </li>
                 ))}
               </ul>
@@ -140,7 +148,12 @@ function SinglePageLanding() {
 
           {beachBands2026.length > 0 && (
             <>
-              <h3 id="beach-bands-2026-heading">Beach Bands 2026</h3>
+              <h3 id="beach-bands-2026-heading" className="text-2xl font-bold text-purple-400 mt-8 mb-4 border-b-2 border-purple-400/30 pb-2">Beach Bands 2026</h3>
+              <div className="bg-purple-900/20 border border-purple-500/30 rounded-lg p-4 mb-4">
+                <p className="text-sm text-gray-300">
+                  <strong>Important:</strong> Thunder Road Bar & Grill is closed on Sundays, except for the small bar which is open for beer and wine only. No outside beverages are allowed.
+                </p>
+              </div>
               <ul className="sp-schedule-list sp-beach-bands-list">
                 {beachBands2026.map((band, idx) => (
                   <li key={idx} className="sp-schedule-item">
