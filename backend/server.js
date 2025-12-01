@@ -150,14 +150,10 @@ app.get('/api/events/:id', async (req, res) => {
 
 app.post('/api/events', async (req, res) => {
 	try {
-		let { title, description, start_datetime, end_datetime, venue_section, event_date, event_time } = req.body;
-		// If start_datetime isn't provided but event_date and event_time are, combine them
-		if ((!start_datetime || start_datetime === '') && event_date && event_time) {
-			start_datetime = `${event_date} ${event_time}`; // assume valid date and time strings
-		}
+		const { artist_name, genre, description, image_url, ticket_price, door_price, age_restriction, venue_section, start_datetime, end_datetime, layout_id, status } = req.body;
 		const [result] = await pool.query(
-			'INSERT INTO events (title, description, start_datetime, end_datetime, venue_section, event_date, event_time) VALUES (?, ?, ?, ?, ?, ?, ?)',
-			[title, description, start_datetime || null, end_datetime || null, venue_section || null, event_date || null, event_time || null]
+			'INSERT INTO events (artist_name, genre, description, image_url, ticket_price, door_price, age_restriction, venue_section, start_datetime, end_datetime, layout_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+			[artist_name, genre || null, description || null, image_url || null, ticket_price || null, door_price || null, age_restriction || 'All Ages', venue_section || 'Main Stage', start_datetime || null, end_datetime || null, layout_id || null, status || 'upcoming']
 		);
 		res.json({ success: true, id: result.insertId });
 	} catch (error) {
@@ -168,13 +164,10 @@ app.post('/api/events', async (req, res) => {
 
 app.put('/api/events/:id', async (req, res) => {
 	try {
-		let { title, description, start_datetime, end_datetime, venue_section, event_date, event_time } = req.body;
-		if ((!start_datetime || start_datetime === '') && event_date && event_time) {
-			start_datetime = `${event_date} ${event_time}`;
-		}
+		const { artist_name, genre, description, image_url, ticket_price, door_price, age_restriction, venue_section, start_datetime, end_datetime, layout_id, status } = req.body;
 		await pool.query(
-			'UPDATE events SET title = ?, description = ?, start_datetime = ?, end_datetime = ?, venue_section = ?, event_date = ?, event_time = ? WHERE id = ?',
-			[title, description, start_datetime || null, end_datetime || null, venue_section || null, event_date || null, event_time || null, req.params.id]
+			'UPDATE events SET artist_name = ?, genre = ?, description = ?, image_url = ?, ticket_price = ?, door_price = ?, age_restriction = ?, venue_section = ?, start_datetime = ?, end_datetime = ?, layout_id = ?, status = ? WHERE id = ?',
+			[artist_name, genre || null, description || null, image_url || null, ticket_price || null, door_price || null, age_restriction || 'All Ages', venue_section || 'Main Stage', start_datetime || null, end_datetime || null, layout_id || null, status || 'upcoming', req.params.id]
 		);
 		res.json({ success: true });
 	} catch (error) {
@@ -207,25 +200,31 @@ app.get('/api/seating/event/:eventId', async (req, res) => {
 		const [eventRows] = await pool.query('SELECT layout_id FROM events WHERE id = ?', [eventId]);
 		
 		let layoutData = [];
+		let stagePosition = null;
+		let stageSize = null;
 		
 		if (eventRows && eventRows.length > 0 && eventRows[0].layout_id) {
 			// Event has a specific layout assigned
 			const [layoutRows] = await pool.query(
-				'SELECT layout_data FROM seating_layouts WHERE id = ?',
+				'SELECT layout_data, stage_position, stage_size FROM seating_layouts WHERE id = ?',
 				[eventRows[0].layout_id]
 			);
 			if (layoutRows && layoutRows.length > 0) {
 				// MySQL JSON type is already parsed as object
 				layoutData = layoutRows[0].layout_data || [];
+				stagePosition = layoutRows[0].stage_position;
+				stageSize = layoutRows[0].stage_size;
 			}
 		} else {
 			// Use default layout
 			const [defaultRows] = await pool.query(
-				'SELECT layout_data FROM seating_layouts WHERE is_default = 1 LIMIT 1'
+				'SELECT layout_data, stage_position, stage_size FROM seating_layouts WHERE is_default = 1 LIMIT 1'
 			);
 			if (defaultRows && defaultRows.length > 0) {
 				// MySQL JSON type is already parsed as object
 				layoutData = defaultRows[0].layout_data || [];
+				stagePosition = defaultRows[0].stage_position;
+				stageSize = defaultRows[0].stage_size;
 			}
 		}
 		
@@ -250,6 +249,8 @@ app.get('/api/seating/event/:eventId', async (req, res) => {
 		res.json({ 
 			success: true, 
 			seating: layoutData,
+			stagePosition: stagePosition,
+			stageSize: stageSize,
 			reservedSeats: Array.from(reservedSeats),
 			pendingSeats: Array.from(pendingSeats)
 		});
@@ -412,7 +413,7 @@ app.get('/api/layout-history/:id', async (req, res) => {
 app.get('/api/seating-layouts', async (req, res) => {
 	try {
 		const [rows] = await pool.query(
-			'SELECT id, name, description, is_default, layout_data, created_at, updated_at FROM seating_layouts ORDER BY is_default DESC, name ASC'
+			'SELECT id, name, description, is_default, layout_data, stage_position, stage_size, created_at, updated_at FROM seating_layouts ORDER BY is_default DESC, name ASC'
 		);
 		res.json({ success: true, layouts: rows });
 	} catch (err) {
@@ -425,7 +426,7 @@ app.get('/api/seating-layouts', async (req, res) => {
 app.get('/api/seating-layouts/default', async (req, res) => {
 	try {
 		const [rows] = await pool.query(
-			'SELECT id, name, description, is_default, layout_data, created_at, updated_at FROM seating_layouts WHERE is_default = 1 LIMIT 1'
+			'SELECT id, name, description, is_default, layout_data, stage_position, stage_size, created_at, updated_at FROM seating_layouts WHERE is_default = 1 LIMIT 1'
 		);
 		if (!rows || rows.length === 0) {
 			return res.status(404).json({ success: false, message: 'No default layout found' });
@@ -441,7 +442,7 @@ app.get('/api/seating-layouts/default', async (req, res) => {
 app.get('/api/seating-layouts/:id', async (req, res) => {
 	try {
 		const [rows] = await pool.query(
-			'SELECT id, name, description, is_default, layout_data, created_at, updated_at FROM seating_layouts WHERE id = ?',
+			'SELECT id, name, description, is_default, layout_data, stage_position, stage_size, created_at, updated_at FROM seating_layouts WHERE id = ?',
 			[req.params.id]
 		);
 		if (!rows || rows.length === 0) {
@@ -491,9 +492,12 @@ app.put('/api/seating-layouts/:id', async (req, res) => {
 			await pool.query('UPDATE seating_layouts SET is_default = 0 WHERE id != ?', [layoutId]);
 		}
 
+		const stage_position = req.body.stage_position ? JSON.stringify(req.body.stage_position) : null;
+		const stage_size = req.body.stage_size ? JSON.stringify(req.body.stage_size) : null;
+		
 		const [result] = await pool.query(
-			'UPDATE seating_layouts SET name = ?, description = ?, is_default = ?, layout_data = ? WHERE id = ?',
-			[name, description || '', is_default ? 1 : 0, JSON.stringify(layout_data), layoutId]
+			'UPDATE seating_layouts SET name = ?, description = ?, is_default = ?, layout_data = ?, stage_position = ?, stage_size = ? WHERE id = ?',
+			[name, description || '', is_default ? 1 : 0, JSON.stringify(layout_data), stage_position, stage_size, layoutId]
 		);
 
 		if (result.affectedRows === 0) {
@@ -709,6 +713,19 @@ app.put('/api/seat-requests/:id', async (req, res) => {
 	}
 });
 
+app.delete('/api/seat-requests/:id', async (req, res) => {
+	try {
+		const [result] = await pool.query('DELETE FROM seat_requests WHERE id = ?', [req.params.id]);
+		if (result.affectedRows === 0) {
+			return res.status(404).json({ success: false, message: 'Seat request not found' });
+		}
+		res.json({ success: true });
+	} catch (error) {
+		console.error('DELETE /api/seat-requests/:id error:', error);
+		res.status(500).json({ success: false, message: 'Failed to delete seat request' });
+	}
+});
+
 // --- Artist Suggestions ---
 // Developer note: Suggestions/contact normalization
 // The `suggestions` table stores submitter contact/details in a JSON column
@@ -812,6 +829,19 @@ app.put('/api/suggestions/:id', async (req, res) => {
 	} catch (error) {
 		console.error('PUT /api/suggestions/:id error:', error);
 		res.status(500).json({ success: false, message: 'Failed to update suggestion' });
+	}
+});
+
+app.delete('/api/suggestions/:id', async (req, res) => {
+	try {
+		const [result] = await pool.query('DELETE FROM suggestions WHERE id = ?', [req.params.id]);
+		if (result.affectedRows === 0) {
+			return res.status(404).json({ success: false, message: 'Suggestion not found' });
+		}
+		res.json({ success: true });
+	} catch (error) {
+		console.error('DELETE /api/suggestions/:id error:', error);
+		res.status(500).json({ success: false, message: 'Failed to delete suggestion' });
 	}
 });
 
