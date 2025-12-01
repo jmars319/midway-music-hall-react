@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, Armchair, Send, AlertCircle } from 'lucide-react';
-import Table6 from './Table6';
+import TableComponent from './TableComponent';
 import { API_BASE } from '../App';
 
 const seatTypeClass = (type, selected) => {
@@ -31,6 +31,8 @@ export default function EventSeatingModal({ event, onClose }) {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [stagePosition, setStagePosition] = useState({ x: 50, y: 10 });
+  const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
   const [form, setForm] = useState({
     customerName: '',
     customerEmail: '',
@@ -50,9 +52,15 @@ export default function EventSeatingModal({ event, onClose }) {
       const res = await fetch(`${API_BASE}/seating/event/${event.id}`);
       const data = await res.json();
       if (data.success) {
-        setSeatingConfig(data.layout?.layout_data || []);
+        setSeatingConfig(data.seating || []);
         setReservedSeats(data.reservedSeats || []);
         setPendingSeats(data.pendingSeats || []);
+        if (data.stagePosition) {
+          setStagePosition(data.stagePosition);
+        }
+        if (data.stageSize) {
+          setStageSize(data.stageSize);
+        }
       } else {
         setErrorMessage('Failed to load seating data');
       }
@@ -298,27 +306,50 @@ export default function EventSeatingModal({ event, onClose }) {
                 </div>
               </div>
             ) : (
-              <div className="relative h-full bg-gray-800/50 rounded-xl p-4 border border-purple-500/20">
-                <StageRenderer />
+              <div className="relative h-full bg-gray-100 dark:bg-gray-900 rounded-xl overflow-auto border border-purple-500/20">
+                <div className="relative min-h-[1600px] p-8">
+                  {/* Stage */}
+                  <div 
+                    className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
+                    style={{
+                      left: `${stagePosition.x}%`,
+                      top: `${stagePosition.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: `${stageSize.width}px`,
+                      height: `${stageSize.height}px`
+                    }}
+                  >
+                    STAGE
+                  </div>
 
-                {activeRows.map(row => {
-                  if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
-                  const left = `${parseFloat(row.pos_x)}%`;
-                  const top = `${parseFloat(row.pos_y)}%`;
-                  const transform = `translate(-50%, -50%) rotate(${row.rotation || 0}deg)`;
-                  
-                  return (
-                    <div key={row.id} style={{ position: 'absolute', left, top, transform }} className="flex flex-col items-center gap-2">
-                      <div className="text-sm text-gray-300 font-semibold">{row.section_name || row.section || 'Section'} {row.row_label || ''}</div>
-
-                      {row.seat_type === 'table-6' && (row.total_seats || 0) === 6 ? (
-                        (() => {
-                          const reservedForRow = reservedSeats.filter(s => s.startsWith(`${row.section_name || row.section}-${row.row_label}-`));
-                          const pendingForRow = pendingSeats.filter(s => s.startsWith(`${row.section_name || row.section}-${row.row_label}-`));
-                          
-                          return (
-                            <Table6
+                  {/* Tables */}
+                  {activeRows.map(row => {
+                    if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
+                    
+                    const reservedForRow = reservedSeats.filter(s => s.startsWith(`${row.section_name || row.section}-${row.row_label}-`));
+                    const pendingForRow = pendingSeats.filter(s => s.startsWith(`${row.section_name || row.section}-${row.row_label}-`));
+                    
+                    return (
+                      <div
+                        key={row.id}
+                        className="absolute"
+                        style={{
+                          left: `${row.pos_x}%`,
+                          top: `${row.pos_y}%`,
+                          transform: `translate(-50%, -50%)`,
+                          padding: '40px 20px',
+                          minWidth: '120px',
+                          minHeight: '120px'
+                        }}
+                      >
+                        <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-xs font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap z-20">
+                          {row.section_name} - {row.row_label}
+                        </div>
+                        <div className="flex items-center justify-center" style={{ minHeight: '60px' }}>
+                          <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
+                            <TableComponent
                               row={row}
+                              tableShape={row.table_shape || 'table-6'}
                               selectedSeats={selectedSeats}
                               pendingSeats={pendingForRow}
                               onToggleSeat={(seatId) => {
@@ -326,45 +357,14 @@ export default function EventSeatingModal({ event, onClose }) {
                                 if (pendingForRow.includes(seatId)) return;
                                 toggleSeat(seatId);
                               }}
+                              interactive={true}
                             />
-                          );
-                        })()
-                      ) : (
-                        <div className="flex gap-2">
-                          {Array.from({ length: row.total_seats || 0 }).map((_, idx) => {
-                            const seatNum = idx + 1;
-                            const seatId = `${row.section_name || row.section}-${row.row_label}-${seatNum}`;
-                            const isSelected = selectedSeats.includes(seatId);
-                            const isPendingSeat = pendingSeats.includes(seatId);
-                            const isReservedSeat = reservedSeats.includes(seatId);
-
-                            let classes = '';
-                            if (isReservedSeat) {
-                              classes = 'w-9 h-9 flex items-center justify-center rounded bg-red-600 ring-2 ring-red-400 text-white cursor-not-allowed';
-                            } else if (isPendingSeat) {
-                              classes = 'w-9 h-9 flex items-center justify-center rounded bg-purple-500/80 border-2 border-dashed border-purple-300 text-white cursor-not-allowed';
-                            } else {
-                              classes = `w-9 h-9 flex items-center justify-center rounded cursor-pointer ${seatTypeClass(row.seat_type, isSelected)}`;
-                            }
-
-                            return (
-                              <button 
-                                key={seatId} 
-                                onClick={() => { 
-                                  if (!isPendingSeat && !isReservedSeat) toggleSeat(seatId); 
-                                }} 
-                                className={classes}
-                                disabled={isPendingSeat || isReservedSeat}
-                              >
-                                <Armchair className="h-4 w-4" />
-                              </button>
-                            );
-                          })}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
+                      </div>
+                    );
+                  })}
+                </div>
 
                 {/* Selected Seats Counter */}
                 <div className="absolute left-4 bottom-4 bg-gray-900/90 px-4 py-2 rounded-lg border border-purple-500/30">
