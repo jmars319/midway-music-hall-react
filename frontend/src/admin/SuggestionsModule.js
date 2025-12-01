@@ -7,7 +7,7 @@
 // flattened fields are missing — avoid rendering mailto: links unless an
 // email value is present.
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle } from 'lucide-react';
+import { CheckCircle, XCircle, Trash2 } from 'lucide-react';
 import { API_BASE } from '../App';
 
 const submissionClasses = {
@@ -54,6 +54,21 @@ export default function SuggestionsModule(){
     } catch (err) {
       console.error('Update suggestion status error', err);
       alert('Failed to update status');
+    }
+  };
+
+  const deleteSuggestion = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this suggestion? This cannot be undone.')) return;
+    try {
+      const res = await fetch(`${API_BASE}/suggestions/${id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data && data.success) fetchSuggestions();
+      else alert('Failed to delete suggestion');
+    } catch (err) {
+      console.error('Delete suggestion error', err);
+      alert('Failed to delete suggestion');
     }
   };
 
@@ -127,15 +142,14 @@ export default function SuggestionsModule(){
 
               <div className="flex items-center justify-between">
                 <div className="text-xs text-gray-400">Submitted: {new Date(s.created_at).toLocaleString()}</div>
-                <div>
-                  {s.status === 'pending' ? (
-                    <div className="inline-flex gap-2">
+                <div className="flex items-center gap-2">
+                  {s.status === 'pending' && (
+                    <>
                       <button onClick={() => updateStatus(s.id, 'approved')} className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded flex items-center gap-2"><CheckCircle className="h-4 w-4" /> Approve</button>
                       <button onClick={() => updateStatus(s.id, 'declined')} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded flex items-center gap-2"><XCircle className="h-4 w-4" /> Decline</button>
-                    </div>
-                  ) : (
-                    <div className="text-sm text-gray-400">No actions</div>
+                    </>
                   )}
+                  <button onClick={() => deleteSuggestion(s.id)} className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded flex items-center gap-2" title="Delete suggestion"><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
             </div>

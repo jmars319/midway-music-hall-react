@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 // SeatRequestsModule: admin list view for seat requests (simpler alternative to RequestsModule)
-import { CheckCircle, XCircle } from 'lucide-react';
+import { CheckCircle, XCircle, Trash2 } from 'lucide-react';
 import { API_BASE } from '../App';
 
 const statusClasses = {
@@ -60,6 +60,21 @@ export default function SeatRequestsModule(){
     }
   };
 
+  const deleteRequest = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this seat request? This cannot be undone.')) return;
+    try {
+      const res = await fetch(`${API_BASE}/seat-requests/${id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data && data.success) fetchRequests();
+      else alert('Failed to delete request');
+    } catch (err) {
+      console.error('Delete request error', err);
+      alert('Failed to delete request');
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -110,14 +125,15 @@ export default function SeatRequestsModule(){
                       <span className={`px-3 py-1 rounded-full text-sm ${statusClasses[req.status] || ''}`}>{req.status}</span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {req.status === 'pending' ? (
-                        <div className="inline-flex gap-2">
-                          <button onClick={() => updateStatus(req.id, 'approved')} className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded flex items-center gap-2"><CheckCircle className="h-4 w-4" /> Approve</button>
-                          <button onClick={() => updateStatus(req.id, 'denied')} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded flex items-center gap-2"><XCircle className="h-4 w-4" /> Deny</button>
-                        </div>
-                      ) : (
-                        <div className="text-sm text-gray-400">No actions</div>
-                      )}
+                      <div className="inline-flex gap-2">
+                        {req.status === 'pending' && (
+                          <>
+                            <button onClick={() => updateStatus(req.id, 'approved')} className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded flex items-center gap-2"><CheckCircle className="h-4 w-4" /> Approve</button>
+                            <button onClick={() => updateStatus(req.id, 'denied')} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded flex items-center gap-2"><XCircle className="h-4 w-4" /> Deny</button>
+                          </>
+                        )}
+                        <button onClick={() => deleteRequest(req.id)} className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded flex items-center gap-2" title="Delete request"><Trash2 className="h-4 w-4" /></button>
+                      </div>
                     </td>
                   </tr>
                 );

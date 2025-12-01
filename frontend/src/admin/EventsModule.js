@@ -287,13 +287,14 @@ export default function EventsModule(){
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Seating Layout</label>
                 <select name="layout_id" value={formData.layout_id} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded">
-                  <option value="">Use Default Layout</option>
+                  <option value="">None (No seat reservations)</option>
                   {layouts.map(layout => (
                     <option key={layout.id} value={layout.id}>
                       {layout.name} {layout.is_default === 1 ? '(Default)' : ''}
                     </option>
                   ))}
                 </select>
+                <p className="text-xs text-gray-400 mt-1">Select a saved layout or leave as None if this event doesn't use seat reservations</p>
               </div>
 
               <div className="md:col-span-2">

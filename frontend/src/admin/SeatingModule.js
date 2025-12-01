@@ -1,10 +1,22 @@
 // SeatingModule: admin layout editor and seating management UI
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, Edit } from 'lucide-react';
-import Table6 from '../components/Table6';
+import TableComponent from '../components/TableComponent';
 import { API_BASE } from '../App';
 
-const seatTypes = ['general', 'premium', 'vip', 'accessible', 'standing', 'table-6'];
+const seatTypes = ['general', 'premium', 'vip', 'accessible'];
+const tableShapes = [
+  { value: 'table-2', label: '2-Top Table', seats: 2 },
+  { value: 'table-4', label: '4-Top Table', seats: 4 },
+  { value: 'table-6', label: '6-Top Table', seats: 6 },
+  { value: 'table-8', label: '8-Top Table', seats: 8 },
+  { value: 'round-6', label: 'Round Table (6)', seats: 6 },
+  { value: 'round-8', label: 'Round Table (8)', seats: 8 },
+  { value: 'bar-6', label: 'Bar Seating (6)', seats: 6 },
+  { value: 'booth-4', label: 'Booth (4)', seats: 4 },
+  { value: 'standing-10', label: 'Standing (10)', seats: 10 },
+  { value: 'standing-20', label: 'Standing (20)', seats: 20 }
+];
 
 export default function SeatingModule(){
   const [seating, setSeating] = useState([]);
@@ -13,7 +25,7 @@ export default function SeatingModule(){
   const containerRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ section_name: '', row_letter: '', total_seats: 1, seat_type: 'general' });
+  const [formData, setFormData] = useState({ section_name: '', row_letter: '', total_seats: 1, seat_type: 'general', table_shape: 'table-6' });
   const [editing, setEditing] = useState(null);
 
   const fetchSeating = async () => {
@@ -158,13 +170,13 @@ export default function SeatingModule(){
 
   const openAdd = (section = '') => {
     setEditing(null);
-    setFormData({ section_name: section, row_letter: '', total_seats: 1, seat_type: 'general', is_active: true, pos_x: '', pos_y: '', rotation: 0 });
+    setFormData({ section_name: section, row_letter: '', total_seats: 6, seat_type: 'general', table_shape: 'table-6', is_active: true, pos_x: '', pos_y: '', rotation: 0 });
     setShowForm(true);
   };
 
   const openEdit = (row) => {
     setEditing(row);
-    setFormData({ section_name: row.section_name || row.section, row_letter: row.row_label || row.row_letter, total_seats: row.total_seats, seat_type: row.seat_type, is_active: !!row.is_active, pos_x: row.pos_x, pos_y: row.pos_y, rotation: row.rotation || 0 });
+    setFormData({ section_name: row.section_name || row.section, row_letter: row.row_label || row.row_letter, total_seats: row.total_seats, seat_type: row.seat_type, table_shape: row.table_shape || 'table-6', is_active: !!row.is_active, pos_x: row.pos_x, pos_y: row.pos_y, rotation: row.rotation || 0 });
     setShowForm(true);
   };
 
@@ -307,6 +319,19 @@ export default function SeatingModule(){
                 <label className="block text-sm text-gray-300 mb-1">Seat Type</label>
                 <select name="seat_type" value={formData.seat_type} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded">
                   {seatTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Table Shape</label>
+                <select name="table_shape" value={formData.table_shape || 'table-6'} onChange={(e) => {
+                  const selected = tableShapes.find(ts => ts.value === e.target.value);
+                  handleChange(e);
+                  if (selected) {
+                    setFormData(prev => ({ ...prev, total_seats: selected.seats }));
+                  }
+                }} className="w-full px-4 py-2 bg-gray-700 text-white rounded">
+                  {tableShapes.map(ts => <option key={ts.value} value={ts.value}>{ts.label}</option>)}
                 </select>
               </div>
 
@@ -611,11 +636,12 @@ function LayoutDraggable({ row, style, containerRef, onUpdate, gridEnabled, grid
     >
       <div className="text-xs font-semibold">{row.section_name || row.section} {row.row_label || row.row_letter}</div>
       <div className="flex items-center gap-2">
-        {row.seat_type === 'table-6' ? (
+        {(row.table_shape || row.seat_type === 'table-6') ? (
           <div className="flex items-center gap-2">
-            <Table6
+            <TableComponent
               row={row}
               size={96}
+              tableShape={row.table_shape || 'table-6'}
               selectedSeats={(function(){ try{ return Array.isArray(row.selected_seats) ? row.selected_seats : (row.selected_seats ? JSON.parse(row.selected_seats) : []); }catch(e){ return []; } })()}
               interactive={true}
               onToggleSeat={async (seatId) => {
