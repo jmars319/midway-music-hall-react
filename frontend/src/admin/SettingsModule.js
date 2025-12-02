@@ -1,13 +1,38 @@
 import React, { useEffect, useState } from 'react';
-import { API_BASE } from '../App';
+import { API_BASE, SERVER_BASE } from '../App';
 
 // SettingsModule: admin UI for business/stage settings
 
 export default function SettingsModule(){
   const [settings, setSettings] = useState({});
+  const [media, setMedia] = useState([]);
+  const [heroMedia, setHeroMedia] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [selectedHeroImages, setSelectedHeroImages] = useState([]);
+
+  const fetchMedia = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/media?category=logo`);
+      const data = await res.json();
+      if (data && data.success) {
+        setMedia(data.media || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch media', err);
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/media?category=hero`);
+      const data = await res.json();
+      if (data && data.success) {
+        setHeroMedia(data.media || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch hero media', err);
+    }
+  };
 
   const fetchSettings = async () => {
     setLoading(true);
@@ -17,6 +42,15 @@ export default function SettingsModule(){
       const data = await res.json();
       if (data && data.success && data.settings) {
         setSettings(data.settings);
+        // Parse hero_images if it exists
+        if (data.settings.hero_images) {
+          try {
+            const images = JSON.parse(data.settings.hero_images);
+            setSelectedHeroImages(Array.isArray(images) ? images : []);
+          } catch (e) {
+            setSelectedHeroImages([]);
+          }
+        }
       } else {
         setSettings({});
       }
@@ -28,7 +62,10 @@ export default function SettingsModule(){
     }
   };
 
-  useEffect(() => { fetchSettings(); }, []);
+  useEffect(() => { 
+    fetchSettings(); 
+    fetchMedia();
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -40,10 +77,14 @@ export default function SettingsModule(){
     setSaving(true);
     setError('');
     try {
+      const settingsToSave = {
+        ...settings,
+        hero_images: JSON.stringify(selectedHeroImages)
+      };
       const res = await fetch(`${API_BASE}/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(settingsToSave),
       });
       const data = await res.json();
       if (data && data.success) {
@@ -93,6 +134,190 @@ export default function SettingsModule(){
             <div className="md:col-span-2">
               <label className="block text-sm text-gray-300 mb-1">Address</label>
               <input name="business_address" value={settings.business_address || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
+            </div>
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-gray-700">
+            <h3 className="text-lg font-bold mb-4">Hero Section</h3>
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Hero Title</label>
+                <input name="hero_title" value={settings.hero_title || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" placeholder="Midway Music Hall" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Hero Subtitle</label>
+                <textarea name="hero_subtitle" value={settings.hero_subtitle || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" rows="2" placeholder="Experience local and touring acts..." />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-gray-700">
+            <h3 className="text-lg font-bold mb-4">About Section</h3>
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">About Title</label>
+                <input name="about_title" value={settings.about_title || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" placeholder="About Midway Music Hall" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">About Description</label>
+                <textarea name="about_description" value={settings.about_description || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" rows="5" placeholder="Description of your venue..." />
+                <p className="text-xs text-gray-400 mt-1">Use double line breaks to separate paragraphs</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-gray-700">
+            <h3 className="text-lg font-bold mb-4">Social Media Links</h3>
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Facebook URL</label>
+                <input name="facebook_url" value={settings.facebook_url || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" placeholder="https://facebook.com/yourpage" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Instagram URL</label>
+                <input name="instagram_url" value={settings.instagram_url || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" placeholder="https://instagram.com/yourpage" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Twitter URL</label>
+                <input name="twitter_url" value={settings.twitter_url || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" placeholder="https://twitter.com/yourpage" />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-gray-700">
+            <h3 className="text-lg font-bold mb-4">Hero Background Images</h3>
+            <p className="text-sm text-gray-400 mb-4">Select images from the Hero category in Media Manager to use as hero backgrounds</p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">Selected Hero Images ({selectedHeroImages.length})</label>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                  {selectedHeroImages.map((imgUrl, idx) => (
+                    <div key={idx} className="relative group">
+                      <img 
+                        src={`${SERVER_BASE}${imgUrl}`} 
+                        alt={`Hero ${idx + 1}`}
+                        className="w-full h-24 object-cover rounded border-2 border-purple-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setSelectedHeroImages(prev => prev.filter((_, i) => i !== idx))}
+                        className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
+                      >
+                        ×
+                      </button>
+                      <div className="absolute bottom-1 left-1 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                        {idx + 1}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">Available Hero Images (click to add)</label>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {heroMedia
+                    .filter(m => !selectedHeroImages.includes(m.file_url))
+                    .map(m => (
+                      <div 
+                        key={m.id} 
+                        onClick={() => setSelectedHeroImages(prev => [...prev, m.file_url])}
+                        className="cursor-pointer hover:ring-2 hover:ring-purple-500 rounded transition"
+                      >
+                        <img 
+                          src={`${SERVER_BASE}${m.file_url}`} 
+                          alt={m.original_name}
+                          className="w-full h-24 object-cover rounded border border-gray-600"
+                        />
+                        <p className="text-xs text-gray-400 mt-1 truncate">{m.original_name}</p>
+                      </div>
+                    ))}
+                </div>
+                {heroMedia.filter(m => !selectedHeroImages.includes(m.file_url)).length === 0 && (
+                  <p className="text-sm text-gray-500 italic">No hero images available. Upload images with "Hero" category in Media Manager.</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="flex items-center space-x-2">
+                    <input 
+                      type="checkbox" 
+                      checked={settings.hero_slideshow_enabled === 'true'}
+                      onChange={(e) => setSettings(prev => ({ ...prev, hero_slideshow_enabled: e.target.checked ? 'true' : 'false' }))}
+                      className="rounded bg-gray-700"
+                    />
+                    <span className="text-sm text-gray-300">Enable Slideshow</span>
+                  </label>
+                  <p className="text-xs text-gray-500 ml-6">Auto-rotate through hero images</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Slideshow Interval (ms)</label>
+                  <input 
+                    type="number" 
+                    name="hero_slideshow_interval" 
+                    value={settings.hero_slideshow_interval || '5000'} 
+                    onChange={handleChange}
+                    min="2000"
+                    step="1000"
+                    className="w-full px-4 py-2 bg-gray-700 text-white rounded" 
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Default: 5000ms (5 seconds)</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-gray-700">
+            <h3 className="text-lg font-bold mb-4">Site Images</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">Navigation Logo</label>
+                <select 
+                  name="site_logo" 
+                  value={settings.site_logo || ''} 
+                  onChange={handleChange} 
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded mb-2"
+                >
+                  <option value="">Select Logo...</option>
+                  {media.map(m => (
+                    <option key={m.id} value={m.file_url}>{m.original_name}</option>
+                  ))}
+                </select>
+                {settings.site_logo && (
+                  <img 
+                    src={`${SERVER_BASE}${settings.site_logo}`} 
+                    alt="Current logo" 
+                    className="w-32 h-auto border border-gray-600 rounded"
+                  />
+                )}
+                <p className="text-xs text-gray-400 mt-1">Upload logos in Media Manager</p>
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">Default Event Image</label>
+                <select 
+                  name="default_event_image" 
+                  value={settings.default_event_image || ''} 
+                  onChange={handleChange} 
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded mb-2"
+                >
+                  <option value="">Select Image...</option>
+                  {media.map(m => (
+                    <option key={m.id} value={m.file_url}>{m.original_name}</option>
+                  ))}
+                </select>
+                {settings.default_event_image && (
+                  <img 
+                    src={`${SERVER_BASE}${settings.default_event_image}`} 
+                    alt="Default event" 
+                    className="w-32 h-auto border border-gray-600 rounded"
+                  />
+                )}
+                <p className="text-xs text-gray-400 mt-1">Used when events have no image</p>
+              </div>
             </div>
           </div>
 

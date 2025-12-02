@@ -1,8 +1,60 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 // Hero: large header/hero section used on the home page
 import { Music2, Calendar, MapPin } from 'lucide-react';
+import { API_BASE, SERVER_BASE } from '../App';
 
 export default function Hero() {
+  const [logo, setLogo] = useState('/logo.png');
+  const [heroTitle, setHeroTitle] = useState('Midway Music Hall');
+  const [heroSubtitle, setHeroSubtitle] = useState('Experience local and touring acts in an intimate venue — weekly shows, great sound, and a welcoming community.');
+  const [heroImages, setHeroImages] = useState([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [slideshowEnabled, setSlideshowEnabled] = useState(false);
+  const [slideshowInterval, setSlideshowInterval] = useState(5000);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/settings`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.settings) {
+          if (data.settings.site_logo) {
+            setLogo(`${SERVER_BASE}${data.settings.site_logo}`);
+          }
+          if (data.settings.hero_title) {
+            setHeroTitle(data.settings.hero_title);
+          }
+          if (data.settings.hero_subtitle) {
+            setHeroSubtitle(data.settings.hero_subtitle);
+          }
+          if (data.settings.hero_images) {
+            try {
+              const images = JSON.parse(data.settings.hero_images);
+              setHeroImages(Array.isArray(images) ? images : []);
+            } catch (e) {
+              setHeroImages([]);
+            }
+          }
+          if (data.settings.hero_slideshow_enabled === 'true') {
+            setSlideshowEnabled(true);
+          }
+          if (data.settings.hero_slideshow_interval) {
+            setSlideshowInterval(parseInt(data.settings.hero_slideshow_interval, 10) || 5000);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Slideshow effect
+  useEffect(() => {
+    if (slideshowEnabled && heroImages.length > 1) {
+      const timer = setInterval(() => {
+        setCurrentImageIndex((prev) => (prev + 1) % heroImages.length);
+      }, slideshowInterval);
+      return () => clearInterval(timer);
+    }
+  }, [slideshowEnabled, heroImages.length, slideshowInterval]);
+
   const scrollTo = (id) => {
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -10,26 +62,35 @@ export default function Hero() {
 
   return (
     <section className="bg-gradient-to-br from-purple-900 via-gray-900 to-blue-900 text-white relative overflow-hidden">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-        <div className="text-center">
-          <div className="flex flex-col items-center justify-center mb-6">
-            <img 
-              src="/logo.png" 
-              alt="Midway Music Hall Logo" 
-              className="h-20 md:h-24 mb-4"
+      {/* Background image */}
+      {heroImages.length > 0 && (
+        <div className="absolute inset-0 z-0">
+          {heroImages.map((image, index) => (
+            <div
+              key={index}
+              className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ${
+                index === currentImageIndex ? 'opacity-100' : 'opacity-0'
+              }`}
+              style={{ backgroundImage: `url(${SERVER_BASE}${image})` }}
             />
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-              Midway Music Hall
-            </h1>
-          </div>
+          ))}
+          {/* Dark overlay for text readability */}
+          <div className="absolute inset-0 bg-black/50" />
+        </div>
+      )}
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 relative z-10">
+        <div className="text-center">
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white mb-6">
+            {heroTitle}
+          </h1>
 
           <p className="mt-4 text-xl text-gray-200 max-w-2xl mx-auto">
-            Experience local and touring acts in an intimate venue — weekly shows, great sound, and a welcoming community.
+            {heroSubtitle}
           </p>
 
-          <div className="mt-8 flex justify-center gap-4">
+          <div className="mt-8 flex justify-center">
             <button onClick={() => scrollTo('schedule')} className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition">View Schedule</button>
-            <button onClick={() => scrollTo('seating')} className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-lg font-semibold transition">Request Seats</button>
           </div>
         </div>
 

@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 // Footer: small presentational component rendered at bottom of site
 import { MapPin, Phone, Mail, Facebook, Instagram, Twitter } from 'lucide-react';
+import { API_BASE } from '../App';
 
 const business = {
   name: 'Midway Music Hall',
@@ -15,7 +16,24 @@ const scrollToSection = (id) => {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
-export default function Footer(){
+export default function Footer({ onAdminClick, onNavigate }){
+  const [facebookUrl, setFacebookUrl] = useState('https://facebook.com/midwaymusichal');
+  const [instagramUrl, setInstagramUrl] = useState('https://instagram.com/midwaymusichal');
+  const [twitterUrl, setTwitterUrl] = useState('https://twitter.com/midwaymusichal');
+
+  useEffect(() => {
+    fetch(`${API_BASE}/settings`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.settings) {
+          if (data.settings.facebook_url) setFacebookUrl(data.settings.facebook_url);
+          if (data.settings.instagram_url) setInstagramUrl(data.settings.instagram_url);
+          if (data.settings.twitter_url) setTwitterUrl(data.settings.twitter_url);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <footer className="bg-gray-900 border-t border-purple-500/15 text-gray-300 mt-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -33,9 +51,11 @@ export default function Footer(){
             <h4 className="text-white font-bold mb-3">Quick Links</h4>
             <div className="flex flex-col gap-2">
               <button onClick={() => scrollToSection('schedule')} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">Schedule</button>
-              <button onClick={() => scrollToSection('seating')} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">Seating Chart</button>
-              <button onClick={() => scrollToSection('suggest')} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">Suggest an Artist</button>
               <button onClick={() => scrollToSection('about')} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">About</button>
+              <button onClick={() => scrollToSection('suggest')} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">Suggest an Artist</button>
+              <button onClick={() => onNavigate && onNavigate('privacy')} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">Privacy Policy</button>
+              <button onClick={() => onNavigate && onNavigate('terms')} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">Terms of Service</button>
+              {onAdminClick && <button onClick={onAdminClick} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">Admin</button>}
             </div>
           </div>
 
@@ -47,13 +67,13 @@ export default function Footer(){
           <div>
             <h4 className="text-white font-bold mb-3">Follow Us</h4>
             <div className="flex items-center gap-3">
-              <a href="https://facebook.com/midwaymusichal" target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
+              <a href={facebookUrl} target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
                 <Facebook className="h-5 w-5" />
               </a>
-              <a href="https://instagram.com/midwaymusichal" target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
+              <a href={instagramUrl} target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
                 <Instagram className="h-5 w-5" />
               </a>
-              <a href="https://twitter.com/midwaymusichal" target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
+              <a href={twitterUrl} target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
                 <Twitter className="h-5 w-5" />
               </a>
             </div>

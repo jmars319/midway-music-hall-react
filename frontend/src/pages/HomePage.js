@@ -8,7 +8,7 @@ import Footer from '../components/Footer';
 // HomePage: main public landing page that composes Hero, Schedule, etc.
 import { API_BASE } from '../App';
 
-export default function HomePage({ onAdminClick }) {
+export default function HomePage({ onAdminClick, onNavigate }) {
   const [events, setEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
 
@@ -47,20 +47,20 @@ export default function HomePage({ onAdminClick }) {
           </div>
         </section>
 
-        <section id="suggest" className="py-12">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <ArtistSuggestion />
-          </div>
-        </section>
-
         <section id="about" className="py-12">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <About />
           </div>
         </section>
+
+        <section id="suggest" className="py-12">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <ArtistSuggestion />
+          </div>
+        </section>
       </main>
 
-      <Footer />
+      <Footer onAdminClick={onAdminClick} onNavigate={onNavigate} />
     </div>
   );
 }

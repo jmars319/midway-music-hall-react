@@ -1,5 +1,5 @@
 // AdminPanel: top-level admin container and navigation for admin modules
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   DashboardModule,
   EventsModule,
@@ -9,6 +9,7 @@ import {
   MediaManager,
   SettingsModule,
 } from './index';
+import { SERVER_BASE } from '../App';
 
 const MENU = [
   { key: 'dashboard', label: 'Dashboard', comp: DashboardModule },
@@ -23,6 +24,18 @@ const MENU = [
 export default function AdminPanel({ user = null, onLogout = () => {}, onBackToSite = () => {} }){
   const [active, setActive] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
+  const [logo, setLogo] = useState('/logo.png');
+
+  useEffect(() => {
+    fetch(`${SERVER_BASE}/api/settings`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.settings && data.settings.site_logo) {
+          setLogo(SERVER_BASE + data.settings.site_logo);
+        }
+      })
+      .catch(err => console.error('Failed to load logo:', err));
+  }, []);
 
   const ActiveComponent = (MENU.find(m => m.key === active) || MENU[0]).comp;
 
@@ -33,7 +46,7 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
         <div className="h-full flex flex-col">
           <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
             <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 rounded bg-gradient-to-br from-purple-600 to-blue-500 flex items-center justify-center font-bold text-white">MM</div>
+              <img src={logo} alt="Midway Music Hall" className={`${collapsed ? 'h-8' : 'h-10'} transition-all duration-200`} />
               {!collapsed && <div className="text-lg font-semibold">Midway Admin</div>}
             </div>
             <button

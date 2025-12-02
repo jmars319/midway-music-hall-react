@@ -2,12 +2,47 @@ import React, { useState, useEffect } from 'react';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import AdminPanel from './admin/AdminPanel';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfService from './pages/TermsOfService';
 
 export const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5001/api';
 export const SERVER_BASE = process.env.REACT_APP_API_BASE ? process.env.REACT_APP_API_BASE.replace('/api', '') : 'http://localhost:5001';
 
+// Cache for settings to avoid repeated fetches
+let settingsCache = null;
+let settingsFetchPromise = null;
+
+const fetchSettings = async () => {
+  if (settingsCache) return settingsCache;
+  if (settingsFetchPromise) return settingsFetchPromise;
+  
+  settingsFetchPromise = fetch(`${API_BASE}/settings`)
+    .then(res => res.json())
+    .then(data => {
+      if (data.success && data.settings) {
+        settingsCache = data.settings;
+        return data.settings;
+      }
+      return {};
+    })
+    .catch(() => ({}));
+  
+  return settingsFetchPromise;
+};
+
 // Helper to get full image URL
-export const getImageUrl = (imageUrl) => {
+export const getImageUrl = async (imageUrl) => {
+  if (!imageUrl) {
+    const settings = await fetchSettings();
+    return settings.default_event_image ? `${SERVER_BASE}${settings.default_event_image}` : '/android-chrome-192x192.png';
+  }
+  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) return imageUrl;
+  if (imageUrl.startsWith('/uploads/')) return `${SERVER_BASE}${imageUrl}`;
+  return imageUrl;
+};
+
+// Synchronous version for backwards compatibility
+export const getImageUrlSync = (imageUrl) => {
   if (!imageUrl) return '/android-chrome-192x192.png';
   if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) return imageUrl;
   if (imageUrl.startsWith('/uploads/')) return `${SERVER_BASE}${imageUrl}`;
@@ -63,6 +98,14 @@ export default function App() {
 
   const navigateToLogin = () => setCurrentView('login');
   const navigateToHome = () => setCurrentView('home');
+  const navigateToPrivacy = () => setCurrentView('privacy');
+  const navigateToTerms = () => setCurrentView('terms');
+
+  const handleNavigate = (page) => {
+    if (page === 'privacy') navigateToPrivacy();
+    else if (page === 'terms') navigateToTerms();
+    else navigateToHome();
+  };
 
   // When the user clicks the Admin button from the public site, if we
   // already have a persisted authenticated admin, go straight to admin.
@@ -82,5 +125,13 @@ export default function App() {
     return <AdminPanel user={currentUser} onLogout={handleLogout} onBackToSite={navigateToHome} />;
   }
 
-  return <HomePage onAdminClick={navigateToAdmin} />;
+  if (currentView === 'privacy') {
+    return <PrivacyPolicy onAdminClick={navigateToAdmin} />;
+  }
+
+  if (currentView === 'terms') {
+    return <TermsOfService onAdminClick={navigateToAdmin} />;
+  }
+
+  return <HomePage onAdminClick={navigateToAdmin} onNavigate={handleNavigate} />;
 }

@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import './index.css';
 
 import eventsData from './data/events.json';
 import contactsData from './data/contacts.json';
 import policiesData from './data/policies.json';
+
+const SERVER_BASE = 'http://localhost:5001';
 
 function parseDateSafe(dateStr) {
   if (!dateStr) return null;
@@ -21,6 +23,19 @@ function formatShortDate(d) {
 }
 
 function SinglePageLanding() {
+  const [logo, setLogo] = useState('/logo.png'); // fallback
+
+  useEffect(() => {
+    fetch(`${SERVER_BASE}/api/settings`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.site_logo) {
+          setLogo(SERVER_BASE + data.site_logo);
+        }
+      })
+      .catch(err => console.error('Failed to load logo from settings:', err));
+  }, []);
+
   // derive map query from policies (Venue Address) or environment
   const venueAddress = (
     policiesData.find((p) => p.category && p.category.toLowerCase().includes('venue address')) ||
@@ -91,7 +106,7 @@ function SinglePageLanding() {
       <header className="bg-gradient-to-br from-purple-900 via-gray-900 to-blue-900 text-white relative overflow-hidden py-16" role="banner">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <img 
-            src="/logo.png" 
+            src={logo} 
             alt="Midway Music Hall Logo" 
             className="mx-auto h-20 md:h-24 mb-4"
           />

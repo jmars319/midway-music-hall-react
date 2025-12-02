@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 // Schedule: simple list of upcoming events used on the home page
 import { Calendar, Clock, DollarSign, Users } from 'lucide-react';
 import EventSeatingModal from './EventSeatingModal';
-import { getImageUrl } from '../App';
+import { getImageUrlSync } from '../App';
 
 const formatDate = (dateInput) => {
   if (!dateInput) return '';
@@ -73,7 +73,7 @@ export default function Schedule({ events = [], loading = false }){
                   <div className="flex-shrink-0">
                     <div className="w-20 h-20 bg-gray-700 rounded-lg overflow-hidden flex items-center justify-center">
                       <img 
-                        src={getImageUrl(event.image_url)} 
+                        src={getImageUrlSync(event.image_url)} 
                         alt={event.artist_name || 'Event'}
                         className="w-full h-full object-cover"
                         onError={(e) => { e.target.src = '/android-chrome-192x192.png'; }}

@@ -1,9 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Menu, X, Music } from 'lucide-react';
+import { API_BASE, SERVER_BASE } from '../App';
 
 // Navigation: top site navigation and admin access button
 export default function Navigation({ onAdminClick }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [logo, setLogo] = useState('/logo.png');
+
+  useEffect(() => {
+    fetch(`${API_BASE}/settings`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.settings.site_logo) {
+          setLogo(`${SERVER_BASE}${data.settings.site_logo}`);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const scrollToSection = (id) => {
     setMobileOpen(false);
@@ -18,7 +31,7 @@ export default function Navigation({ onAdminClick }) {
           <div className="flex items-center space-x-3">
             <div className="flex items-center text-white">
               <img 
-                src="/logo.png" 
+                src={logo} 
                 alt="Midway Music Hall" 
                 className="h-20 w-auto mr-3"
               />
@@ -29,10 +42,8 @@ export default function Navigation({ onAdminClick }) {
           {/* Desktop links */}
           <div className="hidden md:flex items-center space-x-6">
             <button onClick={() => scrollToSection('schedule')} className="text-gray-300 hover:text-purple-400 transition font-medium">Schedule</button>
-            <button onClick={() => scrollToSection('seating')} className="text-gray-300 hover:text-purple-400 transition font-medium">Seating</button>
-            <button onClick={() => scrollToSection('suggest')} className="text-gray-300 hover:text-purple-400 transition font-medium">Suggest Artist</button>
             <button onClick={() => scrollToSection('about')} className="text-gray-300 hover:text-purple-400 transition font-medium">About</button>
-            <button onClick={onAdminClick} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition font-medium">Admin</button>
+            <button onClick={() => scrollToSection('suggest')} className="text-gray-300 hover:text-purple-400 transition font-medium">Suggest Artist</button>
           </div>
 
           {/* Mobile menu button */}
@@ -53,10 +64,8 @@ export default function Navigation({ onAdminClick }) {
         <div className="md:hidden bg-black border-t border-purple-500/30">
           <div className="px-4 pt-4 pb-6 space-y-3">
             <button onClick={() => scrollToSection('schedule')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Schedule</button>
-            <button onClick={() => scrollToSection('seating')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Seating</button>
-            <button onClick={() => scrollToSection('suggest')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Suggest Artist</button>
             <button onClick={() => scrollToSection('about')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">About</button>
-            <button onClick={() => { setMobileOpen(false); onAdminClick && onAdminClick(); }} className="w-full text-left px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium">Admin</button>
+            <button onClick={() => scrollToSection('suggest')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Suggest Artist</button>
           </div>
         </div>
       )}

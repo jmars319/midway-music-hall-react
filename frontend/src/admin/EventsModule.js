@@ -1,7 +1,7 @@
 // EventsModule: admin UI to create and manage events
 import React, { useEffect, useState } from 'react';
 import { Plus, Edit, Trash2 } from 'lucide-react';
-import { API_BASE, getImageUrl } from '../App';
+import { API_BASE, getImageUrlSync } from '../App';
 
 const initialForm = {
   artist_name: '',
@@ -304,7 +304,7 @@ export default function EventsModule(){
                   {(imagePreview || formData.image_url) && (
                     <div className="relative inline-block">
                       <img 
-                        src={imagePreview || getImageUrl(formData.image_url)} 
+                        src={imagePreview || getImageUrlSync(formData.image_url)} 
                         alt="Event preview"
                         className="w-32 h-32 object-cover rounded-lg border-2 border-gray-600"
                         onError={(e) => { e.target.src = '/android-chrome-192x192.png'; }}
