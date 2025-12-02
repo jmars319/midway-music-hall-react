@@ -7,4 +7,5 @@ export { default as LayoutsModule } from './LayoutsModule';
 // Use the newer RequestsModule UI for the admin navigation
 export { default as SeatRequestsModule } from './RequestsModule';
 export { default as SuggestionsModule } from './SuggestionsModule';
+export { default as MediaManager } from './MediaManager';
 export { default as SettingsModule } from './SettingsModule';

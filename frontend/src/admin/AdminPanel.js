@@ -3,20 +3,20 @@ import React, { useState } from 'react';
 import {
   DashboardModule,
   EventsModule,
-  SeatingModule,
   LayoutsModule,
   SeatRequestsModule,
   SuggestionsModule,
+  MediaManager,
   SettingsModule,
 } from './index';
 
 const MENU = [
   { key: 'dashboard', label: 'Dashboard', comp: DashboardModule },
   { key: 'events', label: 'Events', comp: EventsModule },
-  { key: 'seating', label: 'Seating', comp: SeatingModule },
-  { key: 'layouts', label: 'Layouts', comp: LayoutsModule },
+  { key: 'layouts', label: 'Seating Layouts', comp: LayoutsModule },
   { key: 'requests', label: 'Seat Requests', comp: SeatRequestsModule },
   { key: 'suggestions', label: 'Suggestions', comp: SuggestionsModule },
+  { key: 'media', label: 'Media', comp: MediaManager },
   { key: 'settings', label: 'Settings', comp: SettingsModule },
 ];
 

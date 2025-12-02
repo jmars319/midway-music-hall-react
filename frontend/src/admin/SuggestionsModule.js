@@ -7,13 +7,21 @@
 // flattened fields are missing — avoid rendering mailto: links unless an
 // email value is present.
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { API_BASE } from '../App';
 
 const submissionClasses = {
   self: 'bg-purple-500/20 text-purple-400',
   fan: 'bg-blue-500/20 text-blue-400',
 };
+
+const statusOptions = [
+  { value: 'new', label: 'New', color: 'bg-blue-500/20 text-blue-400' },
+  { value: 'contacted', label: 'Contacted', color: 'bg-yellow-500/20 text-yellow-400' },
+  { value: 'considering', label: 'Considering', color: 'bg-purple-500/20 text-purple-400' },
+  { value: 'booked', label: 'Booked', color: 'bg-green-500/20 text-green-400' },
+  { value: 'not_interested', label: 'Not Interested', color: 'bg-gray-500/20 text-gray-400' },
+];
 
 export default function SuggestionsModule(){
   const [suggestions, setSuggestions] = useState([]);
@@ -41,12 +49,12 @@ export default function SuggestionsModule(){
 
   useEffect(() => { fetchSuggestions(); }, []);
 
-  const updateStatus = async (id, status) => {
+  const updateStatus = async (id, newStatus) => {
     try {
       const res = await fetch(`${API_BASE}/suggestions/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status: newStatus }),
       });
       const data = await res.json();
       if (data && data.success) fetchSuggestions();
@@ -88,7 +96,9 @@ export default function SuggestionsModule(){
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {suggestions.length === 0 && <div className="p-6 bg-gray-800 rounded">No suggestions yet.</div>}
 
-          {suggestions.map(s => (
+          {suggestions.map(s => {
+            const currentStatus = statusOptions.find(opt => opt.value === s.status) || statusOptions[0];
+            return (
             <div key={s.id} className="bg-gray-800 rounded-xl p-6 border border-purple-500/30">
               <div className="flex justify-between items-start mb-3">
                 <div>
@@ -97,7 +107,6 @@ export default function SuggestionsModule(){
                 </div>
                 <div className="text-right">
                   <div className={`inline-block px-3 py-1 rounded-full text-sm ${submissionClasses[s.submission_type] || ''}`}>{s.submission_type === 'self' ? 'Artist Submission' : 'Fan Suggestion'}</div>
-                  <div className="text-xs text-gray-500 mt-1">{s.status}</div>
                 </div>
               </div>
 
@@ -143,17 +152,21 @@ export default function SuggestionsModule(){
               <div className="flex items-center justify-between">
                 <div className="text-xs text-gray-400">Submitted: {new Date(s.created_at).toLocaleString()}</div>
                 <div className="flex items-center gap-2">
-                  {s.status === 'pending' && (
-                    <>
-                      <button onClick={() => updateStatus(s.id, 'approved')} className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded flex items-center gap-2"><CheckCircle className="h-4 w-4" /> Approve</button>
-                      <button onClick={() => updateStatus(s.id, 'declined')} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded flex items-center gap-2"><XCircle className="h-4 w-4" /> Decline</button>
-                    </>
-                  )}
+                  <select
+                    value={s.status || 'new'}
+                    onChange={(e) => updateStatus(s.id, e.target.value)}
+                    className={`px-3 py-1 rounded-full text-sm border-0 ${currentStatus.color} cursor-pointer`}
+                  >
+                    {statusOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
                   <button onClick={() => deleteSuggestion(s.id)} className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded flex items-center gap-2" title="Delete suggestion"><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

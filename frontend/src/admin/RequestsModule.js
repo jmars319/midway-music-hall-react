@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { API_BASE } from '../App';
 
 function parseSeats(selected_seats){
@@ -29,17 +30,16 @@ function ConflictModal({ conflicts = [], onClose = () => {}, onRefresh = () => {
 }
 
 // RequestsModule (admin)
-// Shows customer seat requests, allows admin to approve or deny requests.
-// - Polls `/api/seat-requests` periodically when polling is enabled
+// Shows customer seat requests, allows admin to approve, deny, or delete requests.
 // - Approve action will call `/api/seat-requests/:id/approve` and may
 //   return a 409 with conflicts if seats were already reserved
+// - Delete action permanently removes the request from the database
 // This module presents a table view and a small seat-preview for each request.
 export default function RequestsModule(){
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [conflicts, setConflicts] = useState(null);
-  const [polling, setPolling] = useState(true);
 
   const fetchRequests = async () => {
     setLoading(true);
@@ -55,15 +55,6 @@ export default function RequestsModule(){
 
   useEffect(()=>{ fetchRequests(); }, []);
 
-  // Poll for pending requests every 8 seconds when polling enabled
-  useEffect(() => {
-    if (!polling) return;
-    const id = setInterval(() => {
-      fetchRequests();
-    }, 8000);
-    return () => clearInterval(id);
-  }, [polling]);
-
   const act = async (id, action) => {
     try{
       const res = await fetch(`${API_BASE}/seat-requests/${id}/${action}`, { method: 'POST' });
@@ -77,6 +68,19 @@ export default function RequestsModule(){
       if (json && json.success) fetchRequests();
       else alert('Action failed');
     }catch(e){ console.error('Action failed', e); alert('Action failed'); }
+  };
+
+  const deleteRequest = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this seat request? This cannot be undone.')) return;
+    try {
+      const res = await fetch(`${API_BASE}/seat-requests/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data && data.success) fetchRequests();
+      else alert('Failed to delete request');
+    } catch (err) {
+      console.error('Delete request error', err);
+      alert('Failed to delete request');
+    }
   };
 
   /* Developer guidance - approval flow and error handling
@@ -96,14 +100,8 @@ export default function RequestsModule(){
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold">Seat Requests</h1>
-          <div className="text-sm text-gray-300 bg-gray-800 px-2 py-1 rounded border border-purple-500/20">Polling: <span className="font-medium text-white ml-1">{polling ? 'On' : 'Off'}</span></div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => { fetchRequests(); }} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded">Refresh</button>
-          <button onClick={() => setPolling(p => !p)} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded">{polling ? 'Stop' : 'Start'} Poll</button>
-        </div>
+        <h1 className="text-2xl font-bold">Seat Requests</h1>
+        <button onClick={() => { fetchRequests(); }} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg">Refresh</button>
       </div>
 
       {/* Compact legend */}
@@ -168,14 +166,17 @@ export default function RequestsModule(){
                       <span className={`px-3 py-1 rounded-full text-sm ${req.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : req.status === 'approved' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>{req.status}</span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {req.status === 'pending' ? (
-                        <div className="inline-flex gap-2">
-                          <button onClick={() => act(req.id, 'approve')} className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded flex items-center gap-2">Approve</button>
-                          <button onClick={() => act(req.id, 'deny')} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded flex items-center gap-2">Deny</button>
-                        </div>
-                      ) : (
-                        <div className="text-sm text-gray-400">No actions</div>
-                      )}
+                      <div className="inline-flex gap-2">
+                        {req.status === 'pending' && (
+                          <>
+                            <button onClick={() => act(req.id, 'approve')} className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded flex items-center gap-2">Approve</button>
+                            <button onClick={() => act(req.id, 'deny')} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded flex items-center gap-2">Deny</button>
+                          </>
+                        )}
+                        <button onClick={() => deleteRequest(req.id)} className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded flex items-center gap-2" title="Delete request">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

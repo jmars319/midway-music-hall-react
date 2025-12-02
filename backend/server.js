@@ -900,6 +900,111 @@ app.get('/api/dashboard-stats', async (req, res) => {
 	}
 });
 
+// --- Media Management ---
+// Get all media files, optionally filtered by category
+app.get('/api/media', async (req, res) => {
+	try {
+		const { category } = req.query;
+		let query = 'SELECT * FROM media ORDER BY created_at DESC';
+		let params = [];
+		
+		if (category && category !== 'all') {
+			query = 'SELECT * FROM media WHERE category = ? ORDER BY created_at DESC';
+			params = [category];
+		}
+		
+		const [media] = await pool.query(query, params);
+		res.json({ success: true, media });
+	} catch (error) {
+		console.error('GET /api/media error:', error);
+		res.status(500).json({ success: false, message: 'Failed to fetch media' });
+	}
+});
+
+// Upload media file with category
+app.post('/api/media', upload.single('file'), async (req, res) => {
+	try {
+		if (!req.file) {
+			return res.status(400).json({ success: false, message: 'No file uploaded' });
+		}
+		
+		const { category = 'other', alt_text = '', caption = '' } = req.body;
+		const fileUrl = `/uploads/${req.file.filename}`;
+		
+		const [result] = await pool.query(
+			'INSERT INTO media (filename, original_name, file_path, file_url, file_size, mime_type, category, alt_text, caption) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+			[
+				req.file.filename,
+				req.file.originalname,
+				req.file.path,
+				fileUrl,
+				req.file.size,
+				req.file.mimetype,
+				category,
+				alt_text,
+				caption
+			]
+		);
+		
+		res.json({ 
+			success: true, 
+			media: {
+				id: result.insertId,
+				filename: req.file.filename,
+				file_url: fileUrl,
+				category,
+				alt_text,
+				caption
+			}
+		});
+	} catch (error) {
+		console.error('POST /api/media error:', error);
+		res.status(500).json({ success: false, message: 'Upload failed' });
+	}
+});
+
+// Update media metadata (category, alt_text, caption)
+app.put('/api/media/:id', async (req, res) => {
+	try {
+		const { category, alt_text, caption } = req.body;
+		await pool.query(
+			'UPDATE media SET category = ?, alt_text = ?, caption = ? WHERE id = ?',
+			[category, alt_text || '', caption || '', req.params.id]
+		);
+		res.json({ success: true });
+	} catch (error) {
+		console.error('PUT /api/media/:id error:', error);
+		res.status(500).json({ success: false, message: 'Failed to update media' });
+	}
+});
+
+// Delete media file
+app.delete('/api/media/:id', async (req, res) => {
+	try {
+		// Get file info before deleting
+		const [rows] = await pool.query('SELECT * FROM media WHERE id = ?', [req.params.id]);
+		if (rows.length === 0) {
+			return res.status(404).json({ success: false, message: 'Media not found' });
+		}
+		
+		const media = rows[0];
+		
+		// Delete from database
+		await pool.query('DELETE FROM media WHERE id = ?', [req.params.id]);
+		
+		// Delete file from disk
+		const filePath = path.join(uploadsDir, media.filename);
+		if (fs.existsSync(filePath)) {
+			fs.unlinkSync(filePath);
+		}
+		
+		res.json({ success: true });
+	} catch (error) {
+		console.error('DELETE /api/media/:id error:', error);
+		res.status(500).json({ success: false, message: 'Failed to delete media' });
+	}
+});
+
 // --- Settings ---
 app.get('/api/settings', async (req, res) => {
 	try {
