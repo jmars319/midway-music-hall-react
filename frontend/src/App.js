@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import HomePage from './pages/HomePage';
+import SinglePageLanding from './SinglePageLanding';
 import LoginPage from './pages/LoginPage';
 import AdminPanel from './admin/AdminPanel';
 import PrivacyPolicy from './pages/PrivacyPolicy';
@@ -133,5 +134,6 @@ export default function App() {
     return <TermsOfService onAdminClick={navigateToAdmin} />;
   }
 
-  return <HomePage onAdminClick={navigateToAdmin} onNavigate={handleNavigate} />;
+  // Use SinglePageLanding as the default view (temporary landing page)
+  return <SinglePageLanding />;
 }

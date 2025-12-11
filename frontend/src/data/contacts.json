@@ -3,17 +3,9 @@
     "contact_type": "Primary",
     "name": "Donna Cheek",
     "phone": "336-793-4218",
-    "email": "Via Facebook Messenger",
+    "email": "midwayeventcenter@gmail.com",
     "role": "Venue Manager",
     "notes": "Main contact for all events"
-  },
-  {
-    "contact_type": "Ticketing",
-    "name": "Carol Parrish Rousseau",
-    "phone": "336-618-9169",
-    "email": "N/A",
-    "role": "Ticket Contact",
-    "notes": "December 6 Christmas Show"
   },
   {
     "contact_type": "Beach Music Series",
@@ -29,7 +21,10 @@
     "phone": "727-776-1555",
     "email": "N/A",
     "role": "Line Dance Instructor",
-    "notes": "Monday night classes"
+    "class_name": "Line Dance Lessons — All Skill Levels",
+    "class_time": "Mondays, 5:30–7:30 PM",
+    "class_price": "$7/person",
+    "notes": "Line dance lessons for all skill levels"
   },
   {
     "contact_type": "Instructor",
@@ -37,14 +32,20 @@
     "phone": "336-816-5544",
     "email": "N/A",
     "role": "Line Dance Instructor",
-    "notes": "Wednesday beginner classes - Ages 55+"
+    "class_name": "Line Dance Lessons — 55+ Beginner",
+    "class_time": "Wednesdays, 11 AM–Noon",
+    "class_price": "$7/person",
+    "notes": "Beginner line dance classes for ages 55+"
   },
   {
     "contact_type": "Instructor",
-    "name": "Vickie Chambers",
+    "name": "Vickie",
     "phone": "336-989-0156",
     "email": "N/A",
-    "role": "Shag Dance Instructor",
-    "notes": "Tuesday night classes"
+    "role": "Line Dance Instructor",
+    "class_name": "Advanced + beginner line dance classes",
+    "class_time": "",
+    "class_price": "",
+    "notes": "Advanced and beginner line dance classes"
   }
 ]

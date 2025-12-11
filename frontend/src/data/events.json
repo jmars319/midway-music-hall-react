@@ -1,20 +1,6 @@
 [
   {
     "event_type": "Event",
-    "name": "Christmas Show - Elvis, Patsy Cline & Frank Sinatra",
-    "date": "2025-12-06",
-    "day_of_week": "Friday",
-    "time": "Show at 5:00 PM",
-    "doors_open": "4:00 PM",
-    "cover_charge": "TBD",
-    "age_restriction": "All Ages",
-    "notes": "Tribute show featuring Elvis, Patsy Cline, and Frank Sinatra. Contact Carol for ticket info.",
-    "contact_person": "Carol Parrish Rousseau",
-    "contact_phone": "336-618-9169",
-    "location": "Main Hall"
-  },
-  {
-    "event_type": "Event",
     "name": "Friday Night Dance with DJ Dancin' Dan",
     "date": "2025-12-12",
     "day_of_week": "Thursday",
@@ -25,7 +11,8 @@
     "notes": "Beach hits & line dance - The Gathering Place",
     "contact_person": "Donna Cheek",
     "contact_phone": "336-793-4218",
-    "location": "The Gathering Place"
+    "location": "The Gathering Place",
+    "venue": "TGP"
   },
   {
     "event_type": "Event",
@@ -39,7 +26,8 @@
     "notes": "Closed for private party",
     "contact_person": "N/A",
     "contact_phone": "N/A",
-    "location": "Main Hall"
+    "location": "Midway Music Hall",
+    "venue": "MMH"
   },
   {
     "event_type": "Event",
@@ -53,7 +41,8 @@
     "notes": "Featuring Night Move Band; Donna's Dance Party 5-7; call for reservations; bring food and snacks for your table.",
     "contact_person": "Donna Cheek",
     "contact_phone": "336-793-4218",
-    "location": "Main Hall"
+    "location": "Midway Music Hall",
+    "venue": "MMH"
   },
   {
     "event_type": "Notice",
@@ -67,21 +56,143 @@
     "notes": "Closed for holidays (Dec 21 - Jan 2)",
     "contact_person": "N/A",
     "contact_phone": "N/A",
-    "location": "Main Hall"
+    "location": "Midway Music Hall",
+    "venue": "MMH"
+  },
+  {
+    "event_type": "Event",
+    "name": "Coda Junction",
+    "date": "2026-01-03",
+    "day_of_week": "Friday",
+    "time": "7:00 PM - 10:00 PM",
+    "doors_open": "6:00 PM",
+    "cover_charge": "$10",
+    "age_restriction": "All Ages",
+    "notes": "Live music at Midway Music Hall",
+    "contact_person": "Donna Cheek",
+    "contact_phone": "336-793-4218",
+    "location": "Midway Music Hall",
+    "venue": "MMH"
+  },
+  {
+    "event_type": "Event",
+    "name": "Friday Night Dance with DJ Dan",
+    "date": "2026-01-09",
+    "day_of_week": "Friday",
+    "time": "6:00 PM - 10:00 PM",
+    "doors_open": "6:00 PM",
+    "cover_charge": "$10",
+    "age_restriction": "All Ages",
+    "notes": "Beach hits & line dance at The Gathering Place",
+    "contact_person": "Donna Cheek",
+    "contact_phone": "336-793-4218",
+    "location": "The Gathering Place",
+    "venue": "TGP"
+  },
+  {
+    "event_type": "Event",
+    "name": "The Delmonicos",
+    "date": "2026-01-10",
+    "day_of_week": "Saturday",
+    "time": "7:00 PM - 10:00 PM",
+    "doors_open": "6:00 PM",
+    "cover_charge": "$10",
+    "age_restriction": "All Ages",
+    "notes": "Live music at Midway Music Hall",
+    "contact_person": "Donna Cheek",
+    "contact_phone": "336-793-4218",
+    "location": "Midway Music Hall",
+    "venue": "MMH"
+  },
+  {
+    "event_type": "Event",
+    "name": "Hwy 109",
+    "date": "2026-01-16",
+    "day_of_week": "Friday",
+    "time": "7:00 PM - 10:00 PM",
+    "doors_open": "6:00 PM",
+    "cover_charge": "$10",
+    "age_restriction": "All Ages",
+    "notes": "Live music at Midway Music Hall",
+    "contact_person": "Donna Cheek",
+    "contact_phone": "336-793-4218",
+    "location": "Midway Music Hall",
+    "venue": "MMH"
+  },
+  {
+    "event_type": "Event",
+    "name": "Wild Canyon",
+    "date": "2026-01-17",
+    "day_of_week": "Saturday",
+    "time": "7:00 PM - 10:00 PM",
+    "doors_open": "6:00 PM",
+    "cover_charge": "$10",
+    "age_restriction": "All Ages",
+    "notes": "Live music at Midway Music Hall",
+    "contact_person": "Donna Cheek",
+    "contact_phone": "336-793-4218",
+    "location": "Midway Music Hall",
+    "venue": "MMH"
+  },
+  {
+    "event_type": "Event",
+    "name": "Friday Night Dance with DJ Dan",
+    "date": "2026-01-23",
+    "day_of_week": "Friday",
+    "time": "6:00 PM - 10:00 PM",
+    "doors_open": "6:00 PM",
+    "cover_charge": "$10",
+    "age_restriction": "All Ages",
+    "notes": "Beach hits & line dance at The Gathering Place",
+    "contact_person": "Donna Cheek",
+    "contact_phone": "336-793-4218",
+    "location": "The Gathering Place",
+    "venue": "TGP"
+  },
+  {
+    "event_type": "Event",
+    "name": "Silverhawk",
+    "date": "2026-01-24",
+    "day_of_week": "Saturday",
+    "time": "7:00 PM - 10:00 PM",
+    "doors_open": "6:00 PM",
+    "cover_charge": "$10",
+    "age_restriction": "All Ages",
+    "notes": "Live music at Midway Music Hall",
+    "contact_person": "Donna Cheek",
+    "contact_phone": "336-793-4218",
+    "location": "Midway Music Hall",
+    "venue": "MMH"
+  },
+  {
+    "event_type": "Event",
+    "name": "Diamond Edge",
+    "date": "2026-01-31",
+    "day_of_week": "Saturday",
+    "time": "7:00 PM - 10:00 PM",
+    "doors_open": "6:00 PM",
+    "cover_charge": "$10",
+    "age_restriction": "All Ages",
+    "notes": "Live music at Midway Music Hall",
+    "contact_person": "Donna Cheek",
+    "contact_phone": "336-793-4218",
+    "location": "Midway Music Hall",
+    "venue": "MMH"
   },
   {
     "event_type": "Recurring Event",
     "name": "Friday Night Dance with DJ Dancin' Dan",
     "date": "Ongoing",
-    "day_of_week": "2nd & 4th Friday (beginning January)",
+    "day_of_week": "2nd & 4th Friday",
     "time": "6:00 PM - 10:00 PM",
     "doors_open": "6:00 PM",
     "cover_charge": "$10",
     "age_restriction": "All Ages",
-    "notes": "Beach hits & line dance - 2nd and 4th Friday beginning in January",
+    "notes": "Beach hits & line dance at The Gathering Place - 2nd and 4th Friday each month",
     "contact_person": "Donna Cheek",
     "contact_phone": "336-793-4218",
-    "location": "Main Hall"
+    "location": "The Gathering Place",
+    "venue": "TGP"
   },
   {
     "event_type": "Recurring Event",

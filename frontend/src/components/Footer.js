@@ -5,10 +5,10 @@ import { API_BASE } from '../App';
 
 const business = {
   name: 'Midway Music Hall',
-  address: '123 Music Lane, Lexington, NC 27292',
-  phone: '(336) 555-SHOW',
-  email: 'info@midwaymusichal.com',
-  boxOffice: 'Mon-Fri: 10am-6pm, Sat: 12pm-8pm'
+  address: '11141 Old US Hwy 52 W-S NC 27107',
+  phone: '(336) 793-4218',
+  email: 'midwayeventcenter@gmail.com',
+  boxOffice: 'Contact for event information'
 };
 
 const scrollToSection = (id) => {
@@ -42,8 +42,14 @@ export default function Footer({ onAdminClick, onNavigate }){
             <h4 className="text-white font-bold mb-3">{business.name}</h4>
             <div className="text-sm text-gray-400">
               <div className="flex items-center gap-2"><MapPin className="h-4 w-4" /> {business.address}</div>
-              <div className="flex items-center gap-2 mt-2"><Phone className="h-4 w-4" /> {business.phone}</div>
-              <div className="flex items-center gap-2 mt-2"><Mail className="h-4 w-4" /> {business.email}</div>
+              <div className="flex items-center gap-2 mt-2">
+                <Phone className="h-4 w-4" /> 
+                <a href="tel:+13367934218" className="hover:text-purple-400 transition">{business.phone}</a>
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <Mail className="h-4 w-4" /> 
+                <a href="mailto:midwayeventcenter@gmail.com" className="hover:text-purple-400 transition">{business.email}</a>
+              </div>
             </div>
           </div>
 

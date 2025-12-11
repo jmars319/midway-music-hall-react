@@ -101,6 +101,7 @@ a:focus, button:focus, iframe:focus {
 .sp-contact-notes { color: #cbd5e1; margin-top:0.25rem; font-size:0.92rem; }
 .sp-contact-link { color: #9ca3af; text-decoration: none; transition: color 0.2s; }
 .sp-contact-link:hover, .sp-contact-link:focus { color: #c084fc; text-decoration: underline; }
+.sp-contact-link:focus { outline: 2px solid #c084fc; outline-offset: 2px; }
 
 .sp-map-wrapper { border-radius: 6px; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02); }
 .sp-address { margin-top: 0.5rem; color: #9ca3af; }
@@ -118,12 +119,24 @@ a:focus, button:focus, iframe:focus {
 .sp-beach-bands-list { margin-top: 0.5rem; padding-top: 0.75rem; border-top: 2px solid rgba(192, 132, 252, 0.2); }
 .sp-beach-bands-list .sp-schedule-date { color: #a78bfa; }
 
+/* Classes/Lessons section */
+.sp-classes-list { list-style: none; padding-left: 0; margin-top: 0.75rem; }
+.sp-class-item { padding: 0.75rem 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.sp-class-item:last-child { border-bottom: none; }
+.sp-class-header { margin-bottom: 0.5rem; }
+.sp-class-name { color: #f8fafc; font-size: 1.05rem; }
+.sp-class-details { color: #9ca3af; font-size: 0.95rem; line-height: 1.6; }
+.sp-class-time, .sp-class-price { margin-bottom: 0.25rem; }
+.sp-class-instructor { margin-top: 0.25rem; }
+.sp-class-instructor strong { color: #cbd5e1; }
+
 .sp-footer { text-align: center; padding: 1rem 0; color: #9ca3af; }
 
 @media (min-width: 768px) {
   .sp-main { grid-template-columns: 1fr 360px; align-items: start; }
   .sp-schedule { grid-column: 1 / 2; grid-row: 1; }
   .sp-about { grid-column: 1 / 2; grid-row: 2; }
-  .sp-location { grid-column: 2 / 3; grid-row: 1 / 3; }
+  .sp-classes { grid-column: 1 / 2; grid-row: 3; }
+  .sp-location { grid-column: 2 / 3; grid-row: 1 / 4; }
 }
 

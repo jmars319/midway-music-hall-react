@@ -51,12 +51,16 @@ function SinglePageLanding() {
   }));
 
   const upcoming = parsed
-    .filter((e) => e._parsedDate && e._parsedDate >= new Date(today.getFullYear() - 1, 0, 1)) // loosely allow recent
+    .filter((e) => e._parsedDate && e._parsedDate >= today) // Only show current and future events
     .filter((e) => !(e.event_type && String(e.event_type).toLowerCase().includes('closure')))
     .sort((a, b) => a._parsedDate - b._parsedDate)
     .slice(0, 12);
 
-  const ongoing = parsed.filter((e) => !e._parsedDate || /ongoing|daily/i.test(String(e.date)) || /class|related business/i.test(String(e.event_type)));
+  const ongoing = parsed.filter((e) => !e._parsedDate || /ongoing|daily/i.test(String(e.date)) || /related business/i.test(String(e.event_type)));
+
+  // Separate instructors from other contacts
+  const instructors = contactsData.filter(c => c.contact_type === 'Instructor');
+  const otherContacts = contactsData.filter(c => c.contact_type !== 'Instructor');
 
   // policies map for quick lookup
   const policiesMap = policiesData.reduce((acc, p) => {
@@ -86,6 +90,7 @@ function SinglePageLanding() {
     { name: 'SPECIAL OCCASION BAND', date: '2026-02-15' },
     { name: 'GARY LOWDER AND SMOKIN HOT', date: '2026-03-15' },
     { name: 'THE ENTERTAINERS', date: '2026-04-19' },
+    { name: 'THE CATALINAS', date: '2026-05-03' },
     { name: 'JIM QUICK AND COASTLINE', date: '2026-09-20' },
     { name: 'TOO MUCH SYLVIA', date: '2026-10-18' },
     { name: 'BAND OF OZ', date: '2026-11-15' },
@@ -108,7 +113,7 @@ function SinglePageLanding() {
           <img 
             src={logo} 
             alt="Midway Music Hall Logo" 
-            className="mx-auto h-20 md:h-24 mb-4"
+            className="mx-auto h-40 md:h-48 mb-4"
           />
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
             Midway Music Hall
@@ -168,6 +173,9 @@ function SinglePageLanding() {
                 <p className="text-sm text-gray-300">
                   <strong>Important:</strong> Thunder Road Bar & Grill is closed on Sundays, except for the small bar which is open for beer and wine only. No outside beverages are allowed.
                 </p>
+                <p className="text-sm text-gray-300 mt-2">
+                  <strong>Beach Show Amenities:</strong> Concession stand with hot dogs and BBQ available at beach shows and winter cruise-ins. Adult beverages also available.
+                </p>
               </div>
               <ul className="sp-schedule-list sp-beach-bands-list">
                 {beachBands2026.map((band, idx) => (
@@ -195,12 +203,6 @@ function SinglePageLanding() {
                 <dd>{policiesMap['Venue Address']}</dd>
               </>
             )}
-            {policiesMap['Amenities'] && (
-              <>
-                <dt>Amenities</dt>
-                <dd>{policiesMap['Amenities']}</dd>
-              </>
-            )}
             {policiesMap['Family Policy'] && (
               <>
                 <dt>Family Policy</dt>
@@ -217,7 +219,7 @@ function SinglePageLanding() {
 
           <h3>Contacts</h3>
           <ul className="sp-contacts">
-            {contactsData.map((c, i) => {
+            {otherContacts.map((c, i) => {
               const phoneLink = formatPhoneLink(c.phone);
               const emailLink = formatEmailLink(c.email);
               return (
@@ -233,6 +235,32 @@ function SinglePageLanding() {
                     )}
                   </div>
                   {c.notes ? <div className="sp-contact-notes">{c.notes}</div> : null}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+
+        <section className="sp-section sp-classes bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-purple-500/20" aria-labelledby="classes-heading">
+          <h2 id="classes-heading">Weekly Classes & Lessons</h2>
+          <ul className="sp-classes-list">
+            {instructors.map((instructor, i) => {
+              const phoneLink = formatPhoneLink(instructor.phone);
+              return (
+                <li key={i} className="sp-class-item">
+                  <div className="sp-class-header">
+                    <strong className="sp-class-name">{instructor.class_name || instructor.role}</strong>
+                  </div>
+                  <div className="sp-class-details">
+                    {instructor.class_time && <div className="sp-class-time">📅 {instructor.class_time}</div>}
+                    {instructor.class_price && <div className="sp-class-price">💵 {instructor.class_price}</div>}
+                    <div className="sp-class-instructor">
+                      <strong>Instructor:</strong> {instructor.name}
+                      {phoneLink && (
+                        <span> · <a href={phoneLink} className="sp-contact-link">{instructor.phone}</a></span>
+                      )}
+                    </div>
+                  </div>
                 </li>
               );
             })}
