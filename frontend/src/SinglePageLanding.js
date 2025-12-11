@@ -264,6 +264,7 @@ function SinglePageLanding() {
               loading="lazy"
               style={{ border: 0 }}
               sandbox="allow-scripts allow-same-origin"
+              allow="geolocation"
               referrerPolicy="no-referrer-when-downgrade"
               src={`https://maps.google.com/maps?q=${encodeURIComponent(mapQuery)}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
             />
