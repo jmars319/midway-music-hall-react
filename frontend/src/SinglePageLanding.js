@@ -1,11 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import './index.css';
 
 import eventsData from './data/events.json';
 import contactsData from './data/contacts.json';
 import policiesData from './data/policies.json';
-
-const SERVER_BASE = 'http://localhost:5001';
 
 function parseDateSafe(dateStr) {
   if (!dateStr) return null;
@@ -23,18 +21,7 @@ function formatShortDate(d) {
 }
 
 function SinglePageLanding() {
-  const [logo, setLogo] = useState('/logo.png'); // fallback
-
-  useEffect(() => {
-    fetch(`${SERVER_BASE}/api/settings`)
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.site_logo) {
-          setLogo(SERVER_BASE + data.site_logo);
-        }
-      })
-      .catch(err => console.error('Failed to load logo from settings:', err));
-  }, []);
+  const logo = '/logo.png'; // Static logo for production
 
   // derive map query from policies (Venue Address) or environment
   const venueAddress = (
