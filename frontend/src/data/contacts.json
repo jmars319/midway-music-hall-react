@@ -5,6 +5,9 @@
     "phone": "336-793-4218",
     "email": "midwayeventcenter@gmail.com",
     "role": "Venue Manager",
+    "class_name": "",
+    "class_time": "",
+    "class_price": "",
     "notes": "Main contact for all events"
   },
   {
@@ -13,6 +16,9 @@
     "phone": "336-223-5570",
     "email": "mmhbeachbands@gmail.com",
     "role": "Beach Music Coordinator",
+    "class_name": "",
+    "class_time": "",
+    "class_price": "",
     "notes": "2026 Carolina Beach Music Series"
   },
   {
@@ -44,7 +50,7 @@
     "email": "N/A",
     "role": "Shag Instructor",
     "class_name": "Shag Dance Lessons — All Levels",
-    "class_time": "",
+    "class_time": "Tuesdays, 6:30 PM",
     "class_price": "$12/person",
     "notes": "Shag dance lessons for all levels"
   }
