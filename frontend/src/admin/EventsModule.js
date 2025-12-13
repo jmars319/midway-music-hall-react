@@ -1,7 +1,8 @@
 // EventsModule: admin UI to create and manage events
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Edit, Copy, CheckCircle, XCircle, Archive as ArchiveIcon } from 'lucide-react';
 import { API_BASE, getImageUrlSync } from '../App';
+import ResponsiveImage from '../components/ResponsiveImage';
 const SECTION_STORAGE_KEY = 'mmh_event_sections';
 
 const VENUE_LABELS = {
@@ -120,24 +121,61 @@ export default function EventsModule(){
     seatingOnly: false,
     search: '',
   });
+  const [listError, setListError] = useState('');
 
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async () => {
     setLoading(true);
+    setListError('');
     try {
-      const res = await fetch(`${API_BASE}/events`);
-      const data = await res.json();
+      const params = new URLSearchParams({
+        limit: '500',
+        scope: 'admin',
+      });
+      if (filters.status !== 'all') {
+        params.set('status', filters.status);
+      }
+      if (filters.timeframe === 'archived') {
+        params.set('archived', '1');
+        params.set('timeframe', 'all');
+      } else if (filters.timeframe === 'all') {
+        params.set('archived', 'all');
+        params.set('timeframe', 'all');
+      } else {
+        params.set('archived', '0');
+        params.set('timeframe', filters.timeframe);
+      }
+      const res = await fetch(`${API_BASE}/events?${params.toString()}`);
+      const responseText = await res.text();
+      let data = null;
+      if (responseText) {
+        try {
+          data = JSON.parse(responseText);
+        } catch (parseErr) {
+          console.error('Failed to parse admin events payload', parseErr, responseText);
+        }
+      }
+      if (!res.ok) {
+        console.error('Admin events API returned non-200', { status: res.status, body: responseText });
+        setEvents([]);
+        setListError(data?.message || data?.error || `Server returned status ${res.status}.`);
+        return;
+      }
       if (data && data.success && Array.isArray(data.events)) {
         setEvents(data.events);
+        setListError('');
       } else {
+        console.error('Unexpected admin events payload', data);
         setEvents([]);
+        setListError(data?.message || 'Events list is temporarily unavailable.');
       }
     } catch (err) {
       console.error('Failed to fetch events', err);
       setEvents([]);
+      setListError('Events list is temporarily unavailable.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters.status, filters.timeframe]);
 
   const fetchLayouts = async () => {
     try {
@@ -151,10 +189,13 @@ export default function EventsModule(){
     }
   };
 
-  useEffect(() => { 
-    fetchEvents();
+  useEffect(() => {
     fetchLayouts();
   }, []);
+
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
 
   useEffect(() => {
     try {
@@ -203,8 +244,6 @@ export default function EventsModule(){
 
   const filteredEvents = useMemo(() => {
     if (!events.length) return [];
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
     const searchValue = filters.search.trim().toLowerCase();
     return events.filter((event) => {
       if (filters.status !== 'all' && (event.status || 'draft') !== filters.status) {
@@ -214,13 +253,6 @@ export default function EventsModule(){
         return false;
       }
       if (filters.recurringOnly && !isRecurringEvent(event)) {
-        return false;
-      }
-      const eventDate = parseEventDate(event);
-      if (filters.timeframe === 'upcoming' && eventDate && eventDate < startOfToday) {
-        return false;
-      }
-      if (filters.timeframe === 'past' && eventDate && eventDate >= startOfToday) {
         return false;
       }
       if (searchValue) {
@@ -259,10 +291,18 @@ export default function EventsModule(){
           key: venueKey,
           label: VENUE_LABELS[venueKey] || 'Events',
           published: [],
-          drafts: []
+          drafts: [],
+          archived: []
         };
       }
-      const bucket = event.status === 'published' ? 'published' : 'drafts';
+      const isArchived = Boolean(event.archived_at);
+      const eventStatus = event.status || 'draft';
+      let bucket = 'drafts';
+      if (isArchived) {
+        bucket = 'archived';
+      } else if (eventStatus === 'published') {
+        bucket = 'published';
+      }
       acc[venueKey][bucket].push(event);
       return acc;
     }, {});
@@ -270,10 +310,16 @@ export default function EventsModule(){
   }, [filteredEvents]);
 
   const sectionIds = useMemo(() => {
-    return venueGroups.flatMap((group) => [
-      `${group.key}-published`,
-      `${group.key}-drafts`,
-    ]);
+    return venueGroups.flatMap((group) => {
+      const ids = [
+        `${group.key}-published`,
+        `${group.key}-drafts`,
+      ];
+      if (group.archived.length) {
+        ids.push(`${group.key}-archived`);
+      }
+      return ids;
+    });
   }, [venueGroups]);
 
   const renderEventCard = (event) => {
@@ -281,9 +327,15 @@ export default function EventsModule(){
     const subtitle = event.title && event.title !== eventTitle ? event.title : event.notes;
     const ticketTypeLabel = TICKET_TYPE_LABELS[event.ticket_type] || 'General Admission';
     const priceCopy = formatPriceDisplay(event);
-    const statusClasses = event.status === 'published'
+    const eventStatus = event.status || 'draft';
+    const isArchived = Boolean(event.archived_at);
+    const isPublished = eventStatus === 'published';
+    const statusClasses = isPublished
       ? 'bg-green-500/15 text-green-200 border border-green-500/30'
-      : 'bg-yellow-500/15 text-yellow-200 border border-yellow-500/30';
+      : isArchived
+        ? 'bg-gray-500/15 text-gray-200 border border-gray-500/30'
+        : 'bg-yellow-500/15 text-yellow-200 border border-yellow-500/30';
+    const statusLabel = isPublished ? 'Published' : isArchived ? 'Archived' : 'Draft';
     const visibilityBadge = event.visibility === 'private'
       ? <span className="text-xs font-semibold px-2 py-1 rounded-full bg-gray-500/20 text-gray-200 border border-gray-500/30">Private</span>
       : null;
@@ -294,19 +346,22 @@ export default function EventsModule(){
       ? <span className="text-xs font-semibold px-2 py-1 rounded-full bg-purple-500/15 text-purple-200 border border-purple-500/30">Seating Enabled</span>
       : null;
     const imageSrc = getImageUrlSync(event.image_url || '');
+    const archivedAtCopy = isArchived && event.deleted_at
+      ? new Date(event.deleted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      : null;
 
     return (
       <div key={event.id} className="bg-gray-900 rounded-xl border border-gray-700 p-4 shadow-sm">
         <div className="flex flex-col gap-4 md:flex-row">
-          <div className="w-full md:w-32 flex-shrink-0">
+            <div className="w-full md:w-32 flex-shrink-0">
             <div className="w-full aspect-square bg-gray-800 rounded-lg overflow-hidden border border-gray-700">
-              <img src={imageSrc} alt={eventTitle} className="w-full h-full object-cover" />
+              <ResponsiveImage src={imageSrc} alt={eventTitle} width={256} height={256} className="w-full h-full object-cover" />
             </div>
           </div>
           <div className="flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className={`text-xs font-semibold px-2 py-1 rounded-full ${statusClasses}`}>
-                {event.status === 'published' ? 'Published' : 'Draft'}
+                {statusLabel}
               </span>
               {visibilityBadge}
               {recurrenceBadge}
@@ -358,6 +413,12 @@ export default function EventsModule(){
             <p className="text-xs uppercase text-gray-500 tracking-wide">Ticket Link</p>
             <p className="truncate">{event.ticket_url || 'Not provided'}</p>
           </div>
+          {isArchived && (
+            <div>
+              <p className="text-xs uppercase text-gray-500 tracking-wide">Archived</p>
+              <p>{archivedAtCopy || 'History only'}</p>
+            </div>
+          )}
         </div>
 
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
@@ -367,33 +428,44 @@ export default function EventsModule(){
           >
             <Copy className="h-4 w-4" /> Duplicate
           </button>
-          {event.status === 'published' ? (
+          {isArchived ? (
             <button
-              onClick={() => unpublishEvent(event)}
-              className="inline-flex items-center gap-2 px-3 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded"
+              onClick={() => restoreEvent(event)}
+              className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
             >
-              <XCircle className="h-4 w-4" /> Unpublish
+              <ArchiveIcon className="h-4 w-4" /> Restore
             </button>
           ) : (
-            <button
-              onClick={() => publishEvent(event)}
-              className="inline-flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
-            >
-              <CheckCircle className="h-4 w-4" /> Publish
-            </button>
+            <>
+              {isPublished ? (
+                <button
+                  onClick={() => unpublishEvent(event)}
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded"
+                >
+                  <XCircle className="h-4 w-4" /> Unpublish
+                </button>
+              ) : (
+                <button
+                  onClick={() => publishEvent(event)}
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
+                >
+                  <CheckCircle className="h-4 w-4" /> Publish
+                </button>
+              )}
+              <button
+                onClick={() => archiveEvent(event)}
+                className="inline-flex items-center gap-2 px-3 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded"
+              >
+                <ArchiveIcon className="h-4 w-4" /> Archive
+              </button>
+              <button
+                onClick={() => openEdit(event)}
+                className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+              >
+                <Edit className="h-4 w-4" /> Edit
+              </button>
+            </>
           )}
-          <button
-            onClick={() => archiveEvent(event)}
-            className="inline-flex items-center gap-2 px-3 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded"
-          >
-            <ArchiveIcon className="h-4 w-4" /> Archive
-          </button>
-          <button
-            onClick={() => openEdit(event)}
-            className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
-          >
-            <Edit className="h-4 w-4" /> Edit
-          </button>
         </div>
       </div>
     );
@@ -510,10 +582,21 @@ export default function EventsModule(){
 
       const method = editing ? 'PUT' : 'POST';
       const url = editing ? `${API_BASE}/events/${editing.id}` : `${API_BASE}/events`;
+      const payload = { ...formData, image_url: finalImageUrl };
+      const parsedLayoutId = payload.layout_id && payload.layout_id !== '' ? Number(payload.layout_id) : null;
+      const normalizedLayoutId = Number.isFinite(parsedLayoutId) && parsedLayoutId > 0 ? parsedLayoutId : null;
+      payload.layout_id = normalizedLayoutId;
+      if (!payload.layout_id) {
+        payload.seating_enabled = false;
+        payload.layout_version_id = null;
+      } else if (typeof payload.seating_enabled === 'undefined') {
+        payload.seating_enabled = true;
+      }
+
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData, image_url: finalImageUrl }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data && data.success) {
@@ -564,7 +647,7 @@ export default function EventsModule(){
   const archiveEvent = async (event) => {
     if (!window.confirm(`Archive "${event.artist_name || event.title || 'this event'}"?`)) return;
     try {
-      const res = await fetch(`${API_BASE}/events/${event.id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/events/${event.id}/archive`, { method: 'POST' });
       const data = await res.json();
       if (data && data.success) {
         fetchEvents();
@@ -574,6 +657,25 @@ export default function EventsModule(){
     } catch (err) {
       console.error('Archive error', err);
       alert('Failed to archive event');
+    }
+  };
+
+  const restoreEvent = async (event) => {
+    try {
+      const res = await fetch(`${API_BASE}/events/${event.id}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'draft', visibility: 'private' }),
+      });
+      const data = await res.json();
+      if (data && data.success) {
+        fetchEvents();
+      } else {
+        alert(data?.message || 'Failed to restore event');
+      }
+    } catch (err) {
+      console.error('Restore error', err);
+      alert('Failed to restore event');
     }
   };
 
@@ -648,6 +750,12 @@ export default function EventsModule(){
         </div>
       </div>
 
+      {listError && (
+        <div className="mb-6 p-4 rounded-xl border border-red-500/40 bg-red-900/30 text-red-100 text-sm">
+          {listError}
+        </div>
+      )}
+
       {events.length > 0 && (
         <div className="bg-gray-900 border border-purple-500/20 rounded-xl p-4 mb-6 space-y-3">
           <div className="flex flex-wrap items-end gap-3">
@@ -658,10 +766,9 @@ export default function EventsModule(){
                 onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
                 className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
               >
+                <option value="published">Published only</option>
+                <option value="draft">Draft only</option>
                 <option value="all">All statuses</option>
-                <option value="published">Published</option>
-                <option value="draft">Draft</option>
-                <option value="archived">Archived</option>
               </select>
             </div>
             <div className="flex flex-col">
@@ -674,6 +781,7 @@ export default function EventsModule(){
                 <option value="upcoming">Upcoming only</option>
                 <option value="past">Past events</option>
                 <option value="all">All dates</option>
+                <option value="archived">Archived</option>
               </select>
             </div>
             <label className="inline-flex items-center gap-2 text-sm text-gray-300">
@@ -706,6 +814,15 @@ export default function EventsModule(){
               className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
             />
           </div>
+          <p className="text-xs text-gray-500">
+            Upcoming shows load by default. Switch timeframe to “Past” for recent history or “Archived” to manage cleanups.
+          </p>
+        </div>
+      )}
+
+      {filters.timeframe === 'archived' && (
+        <div className="mb-6 p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-sm text-amber-100">
+          Archived events are snapshots for record keeping. Restore to edit or duplicate for new bookings.
         </div>
       )}
 
@@ -740,21 +857,37 @@ export default function EventsModule(){
             </div>
           )}
           <div className="space-y-10">
-            {venueGroups.map((group) => (
-              <section key={group.key} className="bg-gray-800 rounded-2xl border border-purple-500/20 p-6">
-                <div className="flex items-center justify-between flex-wrap gap-4">
-                  <div>
-                    <h3 className="text-xl font-bold text-white">{group.label}</h3>
-                    <p className="text-sm text-gray-400">Organized by publish state and recurring status.</p>
+            {venueGroups.map((group) => {
+              const viewingArchivedOnly = filters.timeframe === 'archived';
+              const includeArchivedInline = filters.timeframe === 'all';
+              const groupTotal = viewingArchivedOnly
+                ? group.archived.length
+                : includeArchivedInline
+                  ? group.published.length + group.drafts.length + group.archived.length
+                  : group.published.length + group.drafts.length;
+              return (
+                <section key={group.key} className="bg-gray-800 rounded-2xl border border-purple-500/20 p-6">
+                  <div className="flex items-center justify-between flex-wrap gap-4">
+                    <div>
+                      <h3 className="text-xl font-bold text-white">{group.label}</h3>
+                      <p className="text-sm text-gray-400">Organized by publish state and recurring status.</p>
+                    </div>
+                    <span className="text-sm text-gray-400">
+                      {groupTotal} total
+                    </span>
                   </div>
-                  <span className="text-sm text-gray-400">
-                    {group.published.length + group.drafts.length} total
-                  </span>
-                </div>
-                {renderEventSection('Published Schedule', group.published, `${group.key}-published`)}
-                {renderEventSection('Draft & Private', group.drafts, `${group.key}-drafts`)}
-              </section>
-            ))}
+                  {viewingArchivedOnly ? (
+                    renderEventSection('Archived / Historical', group.archived, `${group.key}-archived`)
+                  ) : (
+                    <>
+                      {renderEventSection('Published Schedule', group.published, `${group.key}-published`)}
+                      {renderEventSection('Draft & Private', group.drafts, `${group.key}-drafts`)}
+                      {includeArchivedInline && group.archived.length > 0 && renderEventSection('Archived / Historical', group.archived, `${group.key}-archived`)}
+                    </>
+                  )}
+                </section>
+              );
+            })}
           </div>
         </>
       )}
@@ -833,11 +966,12 @@ export default function EventsModule(){
                   {/* Image Preview */}
                   {(imagePreview || formData.image_url) && (
                     <div className="relative inline-block">
-                      <img 
+                      <ResponsiveImage 
                         src={imagePreview || getImageUrlSync(formData.image_url)} 
                         alt="Event preview"
+                        width={256}
+                        height={256}
                         className="w-32 h-32 object-cover rounded-lg border-2 border-gray-600"
-                        onError={(e) => { e.target.src = '/android-chrome-192x192.png'; }}
                       />
                       <button
                         type="button"

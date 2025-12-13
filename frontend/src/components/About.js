@@ -5,7 +5,7 @@ import { API_BASE } from '../App';
 
 // TODO: Confirm actual capacity; using neutral phrasing for now.
 const features = [
-  { icon: Music, title: 'Curated Programming', description: 'Shows focus on Carolina beach music, shag, country, and community dance nights.' },
+  { icon: Music, title: 'Curated Programming', description: 'Shows focus on Carolina beach music, shag, Americana, classic country, and community dance nights.' },
   { icon: Users, title: 'Intimate Venue Atmosphere', description: 'Room layout keeps performers close to the crowd for easy interaction.' },
   { icon: Star, title: 'Premium Sound', description: 'Engineered audio and lighting for both live bands and DJs.' },
   { icon: Heart, title: 'Local First', description: 'We prioritize regional artists, dance instructors, and community partners.' }
@@ -28,7 +28,7 @@ const contacts = [
 
 export default function About(){
   const [aboutTitle, setAboutTitle] = useState('About Midway Music Hall');
-  const [aboutDescription, setAboutDescription] = useState('Midway Music Hall is an intimate live music venue in Winston-Salem, North Carolina. We focus on reliable sound, curated dance nights, and a welcoming community experience.\n\nJoin us for weekly shows, private rentals, and community gatherings that celebrate Carolina beach music, shag culture, and country roots.');
+  const [aboutDescription, setAboutDescription] = useState('Midway Music Hall is an intimate live music venue in Winston-Salem, North Carolina. We focus on reliable sound, curated dance nights, and a welcoming community experience.\n\nJoin us for weekly shows, private rentals, and community gatherings that celebrate Carolina beach music, shag culture, Americana roots, and classic country with the occasional rock feature.');
 
   useEffect(() => {
     fetch(`${API_BASE}/settings`)

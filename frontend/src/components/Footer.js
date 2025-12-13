@@ -5,7 +5,7 @@ import { API_BASE } from '../App';
 
 const business = {
   name: 'Midway Music Hall',
-  address: '11141 Old US Hwy 52 W-S NC 27107',
+  address: '11141 Old US Hwy 52, Winston-Salem, NC 27107',
   phone: '(336) 793-4218',
   email: 'midwayeventcenter@gmail.com',
   boxOffice: 'Contact for event information'
@@ -17,9 +17,9 @@ const scrollToSection = (id) => {
 };
 
 export default function Footer({ onAdminClick, onNavigate }){
-  const [facebookUrl, setFacebookUrl] = useState('https://facebook.com/midwaymusichall');
-  const [instagramUrl, setInstagramUrl] = useState('https://instagram.com/midwaymusichal');
-  const [twitterUrl, setTwitterUrl] = useState('https://twitter.com/midwaymusichal');
+  const [facebookUrl, setFacebookUrl] = useState('https://www.facebook.com/midwaymusichall');
+  const [instagramUrl, setInstagramUrl] = useState('https://www.instagram.com/midwaymusichall');
+  const [twitterUrl, setTwitterUrl] = useState('https://twitter.com/midwaymusichall');
 
   useEffect(() => {
     fetch(`${API_BASE}/settings`)
@@ -61,6 +61,7 @@ export default function Footer({ onAdminClick, onNavigate }){
               <button onClick={() => scrollToSection('lessons')} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">Lessons</button>
               <button onClick={() => scrollToSection('beach-series')} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">Beach Series</button>
               <a href="/thegatheringplace" className="text-sm text-gray-300 hover:text-purple-400 transition text-left">The Gathering Place</a>
+              <button onClick={() => onNavigate && onNavigate('archive')} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">Past Events Archive</button>
               <button onClick={() => onNavigate && onNavigate('privacy')} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">Privacy Policy</button>
               <button onClick={() => onNavigate && onNavigate('terms')} className="text-sm text-gray-300 hover:text-purple-400 transition text-left">Terms of Service</button>
             </div>
@@ -68,12 +69,15 @@ export default function Footer({ onAdminClick, onNavigate }){
 
           <div>
             <h4 className="text-white font-bold mb-3">Box Office & Reservations</h4>
-            <div className="text-sm text-gray-400 space-y-1">
-              <p>Seat reservations are request-only. Staff will confirm by phone.</p>
+            <div className="text-sm text-gray-400 space-y-2">
+              <p>Seat reservations are request-only with a 24-hour hold window. Staff will call or text to confirm every request.</p>
               <p className="flex flex-col">
                 <span className="text-gray-300 font-medium">Donna Cheek · Venue Manager</span>
                 <a href="tel:+13367934218" className="text-purple-300 hover:text-white transition">336-793-4218</a>
                 <a href="mailto:midwayeventcenter@gmail.com" className="text-purple-300 hover:text-white transition">midwayeventcenter@gmail.com</a>
+              </p>
+              <p className="text-xs text-gray-500">
+                Voicemail is monitored daily. Leave your name, party size, and event date for the quickest callback.
               </p>
             </div>
           </div>
