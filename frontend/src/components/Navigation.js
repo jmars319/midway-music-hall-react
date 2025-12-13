@@ -1,27 +1,64 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, X, Music } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import { API_BASE, SERVER_BASE } from '../App';
 
-// Navigation: top site navigation and admin access button
-export default function Navigation({ onAdminClick }) {
+// Navigation: top site navigation with smooth scrolling links
+export default function Navigation() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [logo, setLogo] = useState('/logo.png');
+  const [currentPath, setCurrentPath] = useState('/');
+  const SECTION_MAP = {
+    home: 'home',
+    schedule: 'schedule',
+    recurring: 'recurring-events',
+    'recurring-events': 'recurring-events',
+    lessons: 'lessons',
+    'beach-series': 'beach-series',
+    about: 'about',
+    suggest: 'suggest',
+  };
 
   useEffect(() => {
     fetch(`${API_BASE}/settings`)
       .then(res => res.json())
       .then(data => {
-        if (data.success && data.settings.site_logo) {
+        if (data.success && data.settings?.site_logo) {
           setLogo(`${SERVER_BASE}${data.settings.site_logo}`);
         }
       })
       .catch(() => {});
+
+    if (typeof window !== 'undefined') {
+      setCurrentPath(window.location.pathname || '/');
+    }
   }, []);
 
+  const findTargetElement = (id) => {
+    if (typeof document === 'undefined') return null;
+    const normalized = SECTION_MAP[id] || id;
+    return document.getElementById(normalized) || document.querySelector(`[data-nav-target="${normalized}"]`);
+  };
+
   const scrollToSection = (id) => {
+    if (!id) return false;
+    const el = findTargetElement(id);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return true;
+    }
+    return false;
+  };
+
+  const isGatheringPlacePage = currentPath.startsWith('/thegatheringplace');
+
+  const handleNavClick = (targetId) => {
     setMobileOpen(false);
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (scrollToSection(targetId)) return;
+    const normalized = SECTION_MAP[targetId] || targetId;
+    if (typeof window !== 'undefined') {
+      const hash = normalized === 'home' ? '' : `#${normalized}`;
+      window.location.href = `/${hash}`;
+    }
   };
 
   return (
@@ -41,9 +78,14 @@ export default function Navigation({ onAdminClick }) {
 
           {/* Desktop links */}
           <div className="hidden md:flex items-center space-x-6">
-            <button onClick={() => scrollToSection('schedule')} className="text-gray-300 hover:text-purple-400 transition font-medium">Schedule</button>
-            <button onClick={() => scrollToSection('about')} className="text-gray-300 hover:text-purple-400 transition font-medium">About</button>
-            <button onClick={() => scrollToSection('suggest')} className="text-gray-300 hover:text-purple-400 transition font-medium">Suggest Artist</button>
+            <button onClick={() => handleNavClick('schedule')} className="text-gray-300 hover:text-purple-400 transition font-medium">Schedule</button>
+            <button onClick={() => handleNavClick('recurring')} className="text-gray-300 hover:text-purple-400 transition font-medium">Recurring</button>
+            <button onClick={() => handleNavClick('lessons')} className="text-gray-300 hover:text-purple-400 transition font-medium">Lessons</button>
+            <button onClick={() => handleNavClick('beach-series')} className="text-gray-300 hover:text-purple-400 transition font-medium">Beach Series</button>
+            <a href="/thegatheringplace" className="text-gray-300 hover:text-purple-400 transition font-medium">
+              The Gathering Place
+            </a>
+            <button onClick={() => handleNavClick('suggest')} className="text-gray-300 hover:text-purple-400 transition font-medium">Suggest Artist</button>
           </div>
 
           {/* Mobile menu button */}
@@ -60,15 +102,21 @@ export default function Navigation({ onAdminClick }) {
       </div>
 
       {/* Mobile dropdown */}
-      {mobileOpen && (
-        <div className="md:hidden bg-black border-t border-purple-500/30">
-          <div className="px-4 pt-4 pb-6 space-y-3">
-            <button onClick={() => scrollToSection('schedule')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Schedule</button>
-            <button onClick={() => scrollToSection('about')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">About</button>
-            <button onClick={() => scrollToSection('suggest')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Suggest Artist</button>
-          </div>
-        </div>
-      )}
+          {mobileOpen && (
+            <div className="md:hidden bg-black border-t border-purple-500/30">
+              <div className="px-4 pt-4 pb-6 space-y-3">
+                <button onClick={() => handleNavClick('schedule')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Schedule</button>
+                <button onClick={() => handleNavClick('recurring')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Recurring</button>
+                <button onClick={() => handleNavClick('lessons')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Lessons</button>
+                <button onClick={() => handleNavClick('beach-series')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Beach Series</button>
+                <a href="/thegatheringplace" className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium" onClick={() => setMobileOpen(false)}>
+                  The Gathering Place
+                </a>
+                <button onClick={() => handleNavClick('about')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">About</button>
+                <button onClick={() => handleNavClick('suggest')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Suggest Artist</button>
+              </div>
+            </div>
+          )}
     </nav>
   );
 }

@@ -70,7 +70,7 @@ export default function ArtistSuggestion() {
       }
     } catch (err) {
       console.error(err);
-      setError('Network error — please try again');
+      setError('Network error - please try again');
     } finally {
       setSubmitting(false);
     }

@@ -28,6 +28,12 @@ const formatTime = (dateInput) => {
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 };
 
+const canRequestSeatsForEvent = (event = {}) => {
+  const seatingEnabled = Boolean(event && (event.seating_enabled === 1 || event.seating_enabled === true));
+  const hasLayout = Boolean(event && (event.layout_id || event.layout_version_id));
+  return seatingEnabled && hasLayout;
+};
+
 export default function Schedule({ events = [], loading = false }){
   const [selectedEvent, setSelectedEvent] = useState(null);
 
@@ -83,8 +89,15 @@ export default function Schedule({ events = [], loading = false }){
 
                   <div className="flex-1">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xl font-semibold">{event.artist_name || event.title || event.name || 'Untitled'}</h3>
-                      <span className="text-sm text-gray-400">{event.genre || event.venue_section || ''}</span>
+                      <div>
+                        <h3 className="text-xl font-semibold">{event.artist_name || event.title || event.name || 'Untitled'}</h3>
+                        <span className="text-sm text-gray-400">{event.genre || event.venue_section || ''}</span>
+                      </div>
+                      {event.isBeachSeries && (
+                        <span className="text-xs px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-200 uppercase tracking-wide">
+                          Carolina Beach Music Series
+                        </span>
+                      )}
                     </div>
 
                     <p className="text-gray-300 mt-2 text-sm">{event.description || event.notes || ''}</p>
@@ -98,7 +111,14 @@ export default function Schedule({ events = [], loading = false }){
 
                     <div className="mt-6 flex items-center justify-between">
                       <div className="text-sm text-gray-400">{event.age_restriction || 'All Ages'}</div>
-                      <button onClick={() => handleRequestSeats(event)} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition">Request Seats</button>
+                      {canRequestSeatsForEvent(event) && (
+                        <button
+                          onClick={() => handleRequestSeats(event)}
+                          className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition"
+                        >
+                          Request Seats
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
