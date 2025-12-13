@@ -179,22 +179,24 @@ export default function Hero({ variant = 'main', ctaTarget }) {
       )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 relative z-10">
-        <div className="text-center">
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white mb-6" style={textShadowStyle}>
-            {heroTitle}
-          </h1>
+        <div className="flex justify-center">
+          <div className="w-full max-w-3xl text-center bg-black/40 backdrop-blur-md rounded-3xl px-6 sm:px-10 py-10 shadow-2xl ring-1 ring-white/10">
+            <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white mb-4 sm:mb-6" style={textShadowStyle}>
+              {heroTitle}
+            </h1>
 
-          <p className="mt-4 text-xl text-gray-200 max-w-3xl mx-auto" style={textShadowStyle}>
-            {heroSubtitle}
-          </p>
+            <p className="mt-3 text-lg sm:text-xl text-gray-100" style={textShadowStyle}>
+              {heroSubtitle}
+            </p>
 
-          <div className="mt-8 flex justify-center">
-            <button
-              onClick={() => handleScroll(resolvedCtaTarget)}
-              className={`px-6 py-3 ${config.theme.button} text-white rounded-lg font-semibold transition`}
-            >
-              {config.ctaLabel}
-            </button>
+            <div className="mt-8 flex justify-center">
+              <button
+                onClick={() => handleScroll(resolvedCtaTarget)}
+                className={`px-6 py-3 ${config.theme.button} text-white rounded-lg font-semibold transition shadow-lg shadow-black/30`}
+              >
+                {config.ctaLabel}
+              </button>
+            </div>
           </div>
         </div>
 

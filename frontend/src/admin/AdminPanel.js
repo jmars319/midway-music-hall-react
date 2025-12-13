@@ -9,7 +9,7 @@ import {
   MediaManager,
   SettingsModule,
 } from './index';
-import { SERVER_BASE } from '../App';
+import { API_BASE, SERVER_BASE } from '../App';
 import ResponsiveImage from '../components/ResponsiveImage';
 
 const MENU = [
@@ -26,6 +26,15 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
   const [active, setActive] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
   const [logo, setLogo] = useState('/logo.png');
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState({ type: '', text: '' });
+  const [passwordForm, setPasswordForm] = useState({
+    current: '',
+    next: '',
+    confirm: ''
+  });
   const sidebarAvatar = '/apple-touch-icon.png';
   const resolveDisplayName = () => {
     if (!user) return 'Admin';
@@ -55,6 +64,42 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
 
   const ActiveComponent = (MENU.find(m => m.key === active) || MENU[0]).comp;
   const displayName = resolveDisplayName();
+  const closePasswordModal = () => {
+    setShowPasswordModal(false);
+    setPasswordVisible(false);
+    setPasswordMessage({ type: '', text: '' });
+    setPasswordForm({ current: '', next: '', confirm: '' });
+  };
+
+  const handlePasswordSubmit = async (evt) => {
+    evt.preventDefault();
+    if (passwordSaving) return;
+    setPasswordSaving(true);
+    setPasswordMessage({ type: '', text: '' });
+    try {
+      const res = await fetch(`${API_BASE}/admin/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          current_password: passwordForm.current,
+          new_password: passwordForm.next,
+          confirm_password: passwordForm.confirm,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || 'Failed to change password');
+      }
+      setPasswordMessage({ type: 'success', text: data.message || 'Password updated successfully.' });
+      setPasswordForm({ current: '', next: '', confirm: '' });
+      setPasswordVisible(false);
+    } catch (err) {
+      setPasswordMessage({ type: 'error', text: err.message || 'Failed to change password.' });
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
 
   return (
     <div className="h-screen flex bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
@@ -112,6 +157,13 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
                 </button>
 
                 <button
+                  onClick={() => setShowPasswordModal(true)}
+                  className={`w-full px-3 py-2 text-sm rounded ${collapsed ? 'flex justify-center' : 'text-left'} bg-purple-600/90 text-white hover:bg-purple-700`}
+                >
+                  {!collapsed ? 'Change password' : '●●●'}
+                </button>
+
+                <button
                   onClick={onLogout}
                   className={`w-full px-3 py-2 text-sm rounded ${collapsed ? 'flex justify-center' : 'text-left'} bg-red-600 text-white hover:bg-red-700`}
                 >
@@ -155,6 +207,94 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
           </section>
         </div>
       </main>
+
+      {showPasswordModal && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center px-4 py-6">
+          <div className="bg-white dark:bg-gray-950 rounded-2xl shadow-2xl border border-purple-500/30 max-w-lg w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-semibold">Change Password</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Update the credentials for {displayName}.</p>
+              </div>
+              <button
+                aria-label="Close change password"
+                onClick={closePasswordModal}
+                className="text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form className="space-y-4" onSubmit={handlePasswordSubmit}>
+              {passwordMessage.text && (
+                <div className={`p-3 rounded-md text-sm ${passwordMessage.type === 'success' ? 'bg-green-500/15 border border-green-500/40 text-green-200' : 'bg-red-500/15 border border-red-500/40 text-red-200'}`}>
+                  {passwordMessage.text}
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium mb-1">Current password</label>
+                <input
+                  type={passwordVisible ? 'text' : 'password'}
+                  value={passwordForm.current}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, current: e.target.value }))}
+                  className="w-full px-3 py-2 rounded border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900"
+                  required
+                  autoComplete="current-password"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">New password</label>
+                <input
+                  type={passwordVisible ? 'text' : 'password'}
+                  value={passwordForm.next}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, next: e.target.value }))}
+                  className="w-full px-3 py-2 rounded border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900"
+                  required
+                  autoComplete="new-password"
+                  minLength={10}
+                />
+                <p className="text-xs text-gray-500 mt-1">Minimum 10 characters. Use a mix of letters, numbers, and symbols.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Confirm new password</label>
+                <input
+                  type={passwordVisible ? 'text' : 'password'}
+                  value={passwordForm.confirm}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirm: e.target.value }))}
+                  className="w-full px-3 py-2 rounded border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900"
+                  required
+                  autoComplete="new-password"
+                  minLength={10}
+                />
+              </div>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={passwordVisible}
+                  onChange={(e) => setPasswordVisible(e.target.checked)}
+                />
+                Show passwords
+              </label>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closePasswordModal}
+                  className="px-4 py-2 rounded border border-gray-300 dark:border-gray-700 text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={passwordSaving}
+                  className="px-4 py-2 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-60"
+                >
+                  {passwordSaving ? 'Saving…' : 'Update password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

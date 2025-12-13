@@ -9,6 +9,7 @@ require __DIR__ . '/lib/Response.php';
 require __DIR__ . '/lib/Router.php';
 require __DIR__ . '/lib/Request.php';
 require __DIR__ . '/lib/ImageUtils.php';
+require __DIR__ . '/lib/Emailer.php';
 
 Env::load(__DIR__ . '/.env');
 

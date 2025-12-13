@@ -3,6 +3,7 @@
 require __DIR__ . '/bootstrap.php';
 
 use Midway\Backend\Database;
+use Midway\Backend\Emailer;
 use Midway\Backend\Env;
 use Midway\Backend\Request;
 use Midway\Backend\Response;
@@ -434,6 +435,363 @@ function compute_hold_expiration(DateTimeImmutable $now): DateTimeImmutable
     return $now->modify('+24 hours');
 }
 
+function format_datetime_eastern(?DateTimeInterface $dateTime): string
+{
+    if (!$dateTime) {
+        return 'TBD';
+    }
+    return $dateTime->setTimezone(new DateTimeZone('America/New_York'))->format('l, F j, Y g:i A T');
+}
+
+function format_event_datetime_for_email(array $event): string
+{
+    $start = resolve_event_start_datetime($event);
+    if ($start instanceof DateTimeInterface) {
+        return format_datetime_eastern($start);
+    }
+    if (!empty($event['event_date'])) {
+        $time = trim((string) ($event['event_time'] ?? ''));
+        return trim($event['event_date'] . ' ' . $time);
+    }
+    return 'TBD';
+}
+
+function decode_seat_list($seats): array
+{
+    if (is_array($seats)) {
+        return $seats;
+    }
+    if (is_string($seats)) {
+        $decoded = json_decode($seats, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+    return [];
+}
+
+function notify_seat_request_emails(array $seatRequest, array $event): void
+{
+    try {
+        $emailer = Emailer::instance();
+    } catch (Throwable $error) {
+        error_log('[email] Failed to initialize emailer for seat request: ' . $error->getMessage());
+        return;
+    }
+
+    $eventTitle = trim((string) ($event['title'] ?? ''));
+    if ($eventTitle === '') {
+        $eventTitle = trim((string) ($event['artist_name'] ?? 'Midway Music Hall Event'));
+    }
+    if ($eventTitle === '') {
+        $eventTitle = 'Midway Music Hall Event';
+    }
+    $timestamp = format_datetime_eastern(now_eastern());
+    $eventDate = format_event_datetime_for_email($event);
+    $seatList = decode_seat_list($seatRequest['selected_seats'] ?? []);
+    $seatCount = count($seatList);
+    $seatSummary = $seatList ? implode(', ', $seatList) : 'None provided';
+    $notes = trim((string) ($seatRequest['special_requests'] ?? ''));
+    $notes = $notes !== '' ? $notes : 'None provided';
+    $holdExpiresLine = '';
+    if (!empty($seatRequest['hold_expires_at'])) {
+        try {
+            $holdDate = new DateTimeImmutable($seatRequest['hold_expires_at'], new DateTimeZone('America/New_York'));
+            $holdExpiresLine = "\nHold Expires (ET): " . format_datetime_eastern($holdDate);
+        } catch (Throwable $e) {
+            $holdExpiresLine = '';
+        }
+    }
+    $requestId = $seatRequest['id'] ?? 'n/a';
+    $customerEmail = isset($seatRequest['customer_email']) ? trim((string) $seatRequest['customer_email']) : '';
+    if ($customerEmail && !filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) {
+        $customerEmail = '';
+    }
+    $customerPhone = trim((string) ($seatRequest['customer_phone'] ?? ''));
+    $customerName = trim((string) ($seatRequest['customer_name'] ?? ''));
+    $customerNameLine = $customerName !== '' ? $customerName : 'Unknown';
+    $customerEmailLine = $customerEmail !== '' ? $customerEmail : 'Not provided';
+    $customerPhoneLine = $customerPhone !== '' ? $customerPhone : 'Not provided';
+    $staffBody = <<<TEXT
+New seat request received.
+
+Timestamp (ET): {$timestamp}
+Seat Request ID: {$requestId}
+Event: {$eventTitle}
+Event Date/Time (ET): {$eventDate}{$holdExpiresLine}
+
+Customer Name: {$customerNameLine}
+Customer Email: {$customerEmailLine}
+Customer Phone: {$customerPhoneLine}
+
+Selected Seats ({$seatCount}):
+{$seatSummary}
+
+Notes / Special Requests:
+{$notes}
+TEXT;
+
+    $staffSubject = 'New Seat Request - ' . $eventTitle;
+    $replyTo = $customerEmail !== '' ? $customerEmail : $emailer->staffRecipient();
+
+    try {
+        $emailer->send([
+            'to' => $emailer->staffRecipient(),
+            'from' => $emailer->notificationsSender(),
+            'subject' => $staffSubject,
+            'body' => $staffBody,
+            'reply_to' => $replyTo,
+        ]);
+    } catch (Throwable $sendError) {
+        error_log('[email] Seat request staff notification failed: ' . $sendError->getMessage());
+    }
+
+    if ($customerEmail === '') {
+        return;
+    }
+
+    $customerGreeting = $customerName !== '' ? $customerName : 'there';
+    $customerBody = <<<TEXT
+Hi {$customerGreeting},
+
+Thanks for reaching out to Midway Music Hall. We received your seat request for "{$eventTitle}" on {$timestamp}.
+
+Request summary:
+- Event: {$eventTitle}
+- Event Date/Time (ET): {$eventDate}
+- Seats Requested ({$seatCount}): {$seatSummary}
+- Notes: {$notes}
+- Phone: {$customerPhoneLine}
+
+Our team will review your request and will follow up with availability and next steps. If you need to update your request, just reply to this email or contact us at {$emailer->staffRecipient()}.
+
+Thank you,
+Midway Music Hall
+TEXT;
+
+    try {
+        $emailer->send([
+            'to' => $customerEmail,
+            'from' => $emailer->notificationsSender(),
+            'subject' => 'Seat Request Received - ' . $eventTitle,
+            'body' => $customerBody,
+            'reply_to' => $emailer->staffRecipient(),
+        ]);
+    } catch (Throwable $sendError) {
+        error_log('[email] Seat request customer confirmation failed: ' . $sendError->getMessage());
+    }
+}
+
+function stringify_contact_field($value): string
+{
+    if (is_array($value)) {
+        $flattened = array_filter(array_map(function ($item) {
+            return is_scalar($item) ? trim((string) $item) : '';
+        }, $value), function ($item) {
+            return $item !== '';
+        });
+        return $flattened ? implode(', ', $flattened) : '';
+    }
+    if (is_string($value) || is_numeric($value)) {
+        return trim((string) $value);
+    }
+    return '';
+}
+
+function notify_artist_suggestion_emails(int $suggestionId, string $artistName, array $contact, string $notes, string $submissionType): void
+{
+    try {
+        $emailer = Emailer::instance();
+    } catch (Throwable $error) {
+        error_log('[email] Failed to initialize emailer for artist suggestion: ' . $error->getMessage());
+        return;
+    }
+
+    $timestamp = format_datetime_eastern(now_eastern());
+    $contactName = trim((string) ($contact['name'] ?? ''));
+    $contactEmail = stringify_contact_field($contact['email'] ?? $contact['contact_email'] ?? '');
+    if ($contactEmail && !filter_var($contactEmail, FILTER_VALIDATE_EMAIL)) {
+        $contactEmail = '';
+    }
+    $contactPhone = stringify_contact_field($contact['phone'] ?? $contact['contact_phone'] ?? '');
+    $genre = stringify_contact_field($contact['genre'] ?? '');
+    $musicLinks = stringify_contact_field($contact['music_links'] ?? ($contact['links'] ?? ''));
+    $social = stringify_contact_field($contact['social_media'] ?? '');
+    $raw = stringify_contact_field($contact['raw'] ?? '');
+    $notesText = trim($notes) !== '' ? trim($notes) : 'None provided';
+    $submissionLabel = ucfirst(str_replace('_', ' ', trim($submissionType))) ?: 'General';
+
+    $staffBodySections = [
+        "New artist suggestion submitted.",
+        "",
+        "Timestamp (ET): {$timestamp}",
+        "Suggestion ID: {$suggestionId}",
+        "Artist: {$artistName}",
+        "Submission Type: {$submissionLabel}",
+        "Submitter Name: " . ($contactName !== '' ? $contactName : 'Unknown'),
+        "Submitter Email: " . ($contactEmail !== '' ? $contactEmail : 'Not provided'),
+        "Submitter Phone: " . ($contactPhone !== '' ? $contactPhone : 'Not provided'),
+        "Genre: " . ($genre !== '' ? $genre : 'Not provided'),
+    ];
+    if ($musicLinks !== '') {
+        $staffBodySections[] = 'Music Links: ' . $musicLinks;
+    }
+    if ($social !== '') {
+        $staffBodySections[] = 'Social Media: ' . $social;
+    }
+    if ($raw !== '') {
+        $staffBodySections[] = 'Original Contact Entry: ' . $raw;
+    }
+    $staffBodySections[] = '';
+    $staffBodySections[] = "Notes / Message:";
+    $staffBodySections[] = $notesText;
+    $staffBody = implode("\n", $staffBodySections);
+
+    $replyTo = $contactEmail !== '' ? $contactEmail : $emailer->staffRecipient();
+    try {
+        $emailer->send([
+            'to' => $emailer->staffRecipient(),
+            'from' => $emailer->notificationsSender(),
+            'subject' => 'New Artist Suggestion - ' . $artistName,
+            'body' => $staffBody,
+            'reply_to' => $replyTo,
+        ]);
+    } catch (Throwable $sendError) {
+        error_log('[email] Artist suggestion staff notification failed: ' . $sendError->getMessage());
+    }
+
+    if ($contactEmail === '') {
+        return;
+    }
+
+    $greeting = $contactName !== '' ? $contactName : 'there';
+    $customerBodyLines = [
+        "Hi {$greeting},",
+        "",
+        "Thanks for sharing \"{$artistName}\" with Midway Music Hall. We received your suggestion on {$timestamp}.",
+        "",
+        "Submission summary:",
+        "- Artist: {$artistName}",
+        "- Submission Type: {$submissionLabel}",
+        "- Notes: {$notesText}",
+    ];
+    if ($musicLinks !== '') {
+        $customerBodyLines[] = "- Music Links: {$musicLinks}";
+    }
+    if ($social !== '') {
+        $customerBodyLines[] = "- Social Media: {$social}";
+    }
+    $customerBodyLines[] = "";
+    $customerBodyLines[] = "Our programming team reviews every submission. We'll reach out if we have availability or questions. Reply to this email any time to add more info.";
+    $customerBodyLines[] = "";
+    $customerBodyLines[] = "Thank you,";
+    $customerBodyLines[] = "Midway Music Hall";
+    $customerBody = implode("\n", $customerBodyLines);
+
+    try {
+        $emailer->send([
+            'to' => $contactEmail,
+            'from' => $emailer->notificationsSender(),
+            'subject' => 'Artist Suggestion Received - ' . $artistName,
+            'body' => $customerBody,
+            'reply_to' => $emailer->staffRecipient(),
+        ]);
+    } catch (Throwable $sendError) {
+        error_log('[email] Artist suggestion customer confirmation failed: ' . $sendError->getMessage());
+    }
+}
+
+function redact_sensitive_values($value)
+{
+    if (is_array($value)) {
+        $redacted = [];
+        foreach ($value as $key => $item) {
+            if (is_string($key) && is_sensitive_key($key)) {
+                $redacted[$key] = '[redacted]';
+                continue;
+            }
+            $redacted[$key] = redact_sensitive_values($item);
+        }
+        return $redacted;
+    }
+    return $value;
+}
+
+function is_sensitive_key(string $key): bool
+{
+    $lower = strtolower($key);
+    $keywords = ['password', 'pass', 'token', 'secret', 'authorization', 'api_key', 'apikey', 'auth', 'key', 'session'];
+    foreach ($keywords as $needle) {
+        if (str_contains($lower, $needle)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function notify_unhandled_error(Throwable $error, Request $request): void
+{
+    try {
+        $emailer = Emailer::instance();
+    } catch (Throwable $initError) {
+        error_log('[email] Failed to initialize emailer for alert: ' . $initError->getMessage());
+        $emailer = null;
+    }
+
+    $timestamp = format_datetime_eastern(now_eastern());
+    $method = $request->method ?? ($_SERVER['REQUEST_METHOD'] ?? 'CLI');
+    $path = $request->path ?? (parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/');
+    $queryString = $request->query ? json_encode($request->query, JSON_PRETTY_PRINT) : '{}';
+    $payload = $request->json ?? $request->body ?? [];
+    $redactedPayload = $payload ? json_encode(redact_sensitive_values($payload), JSON_PRETTY_PRINT) : '{}';
+    $rawBody = $request->raw();
+    if (strlen($rawBody) > 800) {
+        $rawBody = substr($rawBody, 0, 800) . '...';
+    }
+    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $host = $_SERVER['HTTP_HOST'] ?? 'unknown';
+
+    $bodyParts = [
+        "A backend error occurred.",
+        "",
+        "Timestamp (ET): {$timestamp}",
+        "Host: {$host}",
+        "Request: {$method} {$path}",
+        "IP: {$ip}",
+        "User Agent: {$userAgent}",
+        "",
+        "Query Params:",
+        $queryString,
+        "",
+        "Payload (redacted):",
+        $redactedPayload,
+    ];
+    if ($rawBody !== '') {
+        $bodyParts[] = '';
+        $bodyParts[] = 'Raw Body Preview:';
+        $bodyParts[] = $rawBody;
+    }
+    $bodyParts[] = '';
+    $bodyParts[] = 'Error Message: ' . $error->getMessage();
+    $bodyParts[] = 'Error Code: ' . $error->getCode();
+    $bodyParts[] = '';
+    $bodyParts[] = 'Stack Trace:';
+    $bodyParts[] = $error->getTraceAsString();
+
+    if ($emailer) {
+        $subject = '[MMH] Backend Error - ' . $method . ' ' . $path;
+        try {
+            $emailer->send([
+                'to' => $emailer->alertsRecipient(),
+                'from' => $emailer->alertsSender(),
+                'subject' => $subject,
+                'body' => implode("\n", $bodyParts),
+                'reply_to' => $emailer->alertsRecipient(),
+            ]);
+        } catch (Throwable $sendError) {
+            error_log('[email] Failed to send backend error alert: ' . $sendError->getMessage());
+        }
+    }
+}
 function seat_request_status_aliases(): array
 {
     return [
@@ -666,7 +1024,7 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
     }
     $customerPhoneNormalized = normalize_phone_number($contactPhone) ?: null;
 
-    $eventStmt = $pdo->prepare('SELECT id, layout_id, layout_version_id, seating_enabled FROM events WHERE id = ? LIMIT 1');
+    $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone FROM events WHERE id = ? LIMIT 1');
     $eventStmt->execute([$eventId]);
     $event = $eventStmt->fetch();
     if (!$event) {
@@ -732,6 +1090,11 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
     $createdStmt = $pdo->prepare('SELECT * FROM seat_requests WHERE id = ? LIMIT 1');
     $createdStmt->execute([$id]);
     $created = $createdStmt->fetch() ?: ['id' => $id];
+    try {
+        notify_seat_request_emails($created, $event);
+    } catch (Throwable $notifyError) {
+        error_log('[email] Unable to process seat request notifications: ' . $notifyError->getMessage());
+    }
     return [
         'seat_request' => $created,
         'hold_expires_at' => $holdDate ? $holdDate->format(DateTimeInterface::ATOM) : null,
@@ -896,6 +1259,29 @@ function parse_contact_field($contact)
     return null;
 }
 
+function ensure_admins_table_exists(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+    try {
+        Database::run('SELECT 1 FROM admins LIMIT 1');
+    } catch (Throwable $e) {
+        Database::run(
+            'CREATE TABLE IF NOT EXISTS admins (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(100) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                email VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
+    }
+}
+
 // Routes
 $router->add('GET', '/api/health', function () {
     Response::success(['status' => 'ok']);
@@ -918,7 +1304,22 @@ $router->add('POST', '/api/login', function (Request $request) {
     $email = trim((string) ($payload['email'] ?? ''));
     $password = (string) ($payload['password'] ?? '');
 
-    if ($email === 'admin' && $password === 'admin123') {
+    ensure_admins_table_exists();
+    $stmt = Database::run('SELECT * FROM admins WHERE username = ? OR email = ? LIMIT 1', [$email, $email]);
+    $row = $stmt->fetch();
+    if ($row && password_verify($password, $row['password_hash'] ?? '')) {
+        $user = sanitize_admin_user($row);
+        $session = start_admin_session($user);
+        return Response::success([
+            'user' => $session['user'],
+            'session' => [
+                'expires_at' => $session['expires_at'],
+                'idle_timeout_seconds' => $session['idle_timeout_seconds'],
+            ],
+        ]);
+    }
+
+    if (!$row && $email === 'admin' && $password === 'admin123') {
         $user = sanitize_admin_user([
             'username' => 'admin',
             'email' => 'admin@midwaymusichall.net',
@@ -933,21 +1334,86 @@ $router->add('POST', '/api/login', function (Request $request) {
             ],
         ]);
     }
-    $stmt = Database::run('SELECT * FROM admins WHERE username = ? OR email = ? LIMIT 1', [$email, $email]);
-    $row = $stmt->fetch();
-    if (!$row || !password_verify($password, $row['password_hash'] ?? '')) {
-        destroy_admin_session();
+
+    destroy_admin_session();
+    Response::error('Invalid credentials', 401);
+});
+
+$router->add('POST', '/api/admin/change-password', function (Request $request) {
+    try {
+        $session = current_admin_session();
+        if (!$session || empty($session['user'])) {
+            return Response::error('Unauthorized', 401);
+        }
+        $payload = read_json_body($request);
+        $currentPassword = (string) ($payload['current_password'] ?? $payload['currentPassword'] ?? '');
+        $newPassword = (string) ($payload['new_password'] ?? $payload['newPassword'] ?? '');
+        $confirmPassword = (string) ($payload['confirm_password'] ?? $payload['confirmPassword'] ?? '');
+        if ($currentPassword === '' || $newPassword === '' || $confirmPassword === '') {
+            return Response::error('All password fields are required.', 400);
+        }
+        if ($newPassword !== $confirmPassword) {
+            return Response::error('New passwords do not match.', 400);
+        }
+        if (strlen($newPassword) < 10) {
+            return Response::error('New password must be at least 10 characters long.', 400);
+        }
+
+        $userInfo = $session['user'];
+        $username = trim((string) ($userInfo['username'] ?? ''));
+        $email = trim((string) ($userInfo['email'] ?? ''));
+
+        ensure_admins_table_exists();
+        $row = null;
+        if ($username !== '') {
+            $stmt = Database::run('SELECT * FROM admins WHERE username = ? LIMIT 1', [$username]);
+            $row = $stmt->fetch();
+        }
+        if (!$row && $email !== '') {
+            $stmt = Database::run('SELECT * FROM admins WHERE email = ? LIMIT 1', [$email]);
+            $row = $stmt->fetch();
+        }
+
+        $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
+        $sanitizedEmail = $email !== '' ? $email : 'admin@midwaymusichall.net';
+        $sanitizedUsername = $username !== '' ? $username : 'admin';
+
+        if ($row) {
+            if (!password_verify($currentPassword, $row['password_hash'] ?? '')) {
+                return Response::error('Invalid credentials', 401);
+            }
+            Database::run('UPDATE admins SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [$newHash, $row['id']]);
+            $updatedStmt = Database::run('SELECT * FROM admins WHERE id = ? LIMIT 1', [$row['id']]);
+            $updatedRow = $updatedStmt->fetch() ?: $row;
+            $sessionData = sanitize_admin_user($updatedRow);
+            start_admin_session($sessionData);
+            return Response::success(['message' => 'Password updated successfully.']);
+        }
+
+        if (strcasecmp($sanitizedUsername, 'admin') === 0) {
+            if ($currentPassword !== 'admin123') {
+                return Response::error('Invalid credentials', 401);
+            }
+            Database::run(
+                'INSERT INTO admins (username, email, password_hash) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), email = COALESCE(NULLIF(email, \'\'), VALUES(email)), updated_at = CURRENT_TIMESTAMP',
+                [$sanitizedUsername, $sanitizedEmail, $newHash]
+            );
+            $stmt = Database::run('SELECT * FROM admins WHERE username = ? LIMIT 1', [$sanitizedUsername]);
+            $createdRow = $stmt->fetch();
+            $sessionData = sanitize_admin_user($createdRow ?: ['username' => $sanitizedUsername, 'email' => $sanitizedEmail]);
+            start_admin_session($sessionData);
+            return Response::success(['message' => 'Password updated successfully.']);
+        }
+
         return Response::error('Invalid credentials', 401);
+    } catch (Throwable $error) {
+        $message = 'Unable to change password at this time.';
+        if (APP_DEBUG) {
+            error_log('Change password failure: ' . $error->getMessage());
+            $message .= ' ' . $error->getMessage();
+        }
+        return Response::error($message, 500);
     }
-    $user = sanitize_admin_user($row);
-    $session = start_admin_session($user);
-    Response::success([
-        'user' => $session['user'],
-        'session' => [
-            'expires_at' => $session['expires_at'],
-            'idle_timeout_seconds' => $session['idle_timeout_seconds'],
-        ],
-    ]);
 });
 
 $router->add('POST', '/api/events/:id/archive', function ($request, $params) {
@@ -2060,8 +2526,14 @@ $router->add('POST', '/api/suggestions', function (Request $request) {
         }
     }
     $contactJson = $contact ? json_encode($contact) : null;
-    Database::run('INSERT INTO suggestions (name, contact, notes, submission_type, created_at) VALUES (?, ?, ?, ?, NOW())', [$artistName, $contactJson, $payload['notes'] ?? $payload['message'] ?? '', $submissionType]);
+    $notes = $payload['notes'] ?? $payload['message'] ?? '';
+    Database::run('INSERT INTO suggestions (name, contact, notes, submission_type, created_at) VALUES (?, ?, ?, ?, NOW())', [$artistName, $contactJson, $notes, $submissionType]);
     $id = (int) Database::connection()->lastInsertId();
+    try {
+        notify_artist_suggestion_emails($id, $artistName, $contact, $notes, $submissionType);
+    } catch (Throwable $notifyError) {
+        error_log('[email] Unable to process artist suggestion notifications: ' . $notifyError->getMessage());
+    }
     Response::success(['id' => $id]);
 });
 
@@ -2415,6 +2887,19 @@ if (APP_DEBUG) {
     });
 }
 
-if (!$router->dispatch($request)) {
+try {
+    $handled = $router->dispatch($request);
+} catch (Throwable $error) {
+    error_log('[router] Unhandled exception: ' . $error->getMessage());
+    try {
+        notify_unhandled_error($error, $request);
+    } catch (Throwable $alertError) {
+        error_log('[email] Failed to dispatch error alert: ' . $alertError->getMessage());
+    }
+    Response::error('Server error', 500);
+    exit;
+}
+
+if (!$handled) {
     Response::error('Not found', 404);
 }
