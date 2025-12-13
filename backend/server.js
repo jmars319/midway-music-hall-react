@@ -68,6 +68,23 @@ const pool = mysql.createPool({
 	queueLimit: 0
 }).promise();
 
+const safeJsonParse = (value) => {
+	if (!value) return null;
+	try {
+		return JSON.parse(value);
+	} catch {
+		return null;
+	}
+};
+
+const mapLayoutRow = (row = {}) => ({
+	...row,
+	layout_data: safeJsonParse(row.layout_data),
+	stage_position: safeJsonParse(row.stage_position),
+	stage_size: safeJsonParse(row.stage_size),
+	canvas_settings: safeJsonParse(row.canvas_settings)
+});
+
 // Health
 // Simple health endpoint (useful for readiness checks)
 app.get('/api/health', (req, res) => res.json({ success: true, status: 'ok' }));
@@ -99,7 +116,7 @@ app.post('/api/login', async (req, res) => {
 	try {
 		// Demo credentials (development)
 		if (email === 'admin' && password === 'admin123') {
-			return res.json({ success: true, user: { username: 'admin', email: 'admin@midwaymusichal.com' } });
+			return res.json({ success: true, user: { username: 'admin', name: 'Admin', email: 'admin@midwaymusichall.net' } });
 		}
 
 		// Try DB lookup by username or email
@@ -413,9 +430,9 @@ app.get('/api/layout-history/:id', async (req, res) => {
 app.get('/api/seating-layouts', async (req, res) => {
 	try {
 		const [rows] = await pool.query(
-			'SELECT id, name, description, is_default, layout_data, stage_position, stage_size, created_at, updated_at FROM seating_layouts ORDER BY is_default DESC, name ASC'
+			'SELECT id, name, description, is_default, layout_data, stage_position, stage_size, canvas_settings, created_at, updated_at FROM seating_layouts ORDER BY is_default DESC, name ASC'
 		);
-		res.json({ success: true, layouts: rows });
+		res.json({ success: true, layouts: rows.map(mapLayoutRow) });
 	} catch (err) {
 		console.error('GET /api/seating-layouts error:', err);
 		res.status(500).json({ success: false, message: 'Failed to fetch seating layouts' });
@@ -426,12 +443,12 @@ app.get('/api/seating-layouts', async (req, res) => {
 app.get('/api/seating-layouts/default', async (req, res) => {
 	try {
 		const [rows] = await pool.query(
-			'SELECT id, name, description, is_default, layout_data, stage_position, stage_size, created_at, updated_at FROM seating_layouts WHERE is_default = 1 LIMIT 1'
+			'SELECT id, name, description, is_default, layout_data, stage_position, stage_size, canvas_settings, created_at, updated_at FROM seating_layouts WHERE is_default = 1 LIMIT 1'
 		);
 		if (!rows || rows.length === 0) {
 			return res.status(404).json({ success: false, message: 'No default layout found' });
 		}
-		res.json({ success: true, layout: rows[0] });
+		res.json({ success: true, layout: mapLayoutRow(rows[0]) });
 	} catch (err) {
 		console.error('GET /api/seating-layouts/default error:', err);
 		res.status(500).json({ success: false, message: 'Failed to fetch default layout' });
@@ -442,13 +459,13 @@ app.get('/api/seating-layouts/default', async (req, res) => {
 app.get('/api/seating-layouts/:id', async (req, res) => {
 	try {
 		const [rows] = await pool.query(
-			'SELECT id, name, description, is_default, layout_data, stage_position, stage_size, created_at, updated_at FROM seating_layouts WHERE id = ?',
+			'SELECT id, name, description, is_default, layout_data, stage_position, stage_size, canvas_settings, created_at, updated_at FROM seating_layouts WHERE id = ?',
 			[req.params.id]
 		);
 		if (!rows || rows.length === 0) {
 			return res.status(404).json({ success: false, message: 'Layout not found' });
 		}
-		res.json({ success: true, layout: rows[0] });
+		res.json({ success: true, layout: mapLayoutRow(rows[0]) });
 	} catch (err) {
 		console.error('GET /api/seating-layouts/:id error:', err);
 		res.status(500).json({ success: false, message: 'Failed to fetch layout' });
@@ -458,7 +475,7 @@ app.get('/api/seating-layouts/:id', async (req, res) => {
 // Create a new seating layout
 app.post('/api/seating-layouts', async (req, res) => {
 	try {
-		const { name, description, is_default, layout_data } = req.body;
+		const { name, description, is_default, layout_data, canvas_settings } = req.body;
 		
 		if (!name || !layout_data) {
 			return res.status(400).json({ success: false, message: 'Name and layout_data are required' });
@@ -470,8 +487,8 @@ app.post('/api/seating-layouts', async (req, res) => {
 		}
 
 		const [result] = await pool.query(
-			'INSERT INTO seating_layouts (name, description, is_default, layout_data) VALUES (?, ?, ?, ?)',
-			[name, description || '', is_default ? 1 : 0, JSON.stringify(layout_data)]
+			'INSERT INTO seating_layouts (name, description, is_default, layout_data, canvas_settings) VALUES (?, ?, ?, ?, ?)',
+			[name, description || '', is_default ? 1 : 0, JSON.stringify(layout_data), canvas_settings ? JSON.stringify(canvas_settings) : null]
 		);
 
 		res.json({ success: true, id: result.insertId });
@@ -484,7 +501,7 @@ app.post('/api/seating-layouts', async (req, res) => {
 // Update a seating layout
 app.put('/api/seating-layouts/:id', async (req, res) => {
 	try {
-		const { name, description, is_default, layout_data } = req.body;
+		const { name, description, is_default, layout_data, canvas_settings } = req.body;
 		const layoutId = req.params.id;
 
 		// If setting as default, unset other defaults first
@@ -494,10 +511,11 @@ app.put('/api/seating-layouts/:id', async (req, res) => {
 
 		const stage_position = req.body.stage_position ? JSON.stringify(req.body.stage_position) : null;
 		const stage_size = req.body.stage_size ? JSON.stringify(req.body.stage_size) : null;
+		const canvas_settings_json = canvas_settings ? JSON.stringify(canvas_settings) : null;
 		
 		const [result] = await pool.query(
-			'UPDATE seating_layouts SET name = ?, description = ?, is_default = ?, layout_data = ?, stage_position = ?, stage_size = ? WHERE id = ?',
-			[name, description || '', is_default ? 1 : 0, JSON.stringify(layout_data), stage_position, stage_size, layoutId]
+			'UPDATE seating_layouts SET name = ?, description = ?, is_default = ?, layout_data = ?, stage_position = ?, stage_size = ?, canvas_settings = ? WHERE id = ?',
+			[name, description || '', is_default ? 1 : 0, JSON.stringify(layout_data), stage_position, stage_size, canvas_settings_json, layoutId]
 		);
 
 		if (result.affectedRows === 0) {
@@ -624,7 +642,7 @@ app.get('/api/seat-requests', async (req, res) => {
 				try { seats = JSON.parse(reqRow.selected_seats || '[]'); } catch(e) { seats = []; }
 				// Check for conflicts first: if any seat is already reserved, abort.
 				// We iterate seats and map each to the seating row. Note: this is a
-				// conservative check — it doesn't reserve seats until the commit step.
+				// conservative check - it doesn't reserve seats until the commit step.
 				const conflicts = [];
 				for (const seatId of seats) {
 					const parts = seatId.split('-');
