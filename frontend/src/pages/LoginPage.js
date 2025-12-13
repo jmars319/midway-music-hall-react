@@ -39,7 +39,7 @@ export default function LoginPage({ onLogin, onBack }) {
       }
     } catch (err) {
       console.error(err);
-      setError('Network error — please try again');
+      setError('Network error; please try again');
     } finally {
       setLoading(false);
     }

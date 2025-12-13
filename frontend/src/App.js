@@ -5,9 +5,38 @@ import LoginPage from './pages/LoginPage';
 import AdminPanel from './admin/AdminPanel';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
+import GatheringPlacePage from './pages/GatheringPlacePage';
 
-export const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5001/api';
-export const SERVER_BASE = process.env.REACT_APP_API_BASE ? process.env.REACT_APP_API_BASE.replace('/api', '') : 'http://localhost:5001';
+const resolveDefaultApiBase = () => {
+  if (process.env.REACT_APP_API_BASE) {
+    return process.env.REACT_APP_API_BASE;
+  }
+  if (typeof window !== 'undefined' && window.location) {
+    const { origin, protocol, hostname } = window.location;
+    const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
+    if (origin && origin !== 'null' && protocol !== 'file:' && !isLocalHost) {
+      return `${origin.replace(/\/$/, '')}/api`;
+    }
+  }
+  // Default local Dev API
+  return 'http://localhost:5001/api';
+};
+
+const normalizeApiBase = (value) => {
+  if (!value) return '/api';
+  return value.replace(/\/+$/, '');
+};
+
+const defaultApiBase = normalizeApiBase(resolveDefaultApiBase());
+export const API_BASE = defaultApiBase;
+const resolvedServer = defaultApiBase.endsWith('/api')
+  ? defaultApiBase.slice(0, -4) || ''
+  : defaultApiBase;
+export const SERVER_BASE = resolvedServer || (typeof window !== 'undefined' && window.location && window.location.origin !== 'null'
+  ? window.location.origin
+  : '');
+const SESSION_DURATION_HOURS = 12;
+const SESSION_DURATION_MS = SESSION_DURATION_HOURS * 60 * 60 * 1000;
 
 // Cache for settings to avoid repeated fetches
 let settingsCache = null;
@@ -59,43 +88,75 @@ export default function App() {
 
   // On mount, try to rehydrate auth from localStorage so admin stays logged in
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     try {
       const raw = localStorage.getItem('mmh_user');
-      if (raw) {
-        const user = JSON.parse(raw);
-        if (user && user.email) {
-          setIsAuthenticated(true);
-          setCurrentUser(user);
-        }
+      if (!raw) return;
+      const stored = JSON.parse(raw);
+      if (!stored || !stored.email) {
+        localStorage.removeItem('mmh_user');
+        return;
       }
+      const normalizedExpires = stored.expires_at ? Number(stored.expires_at) : Date.now() + SESSION_DURATION_MS;
+      if (normalizedExpires <= Date.now()) {
+        localStorage.removeItem('mmh_user');
+        return;
+      }
+      const normalizedUser = { ...stored, expires_at: normalizedExpires };
+      localStorage.setItem('mmh_user', JSON.stringify(normalizedUser));
+      setIsAuthenticated(true);
+      setCurrentUser(normalizedUser);
     } catch (err) {
-      // if parsing fails, clear the bad key
       localStorage.removeItem('mmh_user');
       console.error('Failed to rehydrate auth from localStorage', err);
     }
   }, []);
 
-  const handleLogin = (user) => {
-    setIsAuthenticated(true);
-    setCurrentUser(user);
-    try {
-      localStorage.setItem('mmh_user', JSON.stringify(user));
-    } catch (err) {
-      console.warn('Unable to persist user to localStorage', err);
+  const persistSessionUser = (user) => {
+    const payload = { ...user, expires_at: Date.now() + SESSION_DURATION_MS };
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('mmh_user', JSON.stringify(payload));
+      } catch (err) {
+        console.warn('Unable to persist user to localStorage', err);
+      }
     }
+    return payload;
+  };
+
+  const handleLogin = (user) => {
+    const payload = persistSessionUser(user);
+    setIsAuthenticated(true);
+    setCurrentUser(payload);
     setCurrentView('admin');
   };
 
   const handleLogout = () => {
     setIsAuthenticated(false);
     setCurrentUser(null);
-    try {
-      localStorage.removeItem('mmh_user');
-    } catch (err) {
-      console.warn('Unable to clear localStorage during logout', err);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('mmh_user');
+      } catch (err) {
+        console.warn('Unable to clear localStorage during logout', err);
+      }
     }
     setCurrentView('home');
   };
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser?.expires_at) return;
+    const remaining = currentUser.expires_at - Date.now();
+    if (remaining <= 0) {
+      handleLogout();
+      return;
+    }
+    const timeout = setTimeout(() => {
+      alert('Your admin session expired. Please log in again.');
+      handleLogout();
+    }, remaining);
+    return () => clearTimeout(timeout);
+  }, [isAuthenticated, currentUser?.expires_at]);
 
   const navigateToLogin = () => setCurrentView('login');
   const navigateToHome = () => setCurrentView('home');
@@ -118,6 +179,11 @@ export default function App() {
     }
   };
 
+  const pathname = typeof window !== 'undefined'
+    ? (window.location.pathname || '/').replace(/\/+$/, '') || '/'
+    : '/';
+  const isGatheringPlaceRoute = pathname.toLowerCase() === '/thegatheringplace';
+
   if (currentView === 'login') {
     return <LoginPage onLogin={handleLogin} onBack={navigateToHome} />;
   }
@@ -134,6 +200,21 @@ export default function App() {
     return <TermsOfService onAdminClick={navigateToAdmin} />;
   }
 
-  // Use SinglePageLanding as the default view (temporary landing page)
-  return <SinglePageLanding />;
+  if (isGatheringPlaceRoute && currentView === 'home') {
+    return (
+      <GatheringPlacePage
+        onAdminClick={navigateToAdmin}
+        onNavigate={handleNavigate}
+      />
+    );
+  }
+
+  // Default to the full public site `HomePage`. `SinglePageLanding` is
+  // kept for the temporary landing mode but should not be the default.
+  return (
+    <HomePage
+      onAdminClick={navigateToAdmin}
+      onNavigate={handleNavigate}
+    />
+  );
 }
