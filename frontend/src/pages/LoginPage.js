@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 // LoginPage: admin login form; lightweight demo auth + DB lookup
 import { API_BASE, SERVER_BASE } from '../App';
+import ResponsiveImage from '../components/ResponsiveImage';
 
 export default function LoginPage({ onLogin, onBack }) {
   const [email, setEmail] = useState('');
@@ -29,11 +30,12 @@ export default function LoginPage({ onLogin, onBack }) {
       const res = await fetch(`${API_BASE}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email, password })
       });
       const data = await res.json();
       if (data.success) {
-        onLogin && onLogin(data.user);
+        onLogin && onLogin(data.user, data.session);
       } else {
         setError(data.message || 'Invalid credentials');
       }
@@ -49,7 +51,7 @@ export default function LoginPage({ onLogin, onBack }) {
     <div className="min-h-screen flex items-center justify-center bg-gray-900 py-12">
       <div className="max-w-md w-full bg-gray-800 rounded-xl p-6 border border-purple-500/20">
         <div className="flex justify-center mb-4">
-          <img src={logo} alt="Midway Music Hall" className="h-16" />
+          <ResponsiveImage src={logo} alt="Midway Music Hall" width={160} height={64} priority className="h-16 w-auto object-contain" />
         </div>
         <h2 className="text-2xl font-bold text-white mb-2">Admin Login</h2>
         <p className="text-gray-300 text-sm mb-4">Demo credentials: <span className="font-medium">admin</span> / <span className="font-medium">admin123</span></p>

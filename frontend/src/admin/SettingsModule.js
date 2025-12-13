@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { API_BASE, SERVER_BASE } from '../App';
+import ResponsiveImage from '../components/ResponsiveImage';
 
 // SettingsModule: admin UI for business/stage settings
 
@@ -185,9 +186,11 @@ export default function SettingsModule(){
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
                   {selectedTgpHeroImages.map((imgUrl, idx) => (
                     <div key={`${imgUrl}-${idx}`} className="relative group">
-                      <img
+                      <ResponsiveImage
                         src={`${SERVER_BASE}${imgUrl}`}
                         alt={`TGP Hero ${idx + 1}`}
+                        width={320}
+                        height={192}
                         className="w-full h-24 object-cover rounded border-2 border-blue-500"
                       />
                       <button
@@ -216,9 +219,11 @@ export default function SettingsModule(){
                         onClick={() => setSelectedTgpHeroImages(prev => [...prev, m.file_url])}
                         className="cursor-pointer hover:ring-2 hover:ring-blue-500 rounded transition"
                       >
-                        <img
+                        <ResponsiveImage
                           src={`${SERVER_BASE}${m.file_url}`}
                           alt={m.original_name}
+                          width={320}
+                          height={192}
                           className="w-full h-24 object-cover rounded border border-gray-600"
                         />
                         <p className="text-xs text-gray-400 mt-1 truncate">{m.original_name}</p>
@@ -318,9 +323,11 @@ export default function SettingsModule(){
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
                   {selectedHeroImages.map((imgUrl, idx) => (
                     <div key={idx} className="relative group">
-                      <img 
+                      <ResponsiveImage 
                         src={`${SERVER_BASE}${imgUrl}`} 
                         alt={`Hero ${idx + 1}`}
+                        width={320}
+                        height={192}
                         className="w-full h-24 object-cover rounded border-2 border-purple-500"
                       />
                       <button
@@ -349,9 +356,11 @@ export default function SettingsModule(){
                         onClick={() => setSelectedHeroImages(prev => [...prev, m.file_url])}
                         className="cursor-pointer hover:ring-2 hover:ring-purple-500 rounded transition"
                       >
-                        <img 
+                        <ResponsiveImage 
                           src={`${SERVER_BASE}${m.file_url}`} 
                           alt={m.original_name}
+                          width={320}
+                          height={192}
                           className="w-full h-24 object-cover rounded border border-gray-600"
                         />
                         <p className="text-xs text-gray-400 mt-1 truncate">{m.original_name}</p>
@@ -411,10 +420,13 @@ export default function SettingsModule(){
                   ))}
                 </select>
                 {settings.site_logo && (
-                  <img 
+                  <ResponsiveImage 
                     src={`${SERVER_BASE}${settings.site_logo}`} 
                     alt="Current logo" 
-                    className="w-32 h-auto border border-gray-600 rounded"
+                    width={256}
+                    height={128}
+                    className="w-32 h-auto border border-gray-600 rounded object-contain"
+                    priority
                   />
                 )}
                 <p className="text-xs text-gray-400 mt-1">Upload logos in Media Manager</p>
@@ -434,10 +446,12 @@ export default function SettingsModule(){
                   ))}
                 </select>
                 {settings.default_event_image && (
-                  <img 
+                  <ResponsiveImage 
                     src={`${SERVER_BASE}${settings.default_event_image}`} 
                     alt="Default event" 
-                    className="w-32 h-auto border border-gray-600 rounded"
+                    width={256}
+                    height={160}
+                    className="w-32 h-auto border border-gray-600 rounded object-cover"
                   />
                 )}
                 <p className="text-xs text-gray-400 mt-1">Used when events have no image</p>

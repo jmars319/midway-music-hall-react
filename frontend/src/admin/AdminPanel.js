@@ -10,6 +10,7 @@ import {
   SettingsModule,
 } from './index';
 import { SERVER_BASE } from '../App';
+import ResponsiveImage from '../components/ResponsiveImage';
 
 const MENU = [
   { key: 'dashboard', label: 'Dashboard', comp: DashboardModule },
@@ -26,6 +27,20 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
   const [collapsed, setCollapsed] = useState(false);
   const [logo, setLogo] = useState('/logo.png');
   const sidebarAvatar = '/apple-touch-icon.png';
+  const resolveDisplayName = () => {
+    if (!user) return 'Admin';
+    if (user.display_name) return user.display_name;
+    if (user.name) return user.name;
+    if (user.username) return user.username;
+    if (user.email) {
+      const prefix = user.email.split('@')[0] || 'Admin';
+      if (user.email.toLowerCase().startsWith('admin@')) {
+        return 'Admin';
+      }
+      return prefix;
+    }
+    return 'Admin';
+  };
 
   useEffect(() => {
     fetch(`${SERVER_BASE}/api/settings`)
@@ -39,7 +54,7 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
   }, []);
 
   const ActiveComponent = (MENU.find(m => m.key === active) || MENU[0]).comp;
-  const displayName = (user?.name || user?.username || 'Admin').toString();
+  const displayName = resolveDisplayName();
 
   return (
     <div className="h-screen flex bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
@@ -48,8 +63,21 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
         <div className="h-full flex flex-col">
           <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
             <div className="flex items-center space-x-2">
-              <img src={logo} alt="Midway Music Hall" className={`${collapsed ? 'h-8' : 'h-10'} transition-all duration-200`} />
-              {!collapsed && <div className="text-lg font-semibold">Midway Admin</div>}
+                    <button
+                      onClick={() => setActive('dashboard')}
+                      aria-label="Go to dashboard"
+                      className="flex items-center space-x-2 bg-transparent border-0 p-0"
+                    >
+                      <ResponsiveImage
+                        src={logo}
+                        alt="Midway Music Hall"
+                        width={collapsed ? 64 : 96}
+                        height={collapsed ? 64 : 96}
+                        priority
+                        className={`${collapsed ? 'h-8' : 'h-10'} w-auto transition-all duration-200 object-contain`}
+                      />
+                      {!collapsed && <div className="text-lg font-semibold">Midway Admin</div>}
+                    </button>
             </div>
             <button
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -92,9 +120,12 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
               </div>
 
               <div className="flex items-center gap-3">
-                <img
+                <ResponsiveImage
                   src={sidebarAvatar}
                   alt="Midway Music Hall"
+                  width={48}
+                  height={48}
+                  priority
                   className="w-9 h-9 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 object-cover"
                 />
                 {!collapsed && (

@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { Upload, Trash2, Image as ImageIcon, X } from 'lucide-react';
 import { API_BASE, SERVER_BASE } from '../App';
+import ResponsiveImage from '../components/ResponsiveImage';
 
 const categories = [
   { value: 'all', label: 'All Files', color: 'bg-gray-500' },
@@ -11,16 +12,30 @@ const categories = [
   { value: 'other', label: 'Other', color: 'bg-gray-500' },
 ];
 
-const resolveMediaUrl = (fileUrl) => {
-  if (!fileUrl) return '';
-  if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
-    return fileUrl;
+const buildAbsoluteUrl = (path) => {
+  if (!path) return '';
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
   }
   const fallbackOrigin = (typeof window !== 'undefined' && window.location && window.location.origin !== 'null')
     ? window.location.origin
     : '';
-  return `${SERVER_BASE || fallbackOrigin || ''}${fileUrl}`;
+  const base = SERVER_BASE || fallbackOrigin || '';
+  if (!path.startsWith('/')) {
+    return `${base}/${path}`;
+  }
+  return `${base}${path}`;
 };
+
+const resolveMediaUrl = (fileUrl) => buildAbsoluteUrl(fileUrl);
+
+const mediaPreviewUrl = (item) => {
+  if (!item) return '';
+  const candidate = item.webp_path || item.optimized_path || item.file_url;
+  return resolveMediaUrl(candidate);
+};
+
+const FALLBACK_THUMB = '/android-chrome-192x192.png';
 
 export default function MediaManager() {
   const [media, setMedia] = useState([]);
@@ -136,8 +151,8 @@ export default function MediaManager() {
     }
   };
 
-  const copyUrl = (url) => {
-    const fullUrl = resolveMediaUrl(url);
+  const copyUrl = (item) => {
+    const fullUrl = mediaPreviewUrl(item);
     if (!fullUrl) return;
     navigator.clipboard.writeText(fullUrl);
     alert('URL copied to clipboard!');
@@ -147,6 +162,13 @@ export default function MediaManager() {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  const handleImageError = (event) => {
+    if (!event?.currentTarget) return;
+    event.currentTarget.onerror = null;
+    event.currentTarget.src = FALLBACK_THUMB;
+    event.currentTarget.classList.add('object-contain', 'bg-gray-900');
   };
 
   return (
@@ -195,9 +217,11 @@ export default function MediaManager() {
             <div>
               <label className="block text-sm font-medium mb-2">Preview</label>
               <div className="relative">
-                <img
+                <ResponsiveImage
                   src={previewUrl}
                   alt="Preview"
+                  width={640}
+                  height={384}
                   className="w-full h-48 object-cover rounded border border-gray-600"
                 />
                 <button
@@ -247,11 +271,14 @@ export default function MediaManager() {
           {filteredMedia.map(item => (
             <div key={item.id} className="bg-gray-800 rounded-lg overflow-hidden border border-gray-700 hover:border-purple-500 transition-colors">
               <div className="relative aspect-video">
-                <img
-                  src={resolveMediaUrl(item.file_url)}
+                <ResponsiveImage
+                  src={mediaPreviewUrl(item)}
                   alt={item.alt_text || item.original_name}
+                  width={640}
+                  height={360}
                   className="w-full h-full object-cover cursor-pointer"
                   onClick={() => setEditingMedia(item)}
+                  onError={handleImageError}
                 />
                 <div className={`absolute top-2 right-2 px-2 py-1 rounded text-xs text-white ${
                   categories.find(c => c.value === item.category)?.color || 'bg-gray-500'
@@ -266,7 +293,7 @@ export default function MediaManager() {
 
                 <div className="flex gap-2">
                   <button
-                    onClick={() => copyUrl(item.file_url)}
+                    onClick={() => copyUrl(item)}
                     className="flex-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded"
                   >
                     Copy URL
@@ -300,10 +327,13 @@ export default function MediaManager() {
 
             <div className="p-6">
               <div className="mb-4">
-                <img
-                  src={resolveMediaUrl(editingMedia.file_url)}
+                <ResponsiveImage
+                  src={mediaPreviewUrl(editingMedia)}
                   alt={editingMedia.alt_text || editingMedia.original_name}
-                  className="w-full max-h-96 object-contain rounded border border-gray-700"
+                  width={960}
+                  height={540}
+                  className="w-full max-h-96 object-contain rounded border border-gray-700 bg-black"
+                  onError={handleImageError}
                 />
               </div>
 
