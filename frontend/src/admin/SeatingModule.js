@@ -120,10 +120,12 @@ export default function SeatingModule(){
   const undo = async () => { if (!canUndo()) return; historyIndexRef.current = Math.max(0, historyIndexRef.current - 1); const snap = historyRef.current[historyIndexRef.current]; await applySnapshot(snap, true); setHistoryTick(t => t + 1); };
   const redo = async () => { if (!canRedo()) return; historyIndexRef.current = Math.min(historyRef.current.length - 1, historyIndexRef.current + 1); const snap = historyRef.current[historyIndexRef.current]; await applySnapshot(snap, true); setHistoryTick(t => t + 1); };
   // expose to window for nested draggable items to read
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(()=>{ try{ window.__STAGE_LOCK__ = !!stageLock; }catch(e){} 
     // persist lock state so it survives reloads
     try{ saveStageSettings({ stage_lock: stageLock ? '1' : '0' }); }catch(e){}
   }, [stageLock]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const fetchStageSettings = async () => {
     try{
@@ -181,7 +183,7 @@ export default function SeatingModule(){
   };
 
   const handleChange = (e) => {
-    const { name, value, type, checked } = e.target;
+    const { name, value, checked } = e.target;
     setFormData(prev => ({ ...prev, [name]: name === 'total_seats' || name === 'rotation' ? parseInt(value || 0, 10) : (name === 'is_active' ? !!checked : value) }));
   };
 
@@ -456,7 +458,6 @@ export default function SeatingModule(){
                       onPointerDown={(e)=>{
                         e.stopPropagation();
                         const startX = e.clientX;
-                        const startY = e.clientY;
                         const rect = containerRef.current.getBoundingClientRect();
                         const startSize = stage.size;
                         function onMove(ev){
@@ -503,7 +504,15 @@ export default function SeatingModule(){
                 };
 
                 return (
-                  <LayoutDraggable key={row.id} row={row} style={style} containerRef={containerRef} gridEnabled={gridEnabled} gridSize={gridSize} onUpdate={(r) => {
+                  <LayoutDraggable
+                    key={row.id}
+                    row={row}
+                    style={style}
+                    containerRef={containerRef}
+                    gridEnabled={gridEnabled}
+                    gridSize={gridSize}
+                    setLayoutRows={setLayoutRows}
+                    onUpdate={(r) => {
                     // update local state
                     setLayoutRows(prev => {
                       const next = prev.map(p => p.id === r.id ? { ...p, pos_x: r.pos_x, pos_y: r.pos_y, rotation: r.rotation } : p);
@@ -520,7 +529,8 @@ export default function SeatingModule(){
                         });
                       } catch (err) { console.error('Persist layout error', err); }
                     })();
-                  }} />
+                  }}
+                  />
                 );
               })}
 
@@ -543,18 +553,12 @@ export default function SeatingModule(){
 }
 
 // Draggable item used inside the layout editor. Uses pointer events for drag support and has a rotate button.
-function LayoutDraggable({ row, style, containerRef, onUpdate, gridEnabled, gridSize }){
+function LayoutDraggable({ row, style, containerRef, onUpdate, gridEnabled, gridSize, setLayoutRows }){
   const elRef = useRef();
   const dragging = useRef(false);
   const offset = useRef({ x: 0, y: 0 });
   const [rotation, setRotation] = useState(row.rotation || 0);
   const [hover, setHover] = useState(false);
-  // read lock from outer scope by window-level variable fallback
-  const [stageLockLocal, setStageLockLocal] = useState(false);
-  useEffect(()=>{
-    // try to read global stageLock injected on window by parent (not ideal but simple)
-    try{ setStageLockLocal(window.__STAGE_LOCK__ ? true : false); }catch(e){}
-  }, []);
 
   useEffect(() => {
     return () => { dragging.current = false; };
@@ -650,7 +654,7 @@ function LayoutDraggable({ row, style, containerRef, onUpdate, gridEnabled, grid
                   const current = Array.isArray(row.selected_seats) ? row.selected_seats : (row.selected_seats ? JSON.parse(row.selected_seats) : []);
                   const next = current.includes(seatId) ? current.filter(s=>s!==seatId) : [...current, seatId];
                   // optimistic update locally
-                  setLayoutRows(prev => prev.map(p => p.id === row.id ? { ...p, selected_seats: next } : p));
+                  setLayoutRows(prev => prev.map(p => (p.id === row.id ? { ...p, selected_seats: next } : p)));
                   // persist to server
                   await fetch(`${API_BASE}/seating/${row.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected_seats: next }) });
                 }catch(e){ console.error('Failed to toggle seat', e); }

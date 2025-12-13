@@ -77,7 +77,7 @@ export default function LayoutsModule() {
   const [draggingStage, setDraggingStage] = useState(false);
   const [stageGhostPosition, setStageGhostPosition] = useState(null);
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
-  const [resizingStage, setResizingStage] = useState(false);
+  const [, setResizingStage] = useState(false);
   const [canvasSettings, setCanvasSettings] = useState({
     preset: canvasPresets[0].key,
     width: canvasPresets[0].width,
@@ -89,7 +89,7 @@ export default function LayoutsModule() {
   const [isPanning, setIsPanning] = useState(false);
   const panRef = useRef({ startX: 0, startY: 0, startPan: { x: 0, y: 0 } });
   const [selectedRowId, setSelectedRowId] = useState(null);
-  const [resizingMarker, setResizingMarker] = useState(null);
+  const [, setResizingMarker] = useState(null);
   const [debugOverlay, setDebugOverlay] = useState(null);
 
   const fetchLayouts = async () => {
@@ -168,18 +168,6 @@ export default function LayoutsModule() {
       name: `${layout.name} (Copy)`,
       description: layout.description || '',
       is_default: false,
-      layout_data: layout.layout_data || []
-    });
-    setShowForm(true);
-    setError('');
-  };
-
-  const openEditMetadata = (layout) => {
-    setEditing(layout);
-    setFormData({
-      name: layout.name || '',
-      description: layout.description || '',
-      is_default: layout.is_default === 1,
       layout_data: layout.layout_data || []
     });
     setShowForm(true);

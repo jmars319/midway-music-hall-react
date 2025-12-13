@@ -91,6 +91,7 @@ export default function Hero({ variant = 'main', ctaTarget }) {
   const [slideshowEnabled, setSlideshowEnabled] = useState(false);
   const [slideshowInterval, setSlideshowInterval] = useState(5000);
 
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     let mounted = true;
     fetch(`${API_BASE}/settings`)
@@ -133,6 +134,7 @@ export default function Hero({ variant = 'main', ctaTarget }) {
       .finally(() => {});
     return () => { mounted = false; };
   }, [variant]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
     if (slideshowEnabled && heroImages.length > 1) {

@@ -72,6 +72,7 @@ export default function Navigation() {
     redirectToHomeSection(normalized);
   };
 
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!window.location.hash) return;
@@ -83,6 +84,7 @@ export default function Navigation() {
     const timer = setTimeout(scroll, 50);
     return () => clearTimeout(timer);
   }, [currentPath]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   return (
     <nav className="sticky top-0 z-50 bg-black border-b border-purple-500/30 shadow-lg">

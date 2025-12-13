@@ -15,7 +15,7 @@ import BackToTopButton from '../components/BackToTopButton';
 import { API_BASE, getImageUrlSync } from '../App';
 import { getEventStartDate, getEventEndDate } from '../utils/eventFormat';
 
-const SITE_BASE_URL = 'https://www.midwaymusichall.net';
+const SITE_BASE_URL = 'https://midwaymusichall.net';
 
 const SERIES_OVERRIDES = [
   {

@@ -1,26 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, Armchair, Send, AlertCircle } from 'lucide-react';
+import { X, Send, AlertCircle } from 'lucide-react';
 import TableComponent, { isSeatReserved } from './TableComponent';
 import { API_BASE } from '../App';
 import { seatingLegendSwatches, seatingStatusLabels } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
-
-const seatTypeClass = (type, selected) => {
-  if (selected) return 'bg-purple-700 ring-2 ring-purple-400 text-white';
-
-  switch ((type || '').toLowerCase()) {
-    case 'vip':
-      return 'bg-yellow-500 hover:bg-yellow-400 text-black';
-    case 'premium':
-      return 'bg-purple-500 hover:bg-purple-400 text-white';
-    case 'accessible':
-      return 'bg-blue-500 hover:bg-blue-400 text-white';
-    case 'standing':
-      return 'bg-green-500 hover:bg-green-400 text-white';
-    default:
-      return 'bg-gray-500 hover:bg-gray-400 text-white';
-  }
-};
 
 export default function EventSeatingModal({ event, onClose }) {
   const [seatingConfig, setSeatingConfig] = useState([]);
@@ -64,9 +47,11 @@ export default function EventSeatingModal({ event, onClose }) {
   const canvasWidth = canvasSettings?.width || 1200;
   const canvasHeight = canvasSettings?.height || 800;
 
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     fetchEventSeating();
   }, [event.id]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const fetchEventSeating = async () => {
     setLoading(true);

@@ -213,10 +213,7 @@ export default function SuggestionsModule() {
         </div>
 
         <div className="flex flex-wrap gap-3 items-end">
-          <div className="flex flex-col">
-
-  // Marker: suggestions admin enhancements applied (filters, counts, inline edits)
-  export const SUGGESTIONS_MODULE_UPDATED = true;
+            <div className="flex flex-col">
             <label className="text-xs uppercase text-gray-400 mb-1">Status</label>
             <select
               value={filterStatus}

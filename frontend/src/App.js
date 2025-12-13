@@ -294,7 +294,6 @@ export default function App() {
     };
   }, [isAuthenticated, resetSessionState]);
 
-  const navigateToLogin = () => setCurrentView('login');
   const navigateToHome = () => setCurrentView('home');
   const navigateToPrivacy = () => setCurrentView('privacy');
   const navigateToTerms = () => setCurrentView('terms');

@@ -126,10 +126,11 @@ export default function SeatRequestsModule() {
   useEffect(() => {
     fetchEvents();
   }, []);
-
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     fetchRequests();
   }, [filters.status, filters.eventId]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
     setCollapsedGroups({});

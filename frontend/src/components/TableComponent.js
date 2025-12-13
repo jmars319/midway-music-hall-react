@@ -1,5 +1,5 @@
 import React from 'react';
-import { Armchair, Users } from 'lucide-react';
+import { Users } from 'lucide-react';
 import { seatingStatusClasses } from '../utils/seatingTheme';
 
 // Helper to get seat styling based on type

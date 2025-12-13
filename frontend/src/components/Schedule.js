@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 // Schedule: simple list of upcoming events used on the home page
-import { Calendar, Clock, DollarSign, Users, Share2, CalendarPlus, DoorOpen } from 'lucide-react';
+import { Calendar, DollarSign, Users, Share2, CalendarPlus, DoorOpen } from 'lucide-react';
 import EventSeatingModal from './EventSeatingModal';
 import ResponsiveImage from './ResponsiveImage';
 import { API_BASE, getImageUrlSync } from '../App';
