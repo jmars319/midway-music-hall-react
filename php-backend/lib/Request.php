@@ -11,6 +11,8 @@ class Request
     public ?array $json;
     public array $files;
     public array $headers;
+    public string $rawBody;
+    public int $jsonErrorCode = JSON_ERROR_NONE;
 
     public function __construct()
     {
@@ -24,9 +26,11 @@ class Request
 
         $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
         $raw = file_get_contents('php://input');
+        $this->rawBody = $raw ?: '';
         $jsonBody = null;
         if (is_string($contentType) && str_contains(strtolower($contentType), 'application/json')) {
             $jsonBody = json_decode($raw, true);
+            $this->jsonErrorCode = json_last_error();
             if (!is_array($jsonBody)) {
                 $jsonBody = [];
             }
@@ -40,6 +44,16 @@ class Request
     public function json(): array
     {
         return $this->json ?? [];
+    }
+
+    public function raw(): string
+    {
+        return $this->rawBody ?? '';
+    }
+
+    public function jsonError(): int
+    {
+        return $this->jsonErrorCode ?? JSON_ERROR_NONE;
     }
 
     public function input(string $key, $default = null)

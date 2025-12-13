@@ -43,14 +43,51 @@ define('IMAGE_MAX_DIMENSION', (int) Env::get('IMAGE_MAX_DIMENSION', 2000));
 define('IMAGE_JPEG_QUALITY', (int) Env::get('IMAGE_JPEG_QUALITY', 85));
 define('IMAGE_WEBP_QUALITY', (int) Env::get('IMAGE_WEBP_QUALITY', 85));
 define('IMAGE_PNG_COMPRESSION', (int) Env::get('IMAGE_PNG_COMPRESSION', 6));
+define('IMAGE_UPLOAD_MAX_BYTES', (int) Env::get('IMAGE_UPLOAD_MAX_BYTES', 8 * 1024 * 1024));
 
 define('LAYOUT_HISTORY_MAX', (int) Env::get('LAYOUT_HISTORY_MAX', 200));
 define('LAYOUT_HISTORY_RETENTION_DAYS', (int) Env::get('LAYOUT_HISTORY_RETENTION_DAYS', 90));
 
-header('Access-Control-Allow-Origin: *');
+$sessionCookie = Env::get('ADMIN_SESSION_COOKIE', 'mmh_admin');
+$sessionLifetime = max(3600, (int) Env::get('ADMIN_SESSION_LIFETIME', 60 * 60 * 24 * 7));
+$sessionIdle = max(900, (int) Env::get('ADMIN_SESSION_IDLE_TIMEOUT', 60 * 60 * 4));
+$sessionSecure = filter_var(Env::get('ADMIN_SESSION_COOKIE_SECURE', false), FILTER_VALIDATE_BOOL);
+define('ADMIN_SESSION_LIFETIME', $sessionLifetime);
+define('ADMIN_SESSION_IDLE_TIMEOUT', $sessionIdle);
+if (session_status() === PHP_SESSION_NONE) {
+    session_name($sessionCookie);
+    session_set_cookie_params([
+        'lifetime' => ADMIN_SESSION_LIFETIME,
+        'path' => '/',
+        'secure' => $sessionSecure,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    session_start();
+}
+
+$requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
+$configuredOrigin = Env::get('CORS_ALLOW_ORIGIN', '*');
+$allowOrigin = $configuredOrigin === '*' && $requestOrigin ? $requestOrigin : $configuredOrigin;
+$sendCredentials = $allowOrigin !== '*';
+header('Access-Control-Allow-Origin: ' . $allowOrigin);
+if ($allowOrigin !== '*') {
+    header('Vary: Origin');
+}
 header('Access-Control-Allow-Methods: GET,POST,PUT,PATCH,DELETE,OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
-header('Access-Control-Allow-Credentials: true');
+if ($sendCredentials) {
+    header('Access-Control-Allow-Credentials: true');
+}
+
+header('X-Frame-Options: SAMEORIGIN');
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+header("Permissions-Policy: fullscreen=(self 'https://www.google.com'), geolocation=()");
+$hsts = Env::get('FORCE_STRICT_TRANSPORT', false);
+if ($hsts && (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')) {
+    header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);

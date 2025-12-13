@@ -33,6 +33,19 @@ function parse_selected_seats($value): array
     return [];
 }
 
+class SeatRequestException extends RuntimeException
+{
+    public int $httpStatus;
+    public array $payload;
+
+    public function __construct(string $message, int $httpStatus = 400, array $payload = [])
+    {
+        parent::__construct($message);
+        $this->httpStatus = $httpStatus;
+        $this->payload = $payload;
+    }
+}
+
 function output_upload_error(string $message): void
 {
     Response::error($message, 400);
@@ -50,6 +63,15 @@ function save_uploaded_file(array $file): ?array
     finfo_close($finfo);
     $originalName = $file['name'] ?? 'upload';
     $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+    $fileSize = (int) ($file['size'] ?? 0);
+    if ($fileSize <= 0 && is_file($file['tmp_name'])) {
+        $fileSize = (int) filesize($file['tmp_name']);
+    }
+
+    if (IMAGE_UPLOAD_MAX_BYTES > 0 && $fileSize > IMAGE_UPLOAD_MAX_BYTES) {
+        $maxMb = round(IMAGE_UPLOAD_MAX_BYTES / (1024 * 1024));
+        return ['error' => "File exceeds the {$maxMb}MB limit"];
+    }
 
     if (!in_array($mime, $allowed, true)) {
         return ['error' => 'Only image files are allowed'];
@@ -58,7 +80,36 @@ function save_uploaded_file(array $file): ?array
         return ['error' => 'Only image files are allowed'];
     }
 
-    $unique = 'event-' . time() . '-' . mt_rand(100000, 999999999);
+    $hashPrefix = substr(sha1(($originalName ?: '') . $fileSize . microtime(true) . random_bytes(8)), 0, 12);
+    $unique = 'event-' . $hashPrefix . '-' . mt_rand(100000, 999999999);
+    $filename = $unique . '.' . $extension;
+    $targetPath = rtrim(UPLOADS_DIR, '/') . '/' . $filename;
+
+    $allowed = ['image/jpeg','image/png','image/gif','image/webp'];
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+    $originalName = $file['name'] ?? 'upload';
+    $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+    $fileSize = (int) ($file['size'] ?? 0);
+    if ($fileSize <= 0 && is_file($file['tmp_name'])) {
+        $fileSize = (int) filesize($file['tmp_name']);
+    }
+
+    if (IMAGE_UPLOAD_MAX_BYTES > 0 && $fileSize > IMAGE_UPLOAD_MAX_BYTES) {
+        $maxMb = round(IMAGE_UPLOAD_MAX_BYTES / (1024 * 1024));
+        return ['error' => "File exceeds the {$maxMb}MB limit"];
+    }
+
+    if (!in_array($mime, $allowed, true)) {
+        return ['error' => 'Only image files are allowed'];
+    }
+    if (!in_array($extension, ['jpg','jpeg','png','gif','webp'], true)) {
+        return ['error' => 'Only image files are allowed'];
+    }
+
+    $hashPrefix = substr(sha1(($originalName ?: '') . $fileSize . microtime(true) . random_bytes(8)), 0, 12);
+    $unique = 'event-' . $hashPrefix . '-' . mt_rand(100000, 999999999);
     $filename = $unique . '.' . $extension;
     $targetPath = rtrim(UPLOADS_DIR, '/') . '/' . $filename;
 
@@ -72,7 +123,7 @@ function save_uploaded_file(array $file): ?array
         'filename' => $filename,
         'path' => $targetPath,
         'mime' => $mime,
-        'size' => @filesize($targetPath) ?: ($file['size'] ?? null),
+        'size' => @filesize($targetPath) ?: $fileSize,
         'original_name' => $originalName,
         'width' => $optimization['width'] ?? null,
         'height' => $optimization['height'] ?? null,
@@ -80,6 +131,7 @@ function save_uploaded_file(array $file): ?array
         'webp_path' => $optimization['webp_path'] ?? null,
         'optimization_status' => $optimization['optimization_status'] ?? 'pending',
         'processing_notes' => $optimization['processing_notes'] ?? null,
+        'checksum' => is_file($targetPath) ? hash_file('sha256', $targetPath) : null,
     ];
 }
 
@@ -155,27 +207,290 @@ function normalize_phone_number($value): ?string
     return $digits !== '' ? $digits : null;
 }
 
+function normalize_layout_identifier($value): ?int
+{
+    if ($value === null || $value === '' || $value === false) {
+        return null;
+    }
+    if (is_numeric($value)) {
+        $int = (int) $value;
+        return $int > 0 ? $int : null;
+    }
+    return null;
+}
+
+function event_time_candidate(string $alias = 'e'): string
+{
+    return "NULLIF(TRIM(SUBSTRING_INDEX({$alias}.event_time, '-', 1)), '')";
+}
+
+function event_start_expression(string $alias = 'e'): string
+{
+    $timeCandidate = event_time_candidate($alias);
+    $twentyFour = "STR_TO_DATE(CONCAT({$alias}.event_date, ' ', $timeCandidate), '%Y-%m-%d %H:%i:%s')";
+    $twentyFourShort = "STR_TO_DATE(CONCAT({$alias}.event_date, ' ', $timeCandidate), '%Y-%m-%d %H:%i')";
+    $twelveHour = "STR_TO_DATE(CONCAT({$alias}.event_date, ' ', $timeCandidate), '%Y-%m-%d %h:%i %p')";
+    $defaultEvening = "STR_TO_DATE(CONCAT({$alias}.event_date, ' 18:00:00'), '%Y-%m-%d %H:%i:%s')";
+    return "COALESCE(
+        {$alias}.start_datetime,
+        CASE
+            WHEN {$alias}.event_date IS NOT NULL THEN
+                COALESCE(
+                    CASE WHEN $timeCandidate IS NOT NULL THEN COALESCE($twentyFour, $twentyFourShort) END,
+                    CASE WHEN $timeCandidate IS NOT NULL THEN $twelveHour END,
+                    $defaultEvening
+                )
+            ELSE NULL
+        END
+    )";
+}
+
+function event_end_expression(string $alias = 'e', int $fallbackHours = 4): string
+{
+    $startExpr = event_start_expression($alias);
+    $hours = max(1, $fallbackHours);
+    return "COALESCE({$alias}.end_datetime, DATE_ADD($startExpr, INTERVAL {$hours} HOUR))";
+}
+
+function events_table_has_column(PDO $pdo, string $column): bool
+{
+    static $cache = [];
+    $key = strtolower($column);
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+    try {
+        $stmt = $pdo->prepare('SHOW COLUMNS FROM events LIKE ?');
+        $stmt->execute([$column]);
+        $cache[$key] = (bool) $stmt->fetch();
+    } catch (Throwable $error) {
+        $cache[$key] = false;
+        if (APP_DEBUG) {
+            error_log('events_table_has_column failure: ' . $error->getMessage());
+        }
+    }
+    return $cache[$key];
+}
+
+function events_table_has_index(PDO $pdo, string $indexName): bool
+{
+    static $cache = [];
+    $key = strtolower($indexName);
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+    try {
+        $stmt = $pdo->prepare('SHOW INDEX FROM events WHERE Key_name = ?');
+        $stmt->execute([$indexName]);
+        $cache[$key] = (bool) $stmt->fetch();
+    } catch (Throwable $error) {
+        $cache[$key] = false;
+        if (APP_DEBUG) {
+            error_log('events_table_has_index failure: ' . $error->getMessage());
+        }
+    }
+    return $cache[$key];
+}
+
+function log_admin_session_state(string $message): void
+{
+    if (!APP_DEBUG) {
+        return;
+    }
+    $state = [
+        'session_status' => session_status(),
+        'session_name' => session_name(),
+        'has_admin_user' => isset($_SESSION['admin_user']),
+        'session_id_prefix' => session_id() ? substr(session_id(), 0, 8) : null,
+        'cookies' => array_keys($_COOKIE ?? []),
+        'admin_expires_at' => $_SESSION['admin_expires_at'] ?? null,
+        'admin_last_active' => $_SESSION['admin_last_active'] ?? null,
+    ];
+    error_log($message . ' ' . json_encode($state));
+}
+
+function sanitize_admin_user(array $row): array
+{
+    $username = $row['username'] ?? null;
+    $email = $row['email'] ?? null;
+    $rawDisplay = $row['display_name'] ?? $row['name'] ?? $row['full_name'] ?? $username ?? '';
+    if (!$rawDisplay && $email) {
+        $rawDisplay = explode('@', $email)[0] ?? '';
+    }
+    $display = trim($rawDisplay !== '' ? $rawDisplay : 'Admin');
+    if ($email && str_starts_with(strtolower($email), 'admin@')) {
+        $display = 'Admin';
+    }
+    return [
+        'id' => isset($row['id']) ? (int) $row['id'] : null,
+        'username' => $username ?? null,
+        'email' => $email ?? null,
+        'display_name' => $display,
+    ];
+}
+
+function start_admin_session(array $user): array
+{
+    $expiresAt = time() + ADMIN_SESSION_LIFETIME;
+    $_SESSION['admin_user'] = $user;
+    $_SESSION['admin_expires_at'] = $expiresAt;
+    $_SESSION['admin_last_active'] = time();
+    return [
+        'user' => $user,
+        'expires_at' => gmdate(DateTimeInterface::ATOM, $expiresAt),
+        'idle_timeout_seconds' => ADMIN_SESSION_IDLE_TIMEOUT,
+    ];
+}
+
+function current_admin_session(): ?array
+{
+    if (session_status() !== PHP_SESSION_ACTIVE || empty($_SESSION['admin_user'])) {
+        return null;
+    }
+    $now = time();
+    $expiresAt = (int) ($_SESSION['admin_expires_at'] ?? 0);
+    $lastActive = (int) ($_SESSION['admin_last_active'] ?? 0);
+    if (($expiresAt && $expiresAt < $now) || ($lastActive && ($now - $lastActive) > ADMIN_SESSION_IDLE_TIMEOUT)) {
+        destroy_admin_session();
+        return null;
+    }
+    return [
+        'user' => $_SESSION['admin_user'],
+        'expires_at' => $expiresAt ? gmdate(DateTimeInterface::ATOM, $expiresAt) : null,
+        'idle_timeout_seconds' => ADMIN_SESSION_IDLE_TIMEOUT,
+    ];
+}
+
+function refresh_admin_session(): ?array
+{
+    if (session_status() !== PHP_SESSION_ACTIVE || empty($_SESSION['admin_user'])) {
+        return null;
+    }
+    $_SESSION['admin_last_active'] = time();
+    return current_admin_session();
+}
+
+function destroy_admin_session(): void
+{
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        return;
+    }
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'] ?? '', $params['secure'] ?? false, $params['httponly'] ?? true);
+    }
+    session_destroy();
+}
+
 function now_eastern(): DateTimeImmutable
 {
     return new DateTimeImmutable('now', new DateTimeZone('America/New_York'));
 }
 
+function resolve_event_start_datetime(array $event): ?DateTimeImmutable
+{
+    $tz = new DateTimeZone($event['timezone'] ?? 'America/New_York');
+    $start = $event['start_datetime'] ?? null;
+    if ($start) {
+        try {
+            return new DateTimeImmutable($start, $tz);
+        } catch (Throwable $e) {
+            // fall through
+        }
+    }
+    if (!empty($event['event_date'])) {
+        $timePart = $event['event_time'] ?? '00:00:00';
+        $candidate = $event['event_date'] . ' ' . $timePart;
+        try {
+            return new DateTimeImmutable($candidate, $tz);
+        } catch (Throwable $e) {
+            // ignore
+        }
+    }
+    return null;
+}
+
+function resolve_event_end_datetime(array $event, int $fallbackHours = 4): ?DateTimeImmutable
+{
+    $tz = new DateTimeZone($event['timezone'] ?? 'America/New_York');
+    $end = $event['end_datetime'] ?? null;
+    if ($end) {
+        try {
+            return new DateTimeImmutable($end, $tz);
+        } catch (Throwable $e) {
+            // fall through
+        }
+    }
+    $start = resolve_event_start_datetime($event);
+    if ($start) {
+        return $start->modify('+' . max(1, $fallbackHours) . ' hours');
+    }
+    return null;
+}
+
 function compute_hold_expiration(DateTimeImmutable $now): DateTimeImmutable
 {
-    $cutoff = $now->setTime(18, 0);
-    $oneHourBefore = $cutoff->modify('-1 hour');
-    if ($now < $oneHourBefore) {
-        return $cutoff;
+    return $now->modify('+24 hours');
+}
+
+function seat_request_status_aliases(): array
+{
+    return [
+        'new' => 'new',
+        'hold' => 'new',
+        'contacted' => 'contacted',
+        'waiting' => 'waiting',
+        'pending' => 'waiting',
+        'confirmed' => 'confirmed',
+        'finalized' => 'confirmed',
+        'approved' => 'confirmed',
+        'declined' => 'declined',
+        'denied' => 'declined',
+        'closed' => 'closed',
+        'cancelled' => 'closed',
+        'spam' => 'spam',
+        'expired' => 'expired',
+    ];
+}
+
+function canonical_seat_request_statuses(): array
+{
+    return ['new', 'contacted', 'waiting', 'confirmed', 'declined', 'closed', 'spam', 'expired'];
+}
+
+function open_seat_request_statuses(): array
+{
+    return ['new', 'contacted', 'waiting'];
+}
+
+function normalize_seat_request_status(?string $status): string
+{
+    if ($status === null) {
+        return 'new';
     }
-    if ($now >= $oneHourBefore && $now < $cutoff) {
-        return $cutoff->modify('+1 day');
+    $map = seat_request_status_aliases();
+    $normalized = strtolower(trim($status));
+    return $map[$normalized] ?? $normalized ?: 'new';
+}
+
+function seat_request_admin_actor(): string
+{
+    $session = current_admin_session();
+    if ($session && !empty($session['user'])) {
+        $user = $session['user'];
+        return $user['display_name'] ?? $user['username'] ?? $user['email'] ?? 'admin';
     }
-    return $now->modify('+1 day');
+    return 'admin';
 }
 
 function expire_stale_holds(PDO $pdo): void
 {
-    $pdo->exec("UPDATE seat_requests SET status = 'cancelled', change_note = 'auto-expired hold', updated_at = NOW() WHERE status = 'hold' AND hold_expires_at IS NOT NULL AND hold_expires_at < NOW()");
+    $statuses = array_merge(open_seat_request_statuses(), ['hold', 'pending']);
+    $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+    $sql = "UPDATE seat_requests SET status = 'expired', change_note = 'auto-expired hold', hold_expires_at = NULL, updated_at = NOW() WHERE status IN ($placeholders) AND hold_expires_at IS NOT NULL AND hold_expires_at < NOW()";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($statuses);
 }
 
 function snapshot_layout_version(PDO $pdo, ?int $layoutId, string $changeNote = 'auto-snapshot'): ?int
@@ -208,6 +523,9 @@ function snapshot_layout_version(PDO $pdo, ?int $layoutId, string $changeNote = 
 
 function ensure_event_layout_version(PDO $pdo, ?int $layoutId, ?int $requestedVersion = null): ?int
 {
+    if (!$layoutId) {
+        return null;
+    }
     if ($requestedVersion) {
         $check = $pdo->prepare('SELECT id FROM seating_layout_versions WHERE id = ? AND layout_id = ?');
         $check->execute([$requestedVersion, $layoutId]);
@@ -225,14 +543,29 @@ function detect_seat_conflicts(PDO $pdo, int $eventId, array $seatIds): array
     }
     $conflicts = [];
     $now = now_eastern();
-    $stmt = $pdo->prepare("SELECT selected_seats, status, hold_expires_at FROM seat_requests WHERE event_id = ? AND status IN ('hold','pending','approved','finalized')");
+    $stmt = $pdo->prepare("SELECT selected_seats, status, hold_expires_at FROM seat_requests WHERE event_id = ?");
     $stmt->execute([$eventId]);
+    $holdStatuses = open_seat_request_statuses();
     while ($row = $stmt->fetch()) {
-        if (in_array($row['status'], ['hold','pending'], true) && $row['hold_expires_at']) {
-            $expiry = new DateTimeImmutable($row['hold_expires_at'], new DateTimeZone('UTC'));
-            if ($expiry < $now) {
-                continue;
+        $status = normalize_seat_request_status($row['status'] ?? null);
+        $shouldConsider = false;
+        if ($status === 'confirmed') {
+            $shouldConsider = true;
+        } elseif (in_array($status, $holdStatuses, true)) {
+            $shouldConsider = true;
+            if (!empty($row['hold_expires_at'])) {
+                try {
+                    $expiry = new DateTimeImmutable($row['hold_expires_at'], new DateTimeZone('America/New_York'));
+                    if ($expiry < $now) {
+                        $shouldConsider = false;
+                    }
+                } catch (Throwable $e) {
+                    // if parsing fails, default to considering the hold to be safe
+                }
             }
+        }
+        if (!$shouldConsider) {
+            continue;
         }
         $existing = parse_selected_seats($row['selected_seats']);
         foreach ($existing as $seat) {
@@ -254,6 +587,156 @@ function detect_seat_conflicts(PDO $pdo, int $eventId, array $seatIds): array
     return array_values(array_unique($conflicts));
 }
 
+function parse_seat_identifier(string $seatId): array
+{
+    $parts = explode('-', $seatId);
+    if (count($parts) < 3) {
+        return [null, null, null];
+    }
+    $seatNum = array_pop($parts);
+    $rowLabel = array_pop($parts);
+    $section = implode('-', $parts);
+    return [$section, $rowLabel, $seatNum];
+}
+
+function apply_seat_reservations(PDO $pdo, array $seatIds): void
+{
+    foreach ($seatIds as $seatId) {
+        [$section, $rowLabel] = parse_seat_identifier($seatId);
+        if (!$section || !$rowLabel) {
+            continue;
+        }
+        $stmt = $pdo->prepare('SELECT id, selected_seats FROM seating WHERE section = ? AND row_label = ? LIMIT 1');
+        $stmt->execute([$section, $rowLabel]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            continue;
+        }
+        $existing = parse_selected_seats($row['selected_seats']);
+        if (!in_array($seatId, $existing, true)) {
+            $existing[] = $seatId;
+            $update = $pdo->prepare('UPDATE seating SET selected_seats = ? WHERE id = ?');
+            $update->execute([json_encode($existing), $row['id']]);
+        }
+    }
+}
+
+function create_seat_request_record(PDO $pdo, array $payload, array $options = []): array
+{
+    expire_stale_holds($pdo);
+    $createdBy = $options['created_by'] ?? 'public';
+    $updatedBy = $options['updated_by'] ?? $createdBy;
+    $defaultStatus = normalize_seat_request_status($options['default_status'] ?? 'new');
+    $allowOverride = !empty($options['allow_status_override']);
+    $forcedStatus = $options['forced_status'] ?? null;
+    $statusInput = $forcedStatus ?? ($allowOverride ? ($payload['status'] ?? null) : null);
+    $status = $statusInput ? normalize_seat_request_status($statusInput) : $defaultStatus;
+    if (!in_array($status, canonical_seat_request_statuses(), true)) {
+        $status = $defaultStatus;
+    }
+    $rawSeats = $payload['selected_seats'] ?? $payload['selectedSeats'] ?? [];
+    if (!is_array($rawSeats)) {
+        $rawSeats = [];
+    }
+    $selectedSeats = array_values(array_filter(array_map(function ($seat) {
+        return is_string($seat) ? trim($seat) : '';
+    }, $rawSeats), function ($seat) {
+        return $seat !== '';
+    }));
+    if (empty($selectedSeats)) {
+        throw new SeatRequestException('selected_seats is required');
+    }
+    $eventIdRaw = $payload['event_id'] ?? $payload['eventId'] ?? null;
+    $eventId = (int) $eventIdRaw;
+    if ($eventId <= 0) {
+        throw new SeatRequestException('event_id is required');
+    }
+    $customerName = trim((string)($payload['customer_name'] ?? $payload['customerName'] ?? ''));
+    if ($customerName === '') {
+        throw new SeatRequestException('customer_name is required');
+    }
+    $contactPayload = $payload['contact'] ?? $payload['contactInfo'] ?? [];
+    $contactPhone = isset($contactPayload['phone']) ? trim((string)$contactPayload['phone']) : '';
+    if ($contactPhone === '') {
+        throw new SeatRequestException('phone is required');
+    }
+    $customerEmail = isset($contactPayload['email']) ? trim((string)$contactPayload['email']) : '';
+    if ($customerEmail && !filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) {
+        throw new SeatRequestException('Invalid email address');
+    }
+    $customerPhoneNormalized = normalize_phone_number($contactPhone) ?: null;
+
+    $eventStmt = $pdo->prepare('SELECT id, layout_id, layout_version_id, seating_enabled FROM events WHERE id = ? LIMIT 1');
+    $eventStmt->execute([$eventId]);
+    $event = $eventStmt->fetch();
+    if (!$event) {
+        throw new SeatRequestException('Event not found', 404);
+    }
+    $hasLayout = !empty($event['layout_id']) || !empty($event['layout_version_id']);
+    if ((int)($event['seating_enabled'] ?? 0) !== 1 || !$hasLayout) {
+        throw new SeatRequestException('Seating requests are not available for this event');
+    }
+
+    $conflicts = detect_seat_conflicts($pdo, $eventId, $selectedSeats);
+    if (!empty($conflicts)) {
+        throw new SeatRequestException('Seats unavailable', 409, ['conflicts' => $conflicts]);
+    }
+
+    $now = now_eastern();
+    $holdDate = null;
+    if (in_array($status, open_seat_request_statuses(), true)) {
+        $holdDate = compute_hold_expiration($now);
+    }
+    $holdExpiry = $holdDate ? $holdDate->format('Y-m-d H:i:s') : null;
+    $finalizedAt = $status === 'confirmed' ? $now->format('Y-m-d H:i:s') : null;
+
+    $layoutVersionId = $event['layout_version_id'];
+    if (!$layoutVersionId && $event['layout_id']) {
+        $layoutVersionId = snapshot_layout_version($pdo, $event['layout_id'], 'auto-reservation');
+        if ($layoutVersionId) {
+            Database::run('UPDATE events SET layout_version_id = ? WHERE id = ?', [$layoutVersionId, $eventId]);
+        }
+    }
+    $snapshotData = null;
+    if ($layoutVersionId) {
+        $snapStmt = $pdo->prepare('SELECT layout_data FROM seating_layout_versions WHERE id = ? LIMIT 1');
+        $snapStmt->execute([$layoutVersionId]);
+        $snapshotRow = $snapStmt->fetch();
+        $snapshotData = $snapshotRow ? $snapshotRow['layout_data'] : null;
+    }
+
+    Database::run(
+        'INSERT INTO seat_requests (event_id, layout_version_id, seat_map_snapshot, customer_name, customer_email, customer_phone, customer_phone_normalized, selected_seats, total_seats, special_requests, status, hold_expires_at, finalized_at, created_by, updated_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+        [
+            $eventId,
+            $layoutVersionId,
+            $snapshotData,
+            $customerName,
+            $customerEmail ?: '',
+            $contactPhone,
+            $customerPhoneNormalized,
+            json_encode($selectedSeats),
+            count($selectedSeats),
+            $payload['special_requests'] ?? $payload['specialRequests'] ?? null,
+            $status,
+            $holdExpiry,
+            $finalizedAt,
+            $createdBy,
+            $updatedBy
+        ]
+    );
+    $id = (int) $pdo->lastInsertId();
+    if ($status === 'confirmed') {
+        apply_seat_reservations($pdo, $selectedSeats);
+    }
+    $createdStmt = $pdo->prepare('SELECT * FROM seat_requests WHERE id = ? LIMIT 1');
+    $createdStmt->execute([$id]);
+    $created = $createdStmt->fetch() ?: ['id' => $id];
+    return [
+        'seat_request' => $created,
+        'hold_expires_at' => $holdDate ? $holdDate->format(DateTimeInterface::ATOM) : null,
+    ];
+}
 function list_events(Request $request, ?string $scopeOverride = null): array
 {
     $pdo = Database::connection();
@@ -265,6 +748,11 @@ function list_events(Request $request, ?string $scopeOverride = null): array
     $status = strtolower(trim((string)($request->query['status'] ?? '')));
     $limit = (int)($request->query['limit'] ?? 200);
     $limit = max(1, min($limit, 500));
+    $page = max(1, (int)($request->query['page'] ?? 1));
+    $offset = ($page - 1) * $limit;
+    $timeframe = strtolower(trim((string)($request->query['timeframe'] ?? '')));
+    $archivedFilterRaw = isset($request->query['archived']) ? strtolower(trim((string)$request->query['archived'])) : null;
+    $hasArchivedColumn = events_table_has_column($pdo, 'archived_at');
 
     if (!$includeDeleted) {
         $conditions[] = 'e.deleted_at IS NULL';
@@ -277,16 +765,71 @@ function list_events(Request $request, ?string $scopeOverride = null): array
         $conditions[] = 'e.status = ?';
         $params[] = $status;
     }
+    if ($hasArchivedColumn) {
+        if ($archivedFilterRaw === '1') {
+            $conditions[] = 'e.archived_at IS NOT NULL';
+        } elseif ($archivedFilterRaw === 'all') {
+            // no-op
+        } else {
+            $conditions[] = 'e.archived_at IS NULL';
+        }
+    } else {
+        if ($archivedFilterRaw === '1') {
+            $conditions[] = 'e.status = ?';
+            $params[] = 'archived';
+        } elseif ($archivedFilterRaw === 'all') {
+            // leave rows as-is
+        } else {
+            $conditions[] = 'e.status != ?';
+            $params[] = 'archived';
+        }
+    }
     if ($scope === 'public') {
         $conditions[] = "e.status = 'published'";
         $conditions[] = "e.visibility = 'public'";
     }
+    $nowExpr = "NOW()";
+    $endExpr = event_end_expression('e');
+    $orderBy = 'ORDER BY e.start_datetime ASC';
+    if ($timeframe === 'upcoming') {
+        $conditions[] = "$endExpr >= $nowExpr";
+        $orderBy = 'ORDER BY e.start_datetime ASC';
+    } elseif ($timeframe === 'past') {
+        $conditions[] = "$endExpr < $nowExpr";
+        $orderBy = 'ORDER BY e.start_datetime DESC';
+    }
     $where = $conditions ? ('WHERE ' . implode(' AND ', $conditions)) : '';
-    $sql = "SELECT e.* FROM events e $where ORDER BY e.start_datetime ASC LIMIT ?";
-    $params[] = $limit;
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    return $stmt->fetchAll() ?: [];
+    $limitClause = "LIMIT $limit OFFSET $offset";
+    $sql = "SELECT e.* FROM events e $where $orderBy $limitClause";
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll() ?: [];
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            $safeParams = array_map(function ($value) {
+                if (is_scalar($value) || $value === null) {
+                    return $value;
+                }
+                return json_encode($value);
+            }, $params);
+            $context = [
+                'scope' => $scope,
+                'venue' => $venue,
+                'status' => $status,
+                'limit' => $limit,
+                'page' => $page,
+                'timeframe' => $timeframe,
+                'archived' => $archivedFilterRaw,
+                'has_archived_column' => $hasArchivedColumn,
+                'where' => $where,
+                'sql' => $sql,
+                'params' => $safeParams,
+            ];
+            error_log('list_events failure: ' . $error->getMessage() . ' context=' . json_encode($context));
+        }
+        throw $error;
+    }
 }
 
 function ensure_unique_slug(PDO $pdo, string $base, ?int $ignoreId = null): string
@@ -313,7 +856,14 @@ function ensure_unique_slug(PDO $pdo, string $base, ?int $ignoreId = null): stri
 function read_json_body(Request $request): array
 {
     $payload = $request->json();
-    return is_array($payload) ? $payload : [];
+    if (!is_array($payload)) {
+        $payload = [];
+    }
+    $raw = trim($request->raw());
+    if ($raw !== '' && $request->jsonError() !== JSON_ERROR_NONE) {
+        Response::error('Invalid JSON payload', 400);
+    }
+    return $payload;
 }
 
 function format_contact(array $row): array
@@ -365,19 +915,153 @@ $router->add('POST', '/api/upload-image', function (Request $request) {
 
 $router->add('POST', '/api/login', function (Request $request) {
     $payload = read_json_body($request);
-    $email = $payload['email'] ?? '';
-    $password = $payload['password'] ?? '';
+    $email = trim((string) ($payload['email'] ?? ''));
+    $password = (string) ($payload['password'] ?? '');
 
     if ($email === 'admin' && $password === 'admin123') {
-        return Response::success(['user' => ['username' => 'admin', 'name' => 'Admin', 'email' => 'admin@midwaymusichall.net']]);
+        $user = sanitize_admin_user([
+            'username' => 'admin',
+            'email' => 'admin@midwaymusichall.net',
+            'display_name' => 'Admin',
+        ]);
+        $session = start_admin_session($user);
+        return Response::success([
+            'user' => $session['user'],
+            'session' => [
+                'expires_at' => $session['expires_at'],
+                'idle_timeout_seconds' => $session['idle_timeout_seconds'],
+            ],
+        ]);
     }
     $stmt = Database::run('SELECT * FROM admins WHERE username = ? OR email = ? LIMIT 1', [$email, $email]);
     $row = $stmt->fetch();
     if (!$row || !password_verify($password, $row['password_hash'] ?? '')) {
+        destroy_admin_session();
         return Response::error('Invalid credentials', 401);
     }
-    unset($row['password_hash']);
-    Response::success(['user' => $row]);
+    $user = sanitize_admin_user($row);
+    $session = start_admin_session($user);
+    Response::success([
+        'user' => $session['user'],
+        'session' => [
+            'expires_at' => $session['expires_at'],
+            'idle_timeout_seconds' => $session['idle_timeout_seconds'],
+        ],
+    ]);
+});
+
+$router->add('POST', '/api/events/:id/archive', function ($request, $params) {
+    $targetId = (int) $params['id'];
+    $pdo = Database::connection();
+    if (events_table_has_column($pdo, 'archived_at')) {
+        Database::run('UPDATE events SET archived_at = NOW(), status = ?, visibility = ? WHERE id = ?', ['archived', 'private', $targetId]);
+    } else {
+        if (APP_DEBUG) {
+            error_log('Archive requested but archived_at column missing; falling back to status/visibility only.');
+        }
+        Database::run('UPDATE events SET status = ?, visibility = ? WHERE id = ?', ['archived', 'private', $targetId]);
+    }
+    Response::success(['archived' => true]);
+});
+
+$router->add('POST', '/api/events/:id/restore', function (Request $request, $params) {
+    $targetId = (int) $params['id'];
+    $payload = read_json_body($request);
+    $status = in_array($payload['status'] ?? 'draft', ['draft','published','archived'], true) ? ($payload['status'] ?? 'draft') : 'draft';
+    $visibility = in_array($payload['visibility'] ?? 'public', ['public','private'], true) ? ($payload['visibility'] ?? 'public') : 'public';
+    $pdo = Database::connection();
+    if (events_table_has_column($pdo, 'archived_at')) {
+        Database::run('UPDATE events SET archived_at = NULL, status = ?, visibility = ? WHERE id = ?', [$status, $visibility, $targetId]);
+    } else {
+        if (APP_DEBUG) {
+            error_log('Restore requested but archived_at column missing; updating status/visibility only.');
+        }
+        Database::run('UPDATE events SET status = ?, visibility = ? WHERE id = ?', [$status, $visibility, $targetId]);
+    }
+    Response::success(['archived' => false]);
+});
+
+$router->add('GET', '/api/events/:id.ics', function ($request, $params) {
+    $stmt = Database::run('SELECT * FROM events WHERE id = ? LIMIT 1', [$params['id']]);
+    $event = $stmt->fetch();
+    if (!$event) {
+        http_response_code(404);
+        header('Content-Type: text/plain');
+        echo 'Event not found';
+        return;
+    }
+    $start = resolve_event_start_datetime($event);
+    if (!$start) {
+        http_response_code(400);
+        header('Content-Type: text/plain');
+        echo 'Event start time unavailable';
+        return;
+    }
+    $end = resolve_event_end_datetime($event);
+    $dtStart = $start->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z');
+    $dtEnd = $end ? $end->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z') : $start->modify('+4 hours')->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z');
+    $host = $_SERVER['HTTP_HOST'] ?? 'midwaymusichall.com';
+    $uid = sprintf('mmh-%d@%s', $event['id'], $host);
+    $title = $event['artist_name'] ?: ($event['title'] ?? 'Midway Music Hall Event');
+    $location = trim(($event['venue_section'] ?? '') . ' ' . ($event['venue_code'] ?? ''));
+    if ($location === '') {
+        $location = 'Midway Music Hall, 11141 Old US Hwy 52, Winston-Salem, NC 27107';
+    }
+    $description = trim(($event['description'] ?? '') . "\nContact: " . ($event['contact_name'] ?? 'Venue'));
+    header('Content-Type: text/calendar; charset=utf-8');
+    header('Content-Disposition: attachment; filename="event-' . $event['id'] . '.ics"');
+    echo "BEGIN:VCALENDAR\r\n";
+    echo "VERSION:2.0\r\n";
+    echo "PRODID:-//Midway Music Hall//Events//EN\r\n";
+    echo "BEGIN:VEVENT\r\n";
+    echo "UID:$uid\r\n";
+    echo "DTSTAMP:" . gmdate('Ymd\THis\Z') . "\r\n";
+    echo "DTSTART:$dtStart\r\n";
+    echo "DTEND:$dtEnd\r\n";
+    echo "SUMMARY:" . addcslashes($title, ",;\\") . "\r\n";
+    echo "LOCATION:" . addcslashes($location, ",;\\") . "\r\n";
+    if ($description !== '') {
+        echo "DESCRIPTION:" . addcslashes($description, ",;\\n") . "\r\n";
+    }
+    echo "END:VEVENT\r\n";
+    echo "END:VCALENDAR\r\n";
+});
+
+$router->add('GET', '/api/session', function () {
+    $session = current_admin_session();
+    if (!$session) {
+        log_admin_session_state('GET /api/session unauthenticated');
+        return Response::success(['authenticated' => false]);
+    }
+    $refreshed = refresh_admin_session() ?? $session;
+    Response::success([
+        'authenticated' => true,
+        'user' => $refreshed['user'],
+        'session' => [
+            'expires_at' => $refreshed['expires_at'],
+            'idle_timeout_seconds' => $refreshed['idle_timeout_seconds'],
+        ],
+    ]);
+});
+
+$router->add('POST', '/api/session/refresh', function () {
+    $session = refresh_admin_session();
+    if (!$session) {
+        log_admin_session_state('POST /api/session/refresh failed');
+        return Response::error('Session expired', 401);
+    }
+    Response::success([
+        'user' => $session['user'],
+        'session' => [
+            'expires_at' => $session['expires_at'],
+            'idle_timeout_seconds' => $session['idle_timeout_seconds'],
+        ],
+    ]);
+});
+
+$router->add('POST', '/api/logout', function () {
+    destroy_admin_session();
+    Response::success(['status' => 'logged_out']);
 });
 
 $router->add('GET', '/api/events', function (Request $request) {
@@ -441,9 +1125,16 @@ $router->add('POST', '/api/events', function (Request $request) {
         $ticketType = in_array($payload['ticket_type'] ?? 'general_admission', ['general_admission','reserved_seating','hybrid'], true) ? $payload['ticket_type'] : 'general_admission';
         $status = in_array($payload['status'] ?? 'draft', ['draft','published','archived'], true) ? $payload['status'] : 'draft';
         $visibility = in_array($payload['visibility'] ?? 'public', ['public','private'], true) ? $payload['visibility'] : 'public';
-        $seatingEnabled = !empty($payload['seating_enabled']) ? 1 : 0;
-        $layoutId = $payload['layout_id'] ?? null;
-        $layoutVersionId = $seatingEnabled ? ensure_event_layout_version($pdo, $layoutId, $payload['layout_version_id'] ?? null) : null;
+        $rawLayoutId = array_key_exists('layout_id', $payload) ? $payload['layout_id'] : null;
+        $layoutId = normalize_layout_identifier($rawLayoutId);
+        $rawRequestedVersion = array_key_exists('layout_version_id', $payload) ? $payload['layout_version_id'] : null;
+        $requestedVersion = normalize_layout_identifier($rawRequestedVersion);
+        $explicitSeating = array_key_exists('seating_enabled', $payload) ? (!empty($payload['seating_enabled']) ? 1 : 0) : null;
+        $seatingEnabled = $explicitSeating ?? ($layoutId ? 1 : 0);
+        if (!$layoutId) {
+            $seatingEnabled = 0;
+        }
+        $layoutVersionId = ($seatingEnabled && $layoutId) ? ensure_event_layout_version($pdo, $layoutId, $requestedVersion) : null;
 
         $categoryTags = $payload['category_tags'] ?? null;
         if (is_array($categoryTags)) {
@@ -545,9 +1236,14 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $status = in_array($payload['status'] ?? $existing['status'] ?? 'draft', ['draft','published','archived'], true) ? ($payload['status'] ?? $existing['status']) : ($existing['status'] ?? 'draft');
         $visibility = in_array($payload['visibility'] ?? $existing['visibility'] ?? 'public', ['public','private'], true) ? ($payload['visibility'] ?? $existing['visibility']) : ($existing['visibility'] ?? 'public');
         $seatingEnabled = array_key_exists('seating_enabled', $payload) ? (!empty($payload['seating_enabled']) ? 1 : 0) : (int)$existing['seating_enabled'];
-        $layoutId = $payload['layout_id'] ?? $existing['layout_id'];
-        $requestedVersion = $payload['layout_version_id'] ?? $existing['layout_version_id'];
-        $layoutVersionId = $seatingEnabled ? ensure_event_layout_version($pdo, $layoutId, $requestedVersion) : null;
+        $rawLayoutValue = array_key_exists('layout_id', $payload) ? $payload['layout_id'] : $existing['layout_id'];
+        $layoutId = normalize_layout_identifier($rawLayoutValue);
+        $rawVersionValue = array_key_exists('layout_version_id', $payload) ? $payload['layout_version_id'] : $existing['layout_version_id'];
+        $requestedVersion = normalize_layout_identifier($rawVersionValue);
+        if (!$layoutId) {
+            $seatingEnabled = 0;
+        }
+        $layoutVersionId = ($seatingEnabled && $layoutId) ? ensure_event_layout_version($pdo, $layoutId, $requestedVersion) : null;
 
         $categoryTags = $payload['category_tags'] ?? $existing['category_tags'];
         if (is_array($categoryTags)) {
@@ -768,31 +1464,36 @@ $router->add('GET', '/api/seating/event/:eventId', function ($request, $params) 
     expire_stale_holds($pdo);
     $eventId = (int) $params['eventId'];
     [$layoutData, $stagePosition, $stageSize, $canvasSettings] = fetch_layout_for_event($eventId);
-    $stmt = $pdo->prepare('SELECT selected_seats, status, hold_expires_at FROM seat_requests WHERE event_id = ? AND status IN ("hold","pending","approved","finalized")');
+    $stmt = $pdo->prepare('SELECT selected_seats, status, hold_expires_at FROM seat_requests WHERE event_id = ?');
     $stmt->execute([$eventId]);
     $reserved = [];
     $pending = [];
     $holds = [];
     $finalized = [];
     $now = now_eastern();
+    $openStatuses = open_seat_request_statuses();
     while ($row = $stmt->fetch()) {
         $seats = parse_selected_seats($row['selected_seats']);
-        $status = strtolower($row['status'] ?? '');
-        if (in_array($status, ['hold','pending'], true) && $row['hold_expires_at']) {
-            $expires = new DateTimeImmutable($row['hold_expires_at'], new DateTimeZone('UTC'));
-            if ($expires < $now) {
-                continue;
+        $status = normalize_seat_request_status($row['status'] ?? null);
+        if (in_array($status, $openStatuses, true) && $row['hold_expires_at']) {
+            try {
+                $expires = new DateTimeImmutable($row['hold_expires_at'], new DateTimeZone('America/New_York'));
+                if ($expires < $now) {
+                    continue;
+                }
+            } catch (Throwable $e) {
+                // default to considering, safer to show as pending
             }
         }
         foreach ($seats as $seat) {
-            if (in_array($status, ['approved','finalized'], true)) {
+            if ($status === 'confirmed') {
                 $reserved[$seat] = true;
                 $finalized[$seat] = true;
-            } elseif ($status === 'hold') {
+            } elseif (in_array($status, $openStatuses, true)) {
                 $pending[$seat] = true;
-                $holds[$seat] = true;
-            } elseif ($status === 'pending') {
-                $pending[$seat] = true;
+                if ($status === 'new') {
+                    $holds[$seat] = true;
+                }
             }
         }
     }
@@ -1027,9 +1728,21 @@ $router->add('GET', '/api/seat-requests', function (Request $request) {
             $filters[] = 'sr.event_id = ?';
             $values[] = $request->query['event_id'];
         }
-        if (!empty($request->query['status'])) {
-            $filters[] = 'sr.status = ?';
-            $values[] = $request->query['status'];
+        $statusFilter = strtolower(trim((string) ($request->query['status'] ?? '')));
+        if ($statusFilter !== '' && $statusFilter !== 'all') {
+            if ($statusFilter === 'open') {
+                $statuses = open_seat_request_statuses();
+            } elseif (str_contains($statusFilter, ',')) {
+                $statuses = array_filter(array_map('trim', explode(',', $statusFilter)));
+            } else {
+                $statuses = [$statusFilter];
+            }
+            $statuses = array_values(array_unique(array_map('normalize_seat_request_status', $statuses)));
+            if ($statuses) {
+                $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+                $filters[] = "sr.status IN ($placeholders)";
+                $values = array_merge($values, $statuses);
+            }
         }
         $where = $filters ? ('WHERE ' . implode(' AND ', $filters)) : '';
         $sql = 'SELECT sr.*, e.title as event_title, e.start_datetime FROM seat_requests sr LEFT JOIN events e ON sr.event_id = e.id ' . $where . ' ORDER BY sr.created_at DESC';
@@ -1046,6 +1759,9 @@ $router->add('GET', '/api/seat-requests', function (Request $request) {
                 $decoded = json_decode($row['contact'], true);
                 $row['contact'] = is_array($decoded) ? $decoded : ['email' => $row['customer_email'] ?? null, 'phone' => $row['customer_phone'] ?? null];
             }
+            $row['status_raw'] = $row['status'];
+            $row['status'] = normalize_seat_request_status($row['status']);
+            $row['status_normalized'] = $row['status'];
             $requests[] = $row;
         }
         Response::success(['requests' => $requests]);
@@ -1054,6 +1770,36 @@ $router->add('GET', '/api/seat-requests', function (Request $request) {
             error_log('GET /api/seat-requests error: ' . $e->getMessage());
         }
         Response::error('Failed to fetch seat requests', 500);
+    }
+});
+
+$router->add('POST', '/api/admin/seat-requests', function (Request $request) {
+    $session = current_admin_session();
+    if (!$session) {
+        return Response::error('Unauthorized', 401);
+    }
+    try {
+        $payload = read_json_body($request);
+        $pdo = Database::connection();
+        $adminActor = seat_request_admin_actor();
+        $statusOverride = $payload['status'] ?? null;
+        $result = create_seat_request_record($pdo, $payload, [
+            'created_by' => $adminActor,
+            'updated_by' => $adminActor,
+            'default_status' => 'confirmed',
+            'allow_status_override' => true,
+            'forced_status' => $statusOverride,
+        ]);
+        Response::success($result);
+    } catch (SeatRequestException $validationError) {
+        Response::error($validationError->getMessage(), $validationError->httpStatus, $validationError->payload);
+    } catch (RuntimeException $validationError) {
+        Response::error($validationError->getMessage(), 400);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('POST /api/admin/seat-requests error: ' . $e->getMessage());
+        }
+        Response::error('Failed to create reservation', 500);
     }
 });
 
@@ -1069,6 +1815,11 @@ $router->add('POST', '/api/seat-requests/:id/approve', function ($request, $para
         if (!$requestRow) {
             $pdo->rollBack();
             return Response::error('Request not found', 404);
+        }
+        $currentStatus = normalize_seat_request_status($requestRow['status'] ?? null);
+        if ($currentStatus === 'confirmed') {
+            $pdo->rollBack();
+            return Response::success(['message' => 'Already confirmed']);
         }
         $seats = json_decode($requestRow['selected_seats'] ?? '[]', true) ?: [];
         $conflicts = [];
@@ -1092,25 +1843,10 @@ $router->add('POST', '/api/seat-requests/:id/approve', function ($request, $para
             $pdo->rollBack();
             return Response::error('Conflict - seats already reserved', 409, ['conflicts' => $conflicts]);
         }
-        foreach ($seats as $seatId) {
-            $parts = explode('-', $seatId);
-            $seatNum = array_pop($parts);
-            $rowLabel = array_pop($parts);
-            $section = implode('-', $parts);
-            $stmt = $pdo->prepare('SELECT id, selected_seats FROM seating WHERE section = ? AND row_label = ? LIMIT 1');
-            $stmt->execute([$section, $rowLabel]);
-            $row = $stmt->fetch();
-            if (!$row) {
-                continue;
-            }
-            $existing = json_decode($row['selected_seats'] ?? '[]', true) ?: [];
-            if (!in_array($seatId, $existing, true)) {
-                $existing[] = $seatId;
-                $update = $pdo->prepare('UPDATE seating SET selected_seats = ? WHERE id = ?');
-                $update->execute([json_encode($existing), $row['id']]);
-            }
-        }
-        $pdo->prepare('UPDATE seat_requests SET status = ?, finalized_at = NOW(), hold_expires_at = NULL WHERE id = ?')->execute(['finalized', $rid]);
+        apply_seat_reservations($pdo, $seats);
+        $actor = seat_request_admin_actor();
+        $pdo->prepare('UPDATE seat_requests SET status = ?, finalized_at = NOW(), hold_expires_at = NULL, updated_at = NOW(), updated_by = ?, change_note = ? WHERE id = ?')
+            ->execute(['confirmed', $actor, 'approved via admin', $rid]);
         $pdo->commit();
         Response::success();
     } catch (Throwable $e) {
@@ -1125,123 +1861,115 @@ $router->add('POST', '/api/seat-requests/:id/approve', function ($request, $para
 });
 
 $router->add('POST', '/api/seat-requests/:id/deny', function ($request, $params) {
-    expire_stale_holds(Database::connection());
-    Database::run('UPDATE seat_requests SET status = ?, hold_expires_at = NULL WHERE id = ?', ['denied', $params['id']]);
+    $pdo = Database::connection();
+    expire_stale_holds($pdo);
+    $actor = seat_request_admin_actor();
+    $stmt = $pdo->prepare('UPDATE seat_requests SET status = ?, hold_expires_at = NULL, updated_at = NOW(), updated_by = ?, change_note = ? WHERE id = ?');
+    $stmt->execute(['declined', $actor, 'declined via admin', $params['id']]);
+    if ($stmt->rowCount() === 0) {
+        return Response::error('Seat request not found', 404);
+    }
     Response::success();
 });
 
 $router->add('POST', '/api/seat-requests', function (Request $request) {
     try {
+        $rawBody = trim($request->raw());
+        $payload = json_decode($rawBody, true);
+        if ($rawBody !== '' && json_last_error() !== JSON_ERROR_NONE) {
+            return Response::error('Invalid JSON payload', 400, ['detail' => json_last_error_msg()]);
+        }
+        $payload = is_array($payload) ? $payload : [];
         $pdo = Database::connection();
-        expire_stale_holds($pdo);
-        $payload = read_json_body($request);
-        $eventId = (int)($payload['event_id'] ?? 0);
-        if ($eventId <= 0) {
-            return Response::error('event_id is required', 400);
-        }
-        $eventStmt = $pdo->prepare('SELECT id, layout_id, layout_version_id, seating_enabled FROM events WHERE id = ? LIMIT 1');
-        $eventStmt->execute([$eventId]);
-        $event = $eventStmt->fetch();
-        if (!$event) {
-            return Response::error('Event not found', 404);
-        }
-        $hasLayout = !empty($event['layout_id']) || !empty($event['layout_version_id']);
-        if ((int)($event['seating_enabled'] ?? 0) !== 1 || !$hasLayout) {
-            return Response::error('Seating requests are not available for this event', 400);
-        }
-        $selectedSeats = $payload['selected_seats'] ?? [];
-        if (!is_array($selectedSeats)) {
-            $selectedSeats = [];
-        }
-        $conflicts = detect_seat_conflicts($pdo, $eventId, $selectedSeats);
-        if (!empty($conflicts)) {
-            return Response::error('Seats unavailable', 409, ['conflicts' => $conflicts]);
-        }
-        $contact = $payload['contact'] ?? [];
-        $customerEmail = $contact['email'] ?? null;
-        $customerPhone = $contact['phone'] ?? null;
-        $customerPhoneNormalized = normalize_phone_number($customerPhone);
-        $totalSeats = count($selectedSeats);
-        $now = now_eastern();
-        $holdExpiry = compute_hold_expiration($now);
-        $layoutVersionId = $event['layout_version_id'];
-        if (!$layoutVersionId && $event['layout_id']) {
-            $layoutVersionId = snapshot_layout_version($pdo, $event['layout_id'], 'auto-reservation');
-            if ($layoutVersionId) {
-                Database::run('UPDATE events SET layout_version_id = ? WHERE id = ?', [$layoutVersionId, $eventId]);
-            }
-        }
-        $snapshotData = null;
-        if ($layoutVersionId) {
-            $snapStmt = $pdo->prepare('SELECT layout_data FROM seating_layout_versions WHERE id = ? LIMIT 1');
-            $snapStmt->execute([$layoutVersionId]);
-            $snapshotRow = $snapStmt->fetch();
-            $snapshotData = $snapshotRow ? $snapshotRow['layout_data'] : null;
-        }
-        Database::run(
-            'INSERT INTO seat_requests (event_id, layout_version_id, seat_map_snapshot, customer_name, customer_email, customer_phone, customer_phone_normalized, contact, selected_seats, total_seats, special_requests, status, hold_expires_at, created_by, updated_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-            [
-                $eventId,
-                $layoutVersionId,
-                $snapshotData,
-                $payload['customer_name'] ?? 'Guest',
-                $customerEmail,
-                $customerPhone,
-                $customerPhoneNormalized,
-                $contact ? json_encode($contact) : null,
-                json_encode($selectedSeats),
-                $totalSeats,
-                $payload['special_requests'] ?? null,
-                'hold',
-                $holdExpiry->format('Y-m-d H:i:s'),
-                'public',
-                'public'
-            ]
-        );
-        $id = (int) $pdo->lastInsertId();
-        Response::success(['id' => $id, 'hold_expires_at' => $holdExpiry->format(DateTimeInterface::ATOM)]);
+        $result = create_seat_request_record($pdo, $payload, [
+            'created_by' => 'public',
+            'updated_by' => 'public',
+            'default_status' => 'new',
+            'allow_status_override' => false,
+        ]);
+        Response::success($result);
+    } catch (SeatRequestException $validationError) {
+        Response::error($validationError->getMessage(), $validationError->httpStatus, $validationError->payload);
+    } catch (RuntimeException $validationError) {
+        Response::error($validationError->getMessage(), 400);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
-            error_log('POST /api/seat-requests error: ' . $e->getMessage());
+            error_log('[seat-requests] error: ' . $e->getMessage());
         }
-        Response::error('Failed to submit seat request', 500);
+        $extra = APP_DEBUG ? [
+            'detail' => $e->getMessage(),
+            'where' => $e->getFile() . ':' . $e->getLine(),
+        ] : [];
+        Response::error('Failed to submit seat request', 500, $extra);
     }
 });
 
 $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $params) {
     try {
+        $pdo = Database::connection();
+        expire_stale_holds($pdo);
         $payload = read_json_body($request);
+        if (array_key_exists('selectedSeats', $payload) && !array_key_exists('selected_seats', $payload)) {
+            $payload['selected_seats'] = $payload['selectedSeats'];
+        }
+        $requestId = (int) $params['id'];
+        $existingStmt = $pdo->prepare('SELECT id, status FROM seat_requests WHERE id = ? LIMIT 1');
+        $existingStmt->execute([$requestId]);
+        $existing = $existingStmt->fetch();
+        if (!$existing) {
+            return Response::error('Seat request not found', 404);
+        }
+        $targetStatus = normalize_seat_request_status($existing['status'] ?? 'new');
         $fields = [];
         $values = [];
-        $allowedStatuses = ['hold','pending','approved','denied','finalized','cancelled','expired'];
         if (array_key_exists('status', $payload)) {
-            $status = strtolower($payload['status']);
-            if (!in_array($status, $allowedStatuses, true)) {
+            $newStatus = normalize_seat_request_status($payload['status']);
+            if (!in_array($newStatus, canonical_seat_request_statuses(), true)) {
                 return Response::error('Invalid status', 400);
             }
-            if ($status === 'approved') {
-                $status = 'finalized';
+            if ($newStatus === 'confirmed') {
+                return Response::error('Use the finalize action to confirm seats', 400);
             }
+            $targetStatus = $newStatus;
             $fields[] = 'status = ?';
-            $values[] = $status;
-            if ($status === 'finalized') {
+            $values[] = $newStatus;
+            if ($newStatus === 'confirmed') {
                 $fields[] = 'finalized_at = NOW()';
                 $fields[] = 'hold_expires_at = NULL';
+            } elseif (in_array($newStatus, ['declined', 'closed', 'spam', 'expired'], true)) {
+                $fields[] = 'hold_expires_at = NULL';
+            } elseif (in_array($newStatus, open_seat_request_statuses(), true) && !array_key_exists('hold_expires_at', $payload)) {
+                $fields[] = 'hold_expires_at = ?';
+                $values[] = compute_hold_expiration(now_eastern())->format('Y-m-d H:i:s');
             }
+        }
+        $selectedSeatsPayload = $payload['selected_seats'] ?? null;
+        if ($selectedSeatsPayload !== null) {
+            if (!is_array($selectedSeatsPayload)) {
+                return Response::error('selected_seats must be an array of seat labels', 400);
+            }
+            $seatList = array_values(array_filter(array_map(function ($seat) {
+                return is_string($seat) ? trim($seat) : '';
+            }, $selectedSeatsPayload), function ($seat) {
+                return $seat !== '';
+            }));
+            if (in_array($targetStatus, ['confirmed', 'declined', 'closed', 'spam'], true)) {
+                return Response::error('Seats are locked once a request is finalized. Reopen it first.', 409);
+            }
+            $fields[] = 'selected_seats = ?';
+            $values[] = json_encode($seatList);
+            $fields[] = 'total_seats = ?';
+            $values[] = count($seatList);
         }
         foreach (['customer_name','customer_email','customer_phone','special_requests','staff_notes'] as $col) {
             if (array_key_exists($col, $payload)) {
                 $fields[] = $col . ' = ?';
                 $values[] = $payload[$col];
+                if ($col === 'customer_phone') {
+                    $fields[] = 'customer_phone_normalized = ?';
+                    $values[] = normalize_phone_number($payload[$col]);
+                }
             }
-        }
-        if (array_key_exists('contact', $payload)) {
-            $fields[] = 'contact = ?';
-            $values[] = $payload['contact'] ? json_encode($payload['contact']) : null;
-        }
-        if (array_key_exists('customer_phone', $payload)) {
-            $fields[] = 'customer_phone_normalized = ?';
-            $values[] = normalize_phone_number($payload['customer_phone']);
         }
         if (array_key_exists('hold_expires_at', $payload)) {
             $rawExpiry = $payload['hold_expires_at'];
@@ -1260,9 +1988,12 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
         if (!$fields) {
             return Response::error('No valid fields provided', 400);
         }
-        $values[] = $params['id'];
+        $fields[] = 'updated_by = ?';
+        $values[] = seat_request_admin_actor();
+        $values[] = $requestId;
         $sql = 'UPDATE seat_requests SET ' . implode(', ', $fields) . ' WHERE id = ?';
-        Database::run($sql, $values);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($values);
         Response::success();
     } catch (Throwable $e) {
         if (APP_DEBUG) {
@@ -1651,6 +2382,38 @@ $router->add('PUT', '/api/settings', function (Request $request) {
         Response::error('Failed to update settings', 500);
     }
 });
+
+if (APP_DEBUG) {
+    $router->add('GET', '/api/debug/schema-check', function () {
+        try {
+            $pdo = Database::connection();
+            $hasArchived = events_table_has_column($pdo, 'archived_at');
+            $hasArchivedIndex = events_table_has_index($pdo, 'idx_events_archived_at');
+            $totalEvents = (int) $pdo->query('SELECT COUNT(*) FROM events')->fetchColumn();
+            $nowExpr = "NOW()";
+            $endExpr = event_end_expression('e');
+            $upcomingSql = "SELECT COUNT(*) FROM events e WHERE $endExpr >= $nowExpr";
+            $upcomingEvents = (int) $pdo->query($upcomingSql)->fetchColumn();
+            $pastSql = "SELECT COUNT(*) FROM events e WHERE $endExpr < $nowExpr";
+            $pastEvents = (int) $pdo->query($pastSql)->fetchColumn();
+            $sampleStmt = $pdo->query("SELECT id, artist_name, status, visibility, start_datetime, event_date, event_time FROM events ORDER BY start_datetime DESC LIMIT 5");
+            $recent = $sampleStmt->fetchAll() ?: [];
+            Response::success([
+                'has_archived_at' => $hasArchived,
+                'has_archived_index' => $hasArchivedIndex,
+                'total_events' => $totalEvents,
+                'upcoming_events' => $upcomingEvents,
+                'past_events' => $pastEvents,
+                'recent_events' => $recent,
+            ]);
+        } catch (Throwable $error) {
+            if (APP_DEBUG) {
+                error_log('GET /api/debug/schema-check error: ' . $error->getMessage());
+            }
+            Response::error('Debug schema check failed', 500);
+        }
+    });
+}
 
 if (!$router->dispatch($request)) {
     Response::error('Not found', 404);
