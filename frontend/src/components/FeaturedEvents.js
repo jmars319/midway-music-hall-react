@@ -1,6 +1,8 @@
 import React from 'react';
 import { Sparkles } from 'lucide-react';
 import { getImageUrlSync } from '../App';
+import { formatEventDateTimeLabel, formatDoorsLabel } from '../utils/eventFormat';
+import ResponsiveImage from './ResponsiveImage';
 
 // Highlights the next few headline events at the top of the public site.
 export default function FeaturedEvents({ events = [], loading = false }) {
@@ -38,26 +40,25 @@ export default function FeaturedEvents({ events = [], loading = false }) {
               className="bg-gray-900 rounded-2xl border border-purple-500/30 shadow-xl overflow-hidden flex flex-col"
             >
               <div className="h-48 bg-gray-800 overflow-hidden">
-                <img
+                <ResponsiveImage
                   src={getImageUrlSync(event.image_url)}
                   alt={event.artist_name || event.title || 'Featured event'}
+                  width={640}
+                  height={384}
                   className="w-full h-full object-cover"
-                  onError={(e) => { e.target.src = '/android-chrome-192x192.png'; }}
                 />
               </div>
               <div className="p-6 flex-1 flex flex-col">
                 <p className="text-sm text-purple-300 uppercase tracking-wide mb-2">
-                  {new Date(event.start_datetime || event.event_date).toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    month: 'short',
-                    day: 'numeric',
-                  })}
+                  {formatEventDateTimeLabel(event)}
                 </p>
                 <h3 className="text-2xl font-semibold text-white">{event.artist_name || event.title}</h3>
                 <p className="text-gray-300 mt-3 flex-1">{event.description || event.notes || 'Live at Midway Music Hall'}</p>
-                <div className="mt-6 text-sm text-gray-400">
-                  Doors {event.door_time ? new Date(event.door_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : event.venue_code || 'MMH'}
-                </div>
+                {formatDoorsLabel(event) && (
+                  <div className="mt-6 text-sm text-gray-400">
+                    Doors {formatDoorsLabel(event)}
+                  </div>
+                )}
               </div>
             </article>
           ))}

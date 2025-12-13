@@ -12,13 +12,14 @@ const HERO_VARIANTS = {
     intervalKey: 'hero_slideshow_interval',
     defaults: {
       title: 'Midway Music Hall',
-      subtitle: 'Carolina beach music, shag dance nights, classic country, and the occasional rock show in a friendly, comfortable room.',
+      subtitle: 'Carolina beach music, shag dance nights, Americana roots, classic country, and the occasional rock show in a friendly, comfortable room.',
     },
     ctaLabel: 'Plan Your Visit',
     ctaTarget: 'about',
     theme: {
       gradient: 'from-purple-900 via-gray-900 to-blue-900',
-      overlay: 'bg-black/50',
+      overlayGradient: 'linear-gradient(180deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.35) 70%, rgba(0,0,0,0.1) 100%)',
+      overlayOpacity: 1,
       button: 'bg-purple-600 hover:bg-purple-700',
       icon: 'text-purple-300',
       cardBorder: 'border-purple-500/20',
@@ -27,17 +28,17 @@ const HERO_VARIANTS = {
       {
         icon: Calendar,
         title: 'Weekly Shows',
-        copy: 'Discover new and returning acts every week.',
+        copy: 'Beach music, shag nights, Americana, and classic country every week with the occasional rock feature.',
       },
       {
         icon: MapPin,
         title: 'Prime Location',
-        copy: 'Conveniently located with easy access and nearby parking.',
+        copy: 'Winston-Salem venue inside Midway Town Center with easy parking and direct Hwy 52 access.',
       },
       {
         icon: Music2,
         title: 'Beach, Shag & Country Nights',
-        copy: 'Carolina beach music, shag dancing, country shows, plus occasional rock features.',
+        copy: 'Carolina beach music, shag dancing, Americana roots, classic country, plus occasional rock.',
       },
     ],
   },
@@ -55,7 +56,8 @@ const HERO_VARIANTS = {
     ctaTarget: 'schedule',
     theme: {
       gradient: 'from-blue-900 via-gray-900 to-indigo-900',
-      overlay: 'bg-black/60',
+      overlayGradient: 'linear-gradient(180deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.4) 80%, rgba(0,0,0,0.15) 100%)',
+      overlayOpacity: 1,
       button: 'bg-blue-600 hover:bg-blue-700',
       icon: 'text-blue-300',
       cardBorder: 'border-blue-500/20',
@@ -152,6 +154,7 @@ export default function Hero({ variant = 'main', ctaTarget }) {
 
   const resolvedCtaTarget = ctaTarget || config.ctaTarget;
 
+  const textShadowStyle = { textShadow: '0 2px 6px rgba(0,0,0,0.45)' };
   return (
     <section className={`bg-gradient-to-br ${config.theme.gradient} text-white relative overflow-hidden`}>
       {heroImages.length > 0 && (
@@ -165,17 +168,23 @@ export default function Hero({ variant = 'main', ctaTarget }) {
               style={{ backgroundImage: `url(${SERVER_BASE}${image})` }}
             />
           ))}
-          <div className={`absolute inset-0 ${config.theme.overlay}`} />
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background: config.theme.overlayGradient || 'linear-gradient(180deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.25) 100%)',
+              opacity: config.theme.overlayOpacity ?? 1,
+            }}
+          />
         </div>
       )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 relative z-10">
         <div className="text-center">
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white mb-6">
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-white mb-6" style={textShadowStyle}>
             {heroTitle}
           </h1>
 
-          <p className="mt-4 text-xl text-gray-200 max-w-3xl mx-auto">
+          <p className="mt-4 text-xl text-gray-200 max-w-3xl mx-auto" style={textShadowStyle}>
             {heroSubtitle}
           </p>
 

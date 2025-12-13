@@ -41,13 +41,13 @@ export default function RecurringEvents({ series = [] }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {series.map((item) => {
             const { master, nextOccurrence, upcomingOccurrences, happeningThisWeek, scheduleLabel, summary } = item;
             return (
               <article
-                key={master.id}
-                className="bg-gray-900 rounded-2xl border border-purple-500/30 p-6 flex flex-col space-y-4"
+                key={item.key || master.id || scheduleLabel}
+                className="bg-gray-900 rounded-2xl border border-purple-500/30 p-5 flex flex-col space-y-4 h-full"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>

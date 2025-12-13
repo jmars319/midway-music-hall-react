@@ -1,6 +1,8 @@
 import React from 'react';
 import { Waves, Calendar } from 'lucide-react';
 
+const resolveDateValue = (event = {}) => event.start_datetime || event.event_date || event.date || null;
+
 const formatDate = (value) => {
   if (!value) return '';
   const date = new Date(value);
@@ -13,7 +15,13 @@ const formatDate = (value) => {
 };
 
 export default function BeachSeriesShowcase({ events = [] }) {
-  if (!events.length) {
+  const sortedEvents = [...events].sort((a, b) => {
+    const aTime = new Date(resolveDateValue(a) || 0).getTime();
+    const bTime = new Date(resolveDateValue(b) || 0).getTime();
+    return aTime - bTime;
+  });
+
+  if (!sortedEvents.length) {
     return null;
   }
 
@@ -29,14 +37,14 @@ export default function BeachSeriesShowcase({ events = [] }) {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {events.slice(0, 6).map((event) => (
+          {sortedEvents.map((event) => (
             <article key={event.id} className="bg-gray-950/80 rounded-2xl border border-cyan-500/30 p-5">
               <p className="text-xs uppercase tracking-widest text-cyan-200 mb-2">Beach Music</p>
               <h3 className="text-2xl font-semibold text-white">{event.artist_name || event.title}</h3>
               <p className="text-gray-300 mt-1">{event.description || event.notes || 'Classic Carolina beach music vibes.'}</p>
               <div className="flex items-center gap-2 text-gray-300 mt-4">
                 <Calendar className="h-4 w-4 text-cyan-200" />
-                <span>{formatDate(event.start_datetime || event.event_date)} · {event.venue_code || 'MMH'}</span>
+                <span>{formatDate(resolveDateValue(event))} · {event.venue_code || 'MMH'}</span>
               </div>
             </article>
           ))}

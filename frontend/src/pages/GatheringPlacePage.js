@@ -9,23 +9,50 @@ import { API_BASE } from '../App';
 export default function GatheringPlacePage({ onAdminClick, onNavigate }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [eventsError, setEventsError] = useState('');
 
   useEffect(() => {
     let mounted = true;
     const fetchEvents = async () => {
       setLoading(true);
+      setEventsError('');
       try {
-        const res = await fetch(`${API_BASE}/public/events?venue=TGP`);
-        const data = await res.json();
-        if (mounted && data.success && Array.isArray(data.events)) {
+        const params = new URLSearchParams({
+          venue: 'TGP',
+          timeframe: 'upcoming',
+          archived: '0',
+          limit: '200',
+        });
+        const res = await fetch(`${API_BASE}/public/events?${params.toString()}`);
+        const responseText = await res.text();
+        let data = null;
+        if (responseText) {
+          try {
+            data = JSON.parse(responseText);
+          } catch (parseErr) {
+            console.error('Failed to parse TGP events payload', parseErr, responseText);
+          }
+        }
+        if (!res.ok) {
+          console.error('TGP events API returned non-200', { status: res.status, body: responseText });
+          if (mounted) {
+            setEvents([]);
+            setEventsError(data?.message || data?.error || `Server returned status ${res.status}.`);
+          }
+          return;
+        }
+        if (mounted && data && data.success && Array.isArray(data.events)) {
           setEvents(data.events);
+          setEventsError('');
         } else if (mounted) {
           setEvents([]);
+          setEventsError('Events list is temporarily unavailable. Please try again soon.');
         }
       } catch (err) {
         console.error('Failed to fetch TGP events', err);
         if (mounted) {
           setEvents([]);
+          setEventsError('Events list is temporarily unavailable. Please try again soon.');
         }
       } finally {
         if (mounted) {
@@ -42,7 +69,7 @@ export default function GatheringPlacePage({ onAdminClick, onNavigate }) {
     <div className="min-h-screen bg-gray-900 text-white">
       <Navigation />
 
-      <main>
+      <main id="main" role="main">
         <Hero variant="tgp" ctaTarget="schedule" />
 
         <section id="schedule" className="py-12">
@@ -51,7 +78,7 @@ export default function GatheringPlacePage({ onAdminClick, onNavigate }) {
               <h2 className="text-3xl font-bold">Upcoming at The Gathering Place</h2>
               <p className="text-gray-300 mt-2">DJ nights, recurring dance sessions, and private-friendly bookings.</p>
             </div>
-            <Schedule events={events} loading={loading} />
+            <Schedule events={events} loading={loading} errorMessage={eventsError} />
           </div>
         </section>
 

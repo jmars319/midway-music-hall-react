@@ -1,40 +1,28 @@
 import React, { useState } from 'react';
 // Schedule: simple list of upcoming events used on the home page
-import { Calendar, Clock, DollarSign, Users } from 'lucide-react';
+import { Calendar, Clock, DollarSign, Users, Share2, CalendarPlus, DoorOpen } from 'lucide-react';
 import EventSeatingModal from './EventSeatingModal';
-import { getImageUrlSync } from '../App';
+import ResponsiveImage from './ResponsiveImage';
+import { API_BASE, getImageUrlSync } from '../App';
+import { formatEventDateTimeLabel, formatDoorsLabel, eventHasSeating } from '../utils/eventFormat';
 
-const formatDate = (dateInput) => {
-  if (!dateInput) return '';
-  const date = new Date(dateInput);
-  if (isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('en-US', {
-    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric'
-  });
+const formatPriceValue = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  if (Number.isNaN(num)) return value;
+  return `$${num % 1 === 0 ? num.toFixed(0) : num.toFixed(2)}`;
 };
 
-const formatTime = (dateInput) => {
-  if (!dateInput) return '';
-  // Accept either a time string (HH:MM:SS) or a full datetime
-  if (dateInput.includes && dateInput.includes(':') && dateInput.split(' ').length === 1) {
-    const [hours, minutes] = dateInput.split(':');
-    const hour = parseInt(hours, 10);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const displayHour = hour % 12 || 12;
-    return `${displayHour}:${minutes} ${ampm}`;
+const formatPriceRange = (event = {}) => {
+  const min = formatPriceValue(event.min_ticket_price);
+  const max = formatPriceValue(event.max_ticket_price);
+  if (min && max && min !== max) {
+    return `${min} – ${max}`;
   }
-  const date = new Date(dateInput);
-  if (isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return formatPriceValue(event.ticket_price) || formatPriceValue(event.door_price) || null;
 };
 
-const canRequestSeatsForEvent = (event = {}) => {
-  const seatingEnabled = Boolean(event && (event.seating_enabled === 1 || event.seating_enabled === true));
-  const hasLayout = Boolean(event && (event.layout_id || event.layout_version_id));
-  return seatingEnabled && hasLayout;
-};
-
-export default function Schedule({ events = [], loading = false }){
+export default function Schedule({ events = [], loading = false, errorMessage = '' }){
   const [selectedEvent, setSelectedEvent] = useState(null);
 
   const handleRequestSeats = (event) => {
@@ -56,14 +44,20 @@ export default function Schedule({ events = [], loading = false }){
     
     <section className="py-6">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-8">
-          <h2 className="text-4xl font-bold">Upcoming Shows</h2>
-          <p className="text-gray-300 mt-2">Stay up to date with the latest bookings and ticket info.</p>
+        <div className="text-center mb-8 space-y-2">
+          <h2 className="text-3xl font-bold">Upcoming Shows</h2>
+          <p className="text-gray-300">Stay up to date with the latest bookings and ticket info.</p>
         </div>
 
         {loading ? (
           <div className="flex items-center justify-center h-48">
             <div className="animate-spin h-12 w-12 border-4 border-purple-500 border-t-transparent rounded-full"></div>
+          </div>
+        ) : errorMessage ? (
+          <div className="text-center py-12">
+            <Calendar className="h-16 w-16 text-red-400 mx-auto mb-4" />
+            <p className="text-xl text-red-200">Events are temporarily unavailable.</p>
+            <p className="text-red-300 mt-2">{errorMessage}</p>
           </div>
         ) : events.length === 0 ? (
           <div className="text-center py-12">
@@ -72,55 +66,107 @@ export default function Schedule({ events = [], loading = false }){
             <p className="text-gray-500 mt-2">Check back soon for new events.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {events.map((event) => (
-              <div key={event.id} className="bg-gray-800 rounded-xl p-6 border border-purple-500/20 hover:border-purple-500/60 transition transform hover:scale-105">
-                <div className="flex items-start space-x-4">
-                  <div className="flex-shrink-0">
-                    <div className="w-20 h-20 bg-gray-700 rounded-lg overflow-hidden flex items-center justify-center">
-                      <img 
-                        src={getImageUrlSync(event.image_url)} 
-                        alt={event.artist_name || 'Event'}
-                        className="w-full h-full object-cover"
-                        onError={(e) => { e.target.src = '/android-chrome-192x192.png'; }}
-                      />
-                    </div>
+              <div
+                key={event.id || event.slug || event.title}
+                id={event.id ? `event-${event.id}` : undefined}
+                className="bg-gray-800 rounded-xl border border-gray-700/70 hover:border-purple-400/60 transition p-4 flex flex-col gap-4"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="w-20 h-20 rounded-lg overflow-hidden bg-gray-800 flex-shrink-0">
+                    <ResponsiveImage
+                      src={getImageUrlSync(event.image_url)}
+                      alt={event.artist_name || 'Event'}
+                      width={160}
+                      height={160}
+                      className="w-full h-full object-cover"
+                    />
                   </div>
-
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
                       <div>
-                        <h3 className="text-xl font-semibold">{event.artist_name || event.title || event.name || 'Untitled'}</h3>
-                        <span className="text-sm text-gray-400">{event.genre || event.venue_section || ''}</span>
+                        <h3 className="text-lg font-semibold">{event.artist_name || event.title || event.name || 'Untitled'}</h3>
+                        <p className="text-sm text-gray-400">{event.genre || event.venue_section || ''}</p>
                       </div>
                       {event.isBeachSeries && (
-                        <span className="text-xs px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-200 uppercase tracking-wide">
-                          Carolina Beach Music Series
+                        <span className="text-xs px-2 py-1 rounded-full bg-cyan-500/20 text-cyan-100 uppercase tracking-wide whitespace-nowrap">
+                          Beach Music
                         </span>
                       )}
                     </div>
-
-                    <p className="text-gray-300 mt-2 text-sm">{event.description || event.notes || ''}</p>
-
-                    <div className="mt-4 flex items-center text-sm text-gray-300 space-x-4">
-                      {/* Prefer canonical start_datetime, fall back to event_date/event_time */}
-                      <div className="flex items-center"><Calendar className="h-4 w-4 mr-2" /> {formatDate(event.start_datetime || event.event_date)}</div>
-                      <div className="flex items-center"><Clock className="h-4 w-4 mr-2" /> {formatTime(event.start_datetime || event.event_time)}</div>
-                      {event.ticket_price ? <div className="flex items-center"><DollarSign className="h-4 w-4 mr-2" /> ${event.ticket_price}</div> : null}
-                    </div>
-
-                    <div className="mt-6 flex items-center justify-between">
-                      <div className="text-sm text-gray-400">{event.age_restriction || 'All Ages'}</div>
-                      {canRequestSeatsForEvent(event) && (
-                        <button
-                          onClick={() => handleRequestSeats(event)}
-                          className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition"
-                        >
-                          Request Seats
-                        </button>
+                    <div className="text-sm text-gray-300 space-y-1">
+                      <div className="flex items-center">
+                        <Calendar className="h-4 w-4 mr-2 text-purple-300" />
+                        {formatEventDateTimeLabel(event)}
+                      </div>
+                      {formatDoorsLabel(event) && (
+                        <div className="flex items-center">
+                          <DoorOpen className="h-4 w-4 mr-2 text-purple-300" />
+                          Doors {formatDoorsLabel(event)}
+                        </div>
+                      )}
+                      {formatPriceRange(event) && (
+                        <div className="flex items-center">
+                          <DollarSign className="h-4 w-4 mr-2 text-purple-300" />
+                          {formatPriceRange(event)}
+                        </div>
+                      )}
+                      {event.age_restriction && (
+                        <div className="flex items-center">
+                          <Users className="h-4 w-4 mr-2 text-purple-300" />
+                          {event.age_restriction}
+                        </div>
                       )}
                     </div>
                   </div>
+                </div>
+
+                <p className="text-sm text-gray-400 line-clamp-2 min-h-[2.5rem]">
+                  {event.description || event.notes || 'Performance at Midway Music Hall.'}
+                </p>
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {event.id && (
+                    <>
+                      <a
+                        href={`${API_BASE}/events/${event.id}.ics`}
+                        className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition"
+                      >
+                        <CalendarPlus className="h-4 w-4" /> Add to Calendar
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof window === 'undefined') return;
+                          const shareUrl = `${window.location.origin}/#event-${event.id}`;
+                          if (navigator.share) {
+                            navigator.share({
+                              title: event.artist_name || event.title || 'Midway Music Hall Event',
+                              url: shareUrl,
+                            }).catch(() => {});
+                          } else if (navigator.clipboard) {
+                            navigator.clipboard.writeText(shareUrl).then(() => {
+                              alert('Event link copied to clipboard.');
+                            }).catch(() => alert(shareUrl));
+                          } else {
+                            alert(shareUrl);
+                          }
+                        }}
+                        className="inline-flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition"
+                      >
+                        <Share2 className="h-4 w-4" /> Share
+                      </button>
+                    </>
+                  )}
+                  {eventHasSeating(event) && (
+                    <button
+                      onClick={() => handleRequestSeats(event)}
+                      className="inline-flex items-center gap-2 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded transition"
+                    >
+                      <Users className="h-4 w-4" /> Request Seats
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

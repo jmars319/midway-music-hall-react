@@ -1,9 +1,9 @@
 import React from 'react';
 import { Armchair, Users } from 'lucide-react';
+import { seatingStatusClasses } from '../utils/seatingTheme';
 
 // Helper to get seat styling based on type
-const seatTypeClass = (type, selected) => {
-  if (selected) return 'bg-purple-700 ring-2 ring-purple-400 text-white';
+const seatTypeClass = (type) => {
   switch ((type || '').toLowerCase()) {
     case 'vip':
       return 'bg-yellow-500 hover:bg-yellow-400 text-black';
@@ -59,11 +59,11 @@ export default function TableComponent({
   // Generate seat classes
   const getSeatClasses = (seatId) => {
     const { isReserved, isPending, isSelected } = getSeatStatus(seatId);
-    return `absolute flex items-center justify-center rounded-full ${
-      isReserved ? 'bg-red-600 ring-2 ring-red-400 text-white' : 
-      isPending ? 'bg-purple-500/80 border-2 border-dashed border-purple-300 text-white' : 
-      seatTypeClass(row.seat_type, isSelected)
-    }`;
+    let classes = seatTypeClass(row.seat_type);
+    if (isReserved) classes = seatingStatusClasses.reserved;
+    else if (isPending) classes = seatingStatusClasses.pending;
+    else if (isSelected) classes = seatingStatusClasses.selected;
+    return `absolute flex items-center justify-center rounded-full ${classes}`;
   };
 
   // Generate seat label (AA, AB, AC, etc.)

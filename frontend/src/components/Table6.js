@@ -1,9 +1,9 @@
 import React from 'react';
 import { Armchair } from 'lucide-react';
+import { seatingStatusClasses } from '../utils/seatingTheme';
 
 // small helper to pick classes per seat type
-const seatTypeClass = (type, selected) => {
-  if (selected) return 'bg-purple-700 ring-2 ring-purple-400 text-white';
+const seatTypeClass = (type) => {
   switch ((type || '').toLowerCase()) {
     case 'vip':
       return 'bg-yellow-500 hover:bg-yellow-400 text-black';
@@ -56,6 +56,28 @@ export default function Table6({ row, size = 80, selectedSeats = [], pendingSeat
 
   const radialAngles = [270, 330, 30, 90, 150, 210];
 
+  const reservedSeatList = (() => {
+    if (!row.selected_seats) return [];
+    if (typeof row.selected_seats === 'string') {
+      try {
+        return JSON.parse(row.selected_seats);
+      } catch (e) {
+        return [];
+      }
+    }
+    return row.selected_seats;
+  })();
+
+  const seatClasses = (seatId) => {
+    const isReserved = reservedSeatList.includes(seatId);
+    const isPending = (!isReserved) && Array.isArray(pendingSeats) && pendingSeats.includes(seatId);
+    const isSelected = selectedSeats.includes(seatId) && !isReserved && !isPending;
+    if (isReserved) return seatingStatusClasses.reserved;
+    if (isPending) return seatingStatusClasses.pending;
+    if (isSelected) return seatingStatusClasses.selected;
+    return seatTypeClass(row.seat_type);
+  };
+
   return (
     <div style={{ width: size, height: size, position: 'relative' }}>
       {/* center table */}
@@ -69,11 +91,7 @@ export default function Table6({ row, size = 80, selectedSeats = [], pendingSeat
         const x = startX + i * (seatSize + gap);
         const y = topY;
         const seatId = `${row.section_name || row.section}-${row.row_label}-${seatNum}`;
-  const reservedList = (row.selected_seats && typeof row.selected_seats === 'string') ? (()=>{try{return JSON.parse(row.selected_seats);}catch(e){return []}})() : (row.selected_seats || []);
-  const isReserved = reservedList.includes(seatId);
-  const isPending = (!isReserved) && Array.isArray(pendingSeats) && pendingSeats.includes(seatId);
-  const isSelected = selectedSeats.includes(seatId) && !isReserved && !isPending;
-  const classes = `absolute flex items-center justify-center rounded-full ${isReserved ? 'bg-red-600 ring-2 ring-red-400 text-white' : isPending ? 'bg-purple-500/80 border-2 border-dashed border-purple-300 text-white' : seatTypeClass(row.seat_type, isSelected)}`;
+  const classes = `absolute flex items-center justify-center rounded-full ${seatClasses(seatId)}`;
         const style = { left: x, top: y, transform: 'translate(-50%, -50%)', width: seatSize, height: seatSize };
         if (interactive) {
           return (
@@ -95,11 +113,7 @@ export default function Table6({ row, size = 80, selectedSeats = [], pendingSeat
         const x = startX + i * (seatSize + gap);
         const y = bottomY;
         const seatId = `${row.section_name || row.section}-${row.row_label}-${seatNum}`;
-  const reservedList2 = (row.selected_seats && typeof row.selected_seats === 'string') ? (()=>{try{return JSON.parse(row.selected_seats);}catch(e){return []}})() : (row.selected_seats || []);
-  const isReserved2 = reservedList2.includes(seatId);
-  const isPending2 = (!isReserved2) && Array.isArray(pendingSeats) && pendingSeats.includes(seatId);
-  const isSelected2 = selectedSeats.includes(seatId) && !isReserved2 && !isPending2;
-  const classes = `absolute flex items-center justify-center rounded-full ${isReserved2 ? 'bg-red-600 ring-2 ring-red-400 text-white' : isPending2 ? 'bg-purple-500/80 border-2 border-dashed border-purple-300 text-white' : seatTypeClass(row.seat_type, isSelected2)}`;
+  const classes = `absolute flex items-center justify-center rounded-full ${seatClasses(seatId)}`;
         const style = { left: x, top: y, transform: 'translate(-50%, -50%)', width: seatSize, height: seatSize };
         if (interactive) {
           return (
@@ -123,11 +137,7 @@ export default function Table6({ row, size = 80, selectedSeats = [], pendingSeat
         const y = center + Math.sin(rad) * radius;
         const seatNum = i + 1;
         const seatId = `${row.section_name || row.section}-${row.row_label}-${seatNum}`;
-  const reservedList3 = (row.selected_seats && typeof row.selected_seats === 'string') ? (()=>{try{return JSON.parse(row.selected_seats);}catch(e){return []}})() : (row.selected_seats || []);
-  const isReserved3 = reservedList3.includes(seatId);
-  const isPending3 = (!isReserved3) && Array.isArray(pendingSeats) && pendingSeats.includes(seatId);
-  const isSelected3 = selectedSeats.includes(seatId) && !isReserved3 && !isPending3;
-  const classes = `absolute flex items-center justify-center rounded-full ${isReserved3 ? 'bg-red-600 ring-2 ring-red-400 text-white' : isPending3 ? 'bg-purple-500/80 border-2 border-dashed border-purple-300 text-white' : seatTypeClass(row.seat_type, isSelected3)}`;
+  const classes = `absolute flex items-center justify-center rounded-full ${seatClasses(seatId)}`;
         const style = { left: x, top: y, transform: 'translate(-50%, -50%)', width: seatSize, height: seatSize };
         if (interactive) {
           return (
