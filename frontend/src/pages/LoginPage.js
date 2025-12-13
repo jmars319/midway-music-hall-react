@@ -54,7 +54,7 @@ export default function LoginPage({ onLogin, onBack }) {
           <ResponsiveImage src={logo} alt="Midway Music Hall" width={160} height={64} priority className="h-16 w-auto object-contain" />
         </div>
         <h2 className="text-2xl font-bold text-white mb-2">Admin Login</h2>
-        <p className="text-gray-300 text-sm mb-4">Demo credentials: <span className="font-medium">admin</span> / <span className="font-medium">admin123</span></p>
+        {/* Demo credentials removed for security */}
 
         {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500 text-red-300 rounded">{error}</div>}
 
