@@ -1,85 +1,235 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Armchair, Send, X } from 'lucide-react';
-import Table6 from './Table6';
+import { Send, X, AlertCircle } from 'lucide-react';
+import TableComponent from './TableComponent';
 import { API_BASE } from '../App';
 
-const seatTypeClass = (type, selected) => {
-  if (selected) return 'bg-purple-700 ring-2 ring-purple-400 text-white';
+const DEFAULT_STAGE_POSITION = { x: 50, y: 8 };
+const DEFAULT_STAGE_SIZE = { width: 200, height: 80 };
+const DEFAULT_CANVAS = { width: 1200, height: 800 };
 
-  switch ((type || '').toLowerCase()) {
-    case 'vip':
-      return 'bg-yellow-500 hover:bg-yellow-400 text-black';
-    case 'premium':
-      return 'bg-purple-500 hover:bg-purple-400 text-white';
-    case 'accessible':
-      return 'bg-blue-500 hover:bg-blue-400 text-white';
-    case 'standing':
-      return 'bg-green-500 hover:bg-green-400 text-white';
-    default:
-      return 'bg-gray-500 hover:bg-gray-400 text-white';
-  }
-};
-
-// SeatingChart component
-// Props:
-// - seatingConfig: array of seating rows from the backend
-// - events: array of events to choose from when submitting a seat request
-// - interactive: boolean - controls if seats can be selected (default: true)
-// - reservedSeats: array of reserved seat IDs
-// - pendingSeats: array of pending seat IDs
-// - eventId: specific event ID for seat requests
-// Behavior:
-// - Renders seats positioned by pos_x/pos_y when available
-// - Allows users to select seats (unless they are pending/reserved) when interactive=true
-// - Can submit a seat request payload to the backend
-export default function SeatingChart({ 
-  seatingConfig = [], 
+/**
+ * SeatingChart
+ * Shared renderer for the public seating reference section and the interactive
+ * seat-request surface. When `eventId` is provided it automatically loads the
+ * event-specific layout via `/api/seating/event/:id` to keep the public view in
+ * sync with the admin editor. Without an event id it will attempt to load the
+ * default layout template so the homepage always reflects the latest layout.
+ */
+export default function SeatingChart({
+  seatingConfig,
   events = [],
   interactive = true,
-  reservedSeats = [],
-  pendingSeats: externalPendingSeats = [],
-  eventId = null
+  reservedSeats,
+  pendingSeats,
+  eventId = null,
+  autoFetch = true,
+  showLegend = true,
+  showHeader = true,
+  stagePosition: providedStagePosition,
+  stageSize: providedStageSize,
+  canvasSettings: providedCanvasSettings,
 }) {
-  const activeRows = useMemo(() => seatingConfig.filter(r => r.is_active !== false), [seatingConfig]);
+  const externalLayoutProvided = Array.isArray(seatingConfig) && seatingConfig.length > 0;
+  const externalReservedProvided = Array.isArray(reservedSeats);
+  const externalPendingProvided = Array.isArray(pendingSeats);
 
+  const [layoutRows, setLayoutRows] = useState(externalLayoutProvided ? seatingConfig : []);
+  const [reservedSeatIds, setReservedSeatIds] = useState(externalReservedProvided ? reservedSeats : []);
+  const [pendingSeatIds, setPendingSeatIds] = useState(externalPendingProvided ? pendingSeats : []);
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ customerName: '', customerEmail: '', customerPhone: '', specialRequests: '', eventId: eventId || (events && events[0] ? events[0].id : '') });
+  const [form, setForm] = useState({
+    customerName: '',
+    customerEmail: '',
+    customerPhone: '',
+    specialRequests: '',
+    eventId: eventId || (events[0]?.id ?? ''),
+  });
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  const [pendingSeats, setPendingSeats] = useState(externalPendingSeats);
+  const [layoutError, setLayoutError] = useState('');
+  const [layoutLoading, setLayoutLoading] = useState(() => {
+    if (!autoFetch) return false;
+    if (eventId) return true;
+    return !externalLayoutProvided;
+  });
+  const [stagePosition, setStagePosition] = useState(
+    providedStagePosition || DEFAULT_STAGE_POSITION
+  );
+  const [stageSize, setStageSize] = useState(providedStageSize || DEFAULT_STAGE_SIZE);
+  const [canvasSettings, setCanvasSettings] = useState(
+    providedCanvasSettings || DEFAULT_CANVAS
+  );
 
-  // Update pending seats when external prop changes
   useEffect(() => {
-    setPendingSeats(externalPendingSeats);
-  }, [externalPendingSeats]);
+    if (externalLayoutProvided) {
+      setLayoutRows(seatingConfig);
+      setLayoutLoading(false);
+    }
+  }, [externalLayoutProvided, seatingConfig]);
+
+  useEffect(() => {
+    if (providedStagePosition) {
+      setStagePosition(providedStagePosition);
+    }
+  }, [providedStagePosition]);
+
+  useEffect(() => {
+    if (providedStageSize) {
+      setStageSize(providedStageSize);
+    }
+  }, [providedStageSize]);
+
+  useEffect(() => {
+    if (providedCanvasSettings) {
+      setCanvasSettings({
+        width: providedCanvasSettings.width || DEFAULT_CANVAS.width,
+        height: providedCanvasSettings.height || DEFAULT_CANVAS.height,
+      });
+    }
+  }, [providedCanvasSettings]);
+
+  useEffect(() => {
+    if (externalReservedProvided) {
+      setReservedSeatIds(reservedSeats || []);
+    }
+  }, [externalReservedProvided, reservedSeats]);
+
+  useEffect(() => {
+    if (externalPendingProvided) {
+      setPendingSeatIds(pendingSeats || []);
+    }
+  }, [externalPendingProvided, pendingSeats]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const shouldLoadDefault = !eventId && !externalLayoutProvided && autoFetch;
+    const shouldLoadEvent = Boolean(eventId) && autoFetch;
+    if (!shouldLoadDefault && !shouldLoadEvent) {
+      setLayoutLoading(false);
+      return () => {};
+    }
+
+    const loadLayout = async () => {
+      setLayoutLoading(true);
+      setLayoutError('');
+      try {
+        const endpoint = eventId
+          ? `${API_BASE}/seating/event/${eventId}`
+          : `${API_BASE}/seating-layouts/default`;
+        const res = await fetch(endpoint);
+        const data = await res.json();
+        if (cancelled) return;
+
+        if (!data.success) {
+          setLayoutError(data.message || 'Unable to load seating layout');
+          setLayoutRows([]);
+          return;
+        }
+
+        if (eventId) {
+          setLayoutRows(Array.isArray(data.seating) ? data.seating : []);
+          setReservedSeatIds(Array.isArray(data.reservedSeats) ? data.reservedSeats : []);
+          setPendingSeatIds(Array.isArray(data.pendingSeats) ? data.pendingSeats : []);
+          if (data.stagePosition) {
+            setStagePosition({
+              x: data.stagePosition.x ?? DEFAULT_STAGE_POSITION.x,
+              y: data.stagePosition.y ?? DEFAULT_STAGE_POSITION.y,
+            });
+          }
+          if (data.stageSize) {
+            setStageSize({
+              width: data.stageSize.width ?? DEFAULT_STAGE_SIZE.width,
+              height: data.stageSize.height ?? DEFAULT_STAGE_SIZE.height,
+            });
+          }
+          if (data.canvasSettings) {
+            setCanvasSettings({
+              width: data.canvasSettings.width || DEFAULT_CANVAS.width,
+              height: data.canvasSettings.height || DEFAULT_CANVAS.height,
+            });
+          }
+        } else if (data.layout) {
+          setLayoutRows(Array.isArray(data.layout.layout_data) ? data.layout.layout_data : []);
+          if (data.layout.stage_position) {
+            setStagePosition({
+              x: data.layout.stage_position.x ?? DEFAULT_STAGE_POSITION.x,
+              y: data.layout.stage_position.y ?? DEFAULT_STAGE_POSITION.y,
+            });
+          }
+          if (data.layout.stage_size) {
+            setStageSize({
+              width: data.layout.stage_size.width ?? DEFAULT_STAGE_SIZE.width,
+              height: data.layout.stage_size.height ?? DEFAULT_STAGE_SIZE.height,
+            });
+          }
+          if (data.layout.canvas_settings) {
+            setCanvasSettings({
+              width: data.layout.canvas_settings.width || DEFAULT_CANVAS.width,
+              height: data.layout.canvas_settings.height || DEFAULT_CANVAS.height,
+            });
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setLayoutError('Network error while loading seating layout');
+          setLayoutRows([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLayoutLoading(false);
+        }
+      }
+    };
+
+    loadLayout();
+    return () => {
+      cancelled = true;
+    };
+  }, [autoFetch, eventId, externalLayoutProvided]);
+
+  useEffect(() => {
+    if (!eventId && events[0]?.id) {
+      setForm((prev) => (prev.eventId ? prev : { ...prev, eventId: events[0].id }));
+    }
+  }, [eventId, events]);
+
+  const activeRows = useMemo(
+    () =>
+      (layoutRows || []).filter((row) => {
+        const type = row.element_type || 'table';
+        return row && row.is_active !== false && type !== 'marker' && type !== 'area';
+      }),
+    [layoutRows]
+  );
+
+  const hasPositions = activeRows.some(
+    (row) =>
+      row &&
+      row.pos_x !== null &&
+      row.pos_y !== null &&
+      row.pos_x !== undefined &&
+      row.pos_y !== undefined
+  );
 
   const toggleSeat = (id) => {
-    if (!interactive) return; // Don't allow selection in non-interactive mode
-    setSelectedSeats(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
+    if (!interactive) return;
+    setSelectedSeats((prev) =>
+      prev.includes(id) ? prev.filter((seatId) => seatId !== id) : [...prev, id]
+    );
   };
 
-  /* Developer commentary - selection lifecycle and UX decisions
-     - `selectedSeats` holds the user's current selection in-memory only.
-     - When the user clicks "Request Seats" we POST a new seat_request with
-       the selected seat ids. That request enters a 'pending' state and must
-       be approved by an admin to become reserved.
-     - Why keep selection client-side? This avoids needing a server-side
-       reservation hold mechanism and keeps the UX responsive. Tradeoffs:
-       * Concurrency: two users may select the same seat at once. The
-         approval transaction detects conflicts and prevents double-booking.
-       * UX clarity: we show pending seats (requests in the DB with status
-         'pending') as dashed/purple to reduce user confusion.
-     - If you later want temporary holds (e.g., 10-minute holds when a user
-       initiates checkout), add a 'holds' table and a server endpoint to
-       create a hold with an expiry; then update the UI to display holds.
-  */
-
   const openRequestModal = () => {
+    if (!interactive) return;
     if (selectedSeats.length === 0) {
-      setErrorMessage('Please select at least one seat before requesting.');
-      setTimeout(() => setErrorMessage(''), 3000);
+      setErrorMessage('Select at least one seat before requesting.');
+      setTimeout(() => setErrorMessage(''), 2500);
+      return;
+    }
+    if (!eventId && !form.eventId) {
+      setErrorMessage('Select an event before requesting seats.');
+      setTimeout(() => setErrorMessage(''), 2500);
       return;
     }
     setShowModal(true);
@@ -91,139 +241,219 @@ export default function SeatingChart({
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm(prev => ({ ...prev, [name]: value }));
+    setForm((prev) => ({ ...prev, [name]: value }));
   };
+
+  const resolvedEventId = eventId || form.eventId || (events[0]?.id ?? null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     setErrorMessage('');
+
+    if (!resolvedEventId) {
+      setErrorMessage('Please select an event.');
+      setSubmitting(false);
+      return;
+    }
+
     try {
       const payload = {
-        event_id: form.eventId || (events && events[0] && events[0].id) || null,
+        event_id: resolvedEventId,
         customer_name: form.customerName,
         contact: { email: form.customerEmail, phone: form.customerPhone },
         selected_seats: selectedSeats,
-        special_requests: form.specialRequests
+        special_requests: form.specialRequests,
       };
 
       const res = await fetch(`${API_BASE}/seat-requests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
       if (data.success) {
-        setSuccessMessage('Request submitted — we will contact you soon.');
+        setSuccessMessage('Request submitted. We will follow up soon.');
         setSelectedSeats([]);
-        setForm({ customerName: '', customerEmail: '', customerPhone: '', specialRequests: '', eventId: form.eventId });
-        setTimeout(() => { setShowModal(false); setSuccessMessage(''); }, 2200);
+        setTimeout(() => {
+          setShowModal(false);
+          setSuccessMessage('');
+        }, 2200);
       } else {
         setErrorMessage(data.message || 'Failed to submit request');
       }
     } catch (err) {
-      console.error(err);
-      setErrorMessage('Network error — please try again');
+      setErrorMessage('Network error - please try again');
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Determine whether spatial data exists (pos_x/pos_y set)
-  // If spatial data is missing, we show a list view message instead.
-  const hasPositions = activeRows.some(r => r.pos_x !== null && r.pos_y !== null && r.pos_x !== undefined && r.pos_y !== undefined);
+  const renderLayoutBody = () => {
+    if (layoutLoading) {
+      return (
+        <div className="flex items-center justify-center h-[320px]">
+          <div className="animate-spin h-12 w-12 border-4 border-purple-500 border-t-transparent rounded-full" />
+        </div>
+      );
+    }
+
+    if (layoutError) {
+      return (
+        <div className="flex flex-col items-center justify-center text-center text-red-300 py-10 gap-3">
+          <AlertCircle className="h-10 w-10" />
+          <p>{layoutError}</p>
+        </div>
+      );
+    }
+
+    if (!hasPositions) {
+      return (
+        <div className="text-center py-12 text-gray-400">
+          Layout not available. Contact the admin team for assistance.
+        </div>
+      );
+    }
+
+    return (
+      <div className="relative bg-gray-900 rounded-xl p-6 border border-purple-500/20 overflow-auto">
+        <div
+          className="relative mx-auto"
+          style={{
+            width: canvasSettings.width,
+            height: canvasSettings.height,
+            minWidth: canvasSettings.width,
+            minHeight: canvasSettings.height,
+          }}
+        >
+          <div
+            className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
+            style={{
+              left: `${stagePosition.x}%`,
+              top: `${stagePosition.y}%`,
+              transform: 'translate(-50%, -50%)',
+              width: `${stageSize.width || DEFAULT_STAGE_SIZE.width}px`,
+              height: `${stageSize.height || DEFAULT_STAGE_SIZE.height}px`,
+            }}
+          >
+            STAGE
+          </div>
+
+          {activeRows.map((row) => {
+            if (
+              row.pos_x === null ||
+              row.pos_y === null ||
+              row.pos_x === undefined ||
+              row.pos_y === undefined
+            ) {
+              return null;
+            }
+
+            const reservedForRow = reservedSeatIds.filter((seatId) =>
+              seatId.startsWith(`${row.section_name || row.section}-${row.row_label}-`)
+            );
+            const pendingForRow = pendingSeatIds.filter((seatId) =>
+              seatId.startsWith(`${row.section_name || row.section}-${row.row_label}-`)
+            );
+
+            const rowKey = row.id || `${row.section_name}-${row.row_label}`;
+            const rotation = row.rotation || 0;
+            const width = row.width || 140;
+            const height = row.height || 120;
+
+            return (
+              <div
+                key={rowKey}
+                className="absolute"
+                style={{
+                  left: `${row.pos_x}%`,
+                  top: `${row.pos_y}%`,
+                  transform: 'translate(-50%, -50%)',
+                  minWidth: `${width}px`,
+                  minHeight: `${height}px`,
+                  padding: '10px',
+                }}
+              >
+                <div className="absolute -top-5 left-1/2 transform -translate-x-1/2 text-xs font-semibold text-gray-200 whitespace-nowrap">
+                  {(row.section_name || row.section || 'Section').toUpperCase()} {row.row_label || ''}
+                </div>
+                    <div className="flex items-center justify-center" style={{ minHeight: `${height - 20}px` }}>
+                      <div style={{ transform: `rotate(${rotation}deg)` }}>
+                        <TableComponent
+                          row={row}
+                          tableShape={row.table_shape || row.seat_type || 'table-6'}
+                          selectedSeats={selectedSeats}
+                          pendingSeats={pendingForRow}
+                          reservedSeats={reservedForRow}
+                          onToggleSeat={(seatId) => {
+                            if (reservedForRow.includes(seatId)) return;
+                            if (pendingForRow.includes(seatId)) return;
+                            toggleSeat(seatId);
+                          }}
+                      interactive={interactive}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="absolute left-4 bottom-4 text-gray-300 bg-gray-800/70 px-3 py-1 rounded-lg">
+          Selected seats: <span className="font-semibold text-white">{selectedSeats.length}</span>
+        </div>
+
+        {showLegend && (
+          <div className="absolute right-4 top-4 bg-gray-800/80 p-3 rounded-lg border border-purple-500/20 text-sm text-gray-200 space-y-2">
+            <div className="font-semibold">Legend</div>
+            <div className="flex items-center gap-2">
+              <span className="w-5 h-5 rounded bg-gray-500" /> <span>Available</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-5 h-5 rounded bg-purple-700 ring-2 ring-purple-400" />{' '}
+              <span>Your Selection</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-5 h-5 rounded bg-purple-500/80 border-2 border-dashed border-purple-300" />{' '}
+              <span>Pending</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-5 h-5 rounded bg-red-600 ring-2 ring-red-400" /> <span>Reserved</span>
+            </div>
+          </div>
+        )}
+
+        {interactive && (
+          <div className="absolute right-4 bottom-4 flex flex-col sm:flex-row gap-3 items-center">
+            {errorMessage && <div className="text-sm text-red-400">{errorMessage}</div>}
+            <button
+              onClick={openRequestModal}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-2 transition"
+            >
+              <Send className="h-4 w-4" /> Request Seats
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <section className="py-6" id="seating">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-8">
-          <h2 className="text-4xl font-bold">Seating Chart</h2>
-          <p className="text-gray-300 mt-2">Select your preferred seats and submit a request.</p>
-        </div>
-
-        {!hasPositions ? (
-          <div className="text-center py-12 text-gray-400">No spatial seating configuration available. Contact admin to set positions or use the list view.</div>
-        ) : (
-          <div className="relative bg-gray-900 rounded-xl p-6 border border-purple-500/20" style={{ height: 600 }}>
-            <StageRenderer />
-
-            {activeRows.map(row => {
-              if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
-              const left = `${parseFloat(row.pos_x)}%`;
-              const top = `${parseFloat(row.pos_y)}%`;
-              const transform = `translate(-50%, -50%) rotate(${row.rotation || 0}deg)`;
-              return (
-                <div key={row.id} style={{ position: 'absolute', left, top, transform }} className="flex flex-col items-center gap-2">
-                  <div className="text-sm text-gray-300 font-semibold">{row.section_name || row.section || 'Section'} {row.row_label || ''}</div>
-
-                  {row.seat_type === 'table-6' && (row.total_seats || 0) === 6 ? (
-                    (() => {
-                      const reserved = (row.selected_seats && typeof row.selected_seats === 'string') ? (()=>{try{return JSON.parse(row.selected_seats);}catch(e){return []}})() : (row.selected_seats || []);
-                      // pending seats specific to this row
-                      const pendingForRow = Array.isArray(pendingSeats) ? pendingSeats.filter(s => s.startsWith(`${row.section_name || row.section}-${row.row_label}-`)) : [];
-                      // For table layouts we pass three categories of seats into
-                      // the `Table6` component: reserved seats (persisted in DB),
-                      // pending seats (requests in 'pending' state) and the
-                      // user's current selection (selectedSeats). The Table6
-                      // component is responsible for rendering states with
-                      // appropriate priority: reserved > pending > selected.
-                      return (
-                        <Table6
-                          row={row}
-                          selectedSeats={[...new Set([...(reserved || []), ...selectedSeats])]}
-                          pendingSeats={pendingForRow}
-                          onToggleSeat={(seatId) => {
-                            if (reserved.includes(seatId)) return; // don't allow customers to grab reserved seats
-                            if (pendingForRow.includes(seatId)) return; // don't allow customers to grab pending seats
-                            toggleSeat(seatId);
-                          }}
-                        />
-                      );
-                    })()
-                  ) : (
-                    <div className="flex gap-2">
-                      {Array.from({ length: row.total_seats || 0 }).map((_, idx) => {
-                        const seatNum = idx + 1;
-                        const seatId = `${row.section_name || row.section}-${row.row_label}-${seatNum}`;
-                        const isSelected = selectedSeats.includes(seatId);
-                        const isPendingSeat = pendingSeats.includes(seatId);
-                        const reservedList = (row.selected_seats && typeof row.selected_seats === 'string') ? (()=>{try{return JSON.parse(row.selected_seats);}catch(e){return []}})() : (row.selected_seats || []);
-                        const isReservedSeat = reservedList.includes(seatId);
-
-                        // priority: reserved > pending > selected
-                        let classes = '';
-                        if (isReservedSeat) classes = 'w-9 h-9 flex items-center justify-center rounded bg-red-600 ring-2 ring-red-400 text-white';
-                        else if (isPendingSeat) classes = 'w-9 h-9 flex items-center justify-center rounded bg-purple-500/80 border-2 border-dashed border-purple-300 text-white';
-                        else classes = `w-9 h-9 flex items-center justify-center rounded cursor-pointer ${seatTypeClass(row.seat_type, isSelected)}`;
-
-                        return <button key={seatId} onClick={() => { if (!isPendingSeat && !isReservedSeat) toggleSeat(seatId); }} className={classes}><Armchair className="h-4 w-4" /></button>;
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            <div className="absolute left-4 bottom-4 text-gray-300">Selected seats: <span className="font-medium text-white">{selectedSeats.length}</span></div>
-            {/* Legend */}
-            <div className="absolute right-4 top-4 bg-gray-800/80 p-3 rounded-lg border border-purple-500/20 text-sm text-gray-200">
-              <div className="font-semibold mb-2">Legend</div>
-              <div className="flex items-center gap-2 mb-1"><span className="w-5 h-5 rounded bg-green-500" /> Available</div>
-              <div className="flex items-center gap-2 mb-1"><span className="w-5 h-5 rounded bg-purple-700 ring-2 ring-purple-400" /> Your selection</div>
-              <div className="flex items-center gap-2 mb-1"><span className="w-5 h-5 rounded bg-purple-500/80 border-2 border-dashed border-purple-300" /> Pending request</div>
-              <div className="flex items-center gap-2"><span className="w-5 h-5 rounded bg-red-600 ring-2 ring-red-400" /> Reserved</div>
-            </div>
-            {interactive && (
-              <div className="absolute right-4 bottom-4 flex items-center gap-3">
-                {errorMessage && <div className="text-sm text-red-400">{errorMessage}</div>}
-                <button onClick={openRequestModal} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-2">
-                  <Send className="h-4 w-4" /> Request Seats
-                </button>
-              </div>
-            )}
+        {showHeader && (
+          <div className="text-center mb-8">
+            <h2 className="text-4xl font-bold">Seating Chart</h2>
+            <p className="text-gray-300 mt-2">
+              {interactive
+                ? 'Select seats to submit a reservation request.'
+                : 'Reference layout for upcoming shows.'}
+            </p>
           </div>
         )}
+
+        {renderLayoutBody()}
       </div>
 
       {showModal && (
@@ -237,58 +467,111 @@ export default function SeatingChart({
             </div>
 
             {successMessage && (
-              <div className="p-3 mb-4 bg-green-500/20 border border-green-500 text-green-300 rounded">{successMessage}</div>
+              <div className="p-3 mb-4 bg-green-500/20 border border-green-500 text-green-300 rounded">
+                {successMessage}
+              </div>
+            )}
+
+            {errorMessage && (
+              <div className="p-3 mb-4 bg-red-500/20 border border-red-500 text-red-300 rounded">
+                {errorMessage}
+              </div>
             )}
 
             <form onSubmit={handleSubmit}>
-              <div className="mb-3">
-                <label className="block text-white mb-2">Event</label>
-                <select name="eventId" value={form.eventId} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg focus:ring-2 focus:ring-purple-500">
-                  <option value="">Select an event</option>
-                  {events.map(ev => (
-                    <option key={ev.id} value={ev.id}>{ev.artist_name} — {formatDateForOption(ev.event_date)} {formatTimeForOption(ev.event_time)}</option>
-                  ))}
-                </select>
-              </div>
+              {!eventId && (
+                <div className="mb-3">
+                  <label className="block text-white mb-2">Event</label>
+                  <select
+                    name="eventId"
+                    value={form.eventId}
+                    onChange={handleChange}
+                    className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="">Select an event</option>
+                    {events.map((ev) => (
+                      <option key={ev.id} value={ev.id}>
+                        {ev.artist_name || ev.title} - {formatDateForOption(ev.event_date)}{' '}
+                        {formatTimeForOption(ev.event_time)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-white mb-2">Your name</label>
-                  <input name="customerName" value={form.customerName} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" required />
+                  <input
+                    name="customerName"
+                    value={form.customerName}
+                    onChange={handleChange}
+                    className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg"
+                    required
+                  />
                 </div>
                 <div>
                   <label className="block text-white mb-2">Email</label>
-                  <input name="customerEmail" type="email" value={form.customerEmail} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" required />
+                  <input
+                    name="customerEmail"
+                    type="email"
+                    value={form.customerEmail}
+                    onChange={handleChange}
+                    className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg"
+                    required
+                  />
                 </div>
               </div>
 
               <div className="mt-3">
                 <label className="block text-white mb-2">Phone</label>
-                <input name="customerPhone" value={form.customerPhone} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" />
+                <input
+                  name="customerPhone"
+                  value={form.customerPhone}
+                  onChange={handleChange}
+                  className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg"
+                />
               </div>
 
               <div className="mt-3">
                 <label className="block text-white mb-2">Selected Seats</label>
                 <div className="flex flex-wrap gap-2">
-                  {selectedSeats.map(s => (
-                    <div key={s} className="px-3 py-1 bg-gray-700 text-white rounded">{s}</div>
+                  {selectedSeats.map((seatId) => (
+                    <div key={seatId} className="px-3 py-1 bg-gray-700 text-white rounded">
+                      {seatId}
+                    </div>
                   ))}
                 </div>
               </div>
 
               <div className="mt-3">
                 <label className="block text-white mb-2">Special requests</label>
-                <textarea name="specialRequests" value={form.specialRequests} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg resize-none" rows={3} />
+                <textarea
+                  name="specialRequests"
+                  value={form.specialRequests}
+                  onChange={handleChange}
+                  className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg resize-none"
+                  rows={3}
+                />
               </div>
 
               <div className="mt-6 flex justify-end items-center gap-3">
-                <button type="button" onClick={closeModal} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded">Cancel</button>
-                <button type="submit" disabled={submitting} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg disabled:bg-gray-600 disabled:cursor-not-allowed"
+                >
                   {submitting ? 'Submitting...' : 'Submit Request'}
                 </button>
               </div>
             </form>
-            {errorMessage && <div className="mt-4 text-sm text-red-400">{errorMessage}</div>}
           </div>
         </div>
       )}
@@ -296,37 +579,6 @@ export default function SeatingChart({
   );
 }
 
-function StageRenderer(){
-  const [stage, setStage] = useState(null);
-  useEffect(() => {
-    let mounted = true;
-    fetch(`${API_BASE}/stage-settings`).then(r => r.json()).then(d => { if (mounted && d && d.success) setStage(d.settings); }).catch(()=>{ });
-    // fetch pending seat requests to mark pending seats
-    fetch(`${API_BASE}/seat-requests?status=pending`).then(r => r.json()).then(d => {
-      if (mounted && d && d.success && Array.isArray(d.requests)) {
-        const allSeats = [];
-        d.requests.forEach(req => {
-          const seats = Array.isArray(req.selected_seats) ? req.selected_seats : (typeof req.selected_seats === 'string' ? (()=>{try{return JSON.parse(req.selected_seats);}catch(e){return []}})() : []);
-          seats.forEach(s => allSeats.push(s));
-        });
-        setPendingSeats(allSeats);
-      }
-    }).catch(()=>{});
-    return () => { mounted = false; };
-  }, []);
-
-  if (!stage) return null;
-  const pos = stage.position || 'back-left';
-  const style = { position: 'absolute', width: '22%', height: 40, background: '#2d2d2d', border: '2px solid #7c3aed', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-  switch (pos) {
-    case 'back-left': return <div style={{ ...style, left: '6%', top: '4%' }}>Stage</div>;
-    case 'back-right': return <div style={{ ...style, right: '6%', top: '4%' }}>Stage</div>;
-    case 'front-center': return <div style={{ ...style, left: '50%', top: '88%', transform: 'translateX(-50%)' }}>Stage</div>;
-    default: return <div style={{ ...style, left: '6%', top: '4%' }}>Stage</div>;
-  }
-}
-
-// Helper date/time formatting used inside the modal options
 function formatDateForOption(dateString) {
   if (!dateString) return '';
   const d = new Date(dateString);
@@ -341,3 +593,6 @@ function formatTimeForOption(timeString) {
   const displayHour = hour % 12 || 12;
   return `${displayHour}:${minutes || '00'} ${ampm}`;
 }
+
+// Feature flag / marker for git history: seating sync behaviour
+export const SEATING_SYNC_FEATURE = true;

@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Armchair, Send, AlertCircle } from 'lucide-react';
-import TableComponent from './TableComponent';
+import TableComponent, { isSeatReserved } from './TableComponent';
 import { API_BASE } from '../App';
 
 const seatTypeClass = (type, selected) => {
@@ -33,6 +33,8 @@ export default function EventSeatingModal({ event, onClose }) {
   const [successMessage, setSuccessMessage] = useState('');
   const [stagePosition, setStagePosition] = useState({ x: 50, y: 10 });
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
+  const [canvasSettings, setCanvasSettings] = useState({ width: 1200, height: 800 });
+  const canvasContainerRef = useRef(null);
   const [form, setForm] = useState({
     customerName: '',
     customerEmail: '',
@@ -40,7 +42,15 @@ export default function EventSeatingModal({ event, onClose }) {
     specialRequests: ''
   });
 
-  const activeRows = useMemo(() => seatingConfig.filter(r => r.is_active !== false), [seatingConfig]);
+  const activeRows = useMemo(
+    () => seatingConfig.filter(r => {
+      const type = r.element_type || 'table';
+      return r.is_active !== false && type !== 'marker' && type !== 'area';
+    }),
+    [seatingConfig]
+  );
+  const canvasWidth = canvasSettings?.width || 1200;
+  const canvasHeight = canvasSettings?.height || 800;
 
   useEffect(() => {
     fetchEventSeating();
@@ -60,6 +70,12 @@ export default function EventSeatingModal({ event, onClose }) {
         }
         if (data.stageSize) {
           setStageSize(data.stageSize);
+        }
+        if (data.canvasSettings) {
+          setCanvasSettings({
+            width: data.canvasSettings.width || 1200,
+            height: data.canvasSettings.height || 800
+          });
         }
       } else {
         setErrorMessage('Failed to load seating data');
@@ -147,7 +163,7 @@ export default function EventSeatingModal({ event, onClose }) {
       }
     } catch (err) {
       console.error(err);
-      setErrorMessage('Network error — please try again');
+      setErrorMessage('Network error - please try again');
     } finally {
       setSubmitting(false);
     }
@@ -306,8 +322,19 @@ export default function EventSeatingModal({ event, onClose }) {
                 </div>
               </div>
             ) : (
-              <div className="relative h-full bg-gray-100 dark:bg-gray-900 rounded-xl overflow-auto border border-purple-500/20">
-                <div className="relative min-h-[1600px] p-8">
+              <div
+                className="relative h-full bg-gray-100 dark:bg-gray-900 rounded-xl overflow-auto border border-purple-500/20"
+                ref={canvasContainerRef}
+              >
+                <div
+                  className="relative mx-auto"
+                  style={{
+                    width: canvasWidth,
+                    height: canvasHeight,
+                    minWidth: canvasWidth,
+                    minHeight: canvasHeight
+                  }}
+                >
                   {/* Stage */}
                   <div 
                     className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
@@ -315,8 +342,8 @@ export default function EventSeatingModal({ event, onClose }) {
                       left: `${stagePosition.x}%`,
                       top: `${stagePosition.y}%`,
                       transform: 'translate(-50%, -50%)',
-                      width: `${stageSize.width}px`,
-                      height: `${stageSize.height}px`
+                      width: `${stageSize.width || 200}px`,
+                      height: `${stageSize.height || 80}px`
                     }}
                   >
                     STAGE
@@ -337,9 +364,9 @@ export default function EventSeatingModal({ event, onClose }) {
                           left: `${row.pos_x}%`,
                           top: `${row.pos_y}%`,
                           transform: `translate(-50%, -50%)`,
-                          padding: '40px 20px',
-                          minWidth: '120px',
-                          minHeight: '120px'
+                          padding: '20px',
+                          minWidth: `${row.width || 120}px`,
+                          minHeight: `${row.height || 120}px`
                         }}
                       >
                         <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-xs font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap z-20">
@@ -352,8 +379,9 @@ export default function EventSeatingModal({ event, onClose }) {
                               tableShape={row.table_shape || 'table-6'}
                               selectedSeats={selectedSeats}
                               pendingSeats={pendingForRow}
+                              reservedSeats={reservedForRow}
                               onToggleSeat={(seatId) => {
-                                if (reservedForRow.includes(seatId)) return;
+                                if (isSeatReserved(row, seatId, reservedForRow)) return;
                                 if (pendingForRow.includes(seatId)) return;
                                 toggleSeat(seatId);
                               }}
@@ -446,48 +474,4 @@ export default function EventSeatingModal({ event, onClose }) {
       )}
     </div>
   );
-}
-
-function StageRenderer() {
-  const [stage, setStage] = useState(null);
-  
-  useEffect(() => {
-    let mounted = true;
-    fetch(`${API_BASE}/stage-settings`)
-      .then(r => r.json())
-      .then(d => { 
-        if (mounted && d && d.success) setStage(d.settings); 
-      })
-      .catch(() => {});
-    return () => { mounted = false; };
-  }, []);
-
-  if (!stage) return null;
-  
-  const pos = stage.position || 'back-left';
-  const style = { 
-    position: 'absolute', 
-    width: '22%', 
-    height: 48, 
-    background: '#1f1f1f', 
-    border: '3px solid #7c3aed', 
-    color: '#fff', 
-    display: 'flex', 
-    alignItems: 'center', 
-    justifyContent: 'center',
-    fontWeight: 'bold',
-    fontSize: '16px',
-    borderRadius: '8px'
-  };
-  
-  switch (pos) {
-    case 'back-left': 
-      return <div style={{ ...style, left: '6%', top: '4%' }}>STAGE</div>;
-    case 'back-right': 
-      return <div style={{ ...style, right: '6%', top: '4%' }}>STAGE</div>;
-    case 'front-center': 
-      return <div style={{ ...style, left: '50%', top: '88%', transform: 'translateX(-50%)' }}>STAGE</div>;
-    default: 
-      return <div style={{ ...style, left: '6%', top: '4%' }}>STAGE</div>;
-  }
 }

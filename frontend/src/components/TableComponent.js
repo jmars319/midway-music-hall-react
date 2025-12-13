@@ -34,7 +34,8 @@ export default function TableComponent({
   pendingSeats = [], 
   onToggleSeat, 
   interactive = true,
-  tableShape
+  tableShape,
+  reservedSeats = []
 }) {
   const shape = tableShape || row.table_shape || row.seat_type || 'table-6';
   
@@ -49,7 +50,7 @@ export default function TableComponent({
 
   // Check seat status
   const getSeatStatus = (seatId) => {
-    const isReserved = reservedList.includes(seatId);
+    const isReserved = reservedList.includes(seatId) || reservedSeats.includes(seatId);
     const isPending = !isReserved && pendingSeats.includes(seatId);
     const isSelected = selectedSeats.includes(seatId) && !isReserved && !isPending;
     return { isReserved, isPending, isSelected };
@@ -196,6 +197,15 @@ export default function TableComponent({
         {renderTableCenter(size * 0.8, size * 0.35, 'Table')}
         {[0, 1, 2, 3].map(i => renderSeat(i + 1, startX + i * (seatSize + gap), topY, seatSize))}
         {[0, 1, 2, 3].map(i => renderSeat(i + 5, startX + i * (seatSize + gap), bottomY, seatSize))}
+      </div>
+    );
+  }
+
+  if (shape === 'chair') {
+    const seatSize = Math.max(26, Math.floor(size * 0.5));
+    return (
+      <div style={{ width: size, height: size, position: 'relative' }}>
+        {renderSeat(1, size / 2, size / 2, seatSize)}
       </div>
     );
   }
@@ -351,4 +361,16 @@ export default function TableComponent({
       {renderTableCenter(size * 0.6, size * 0.6, shape, true)}
     </div>
   );
+}
+
+// Utility: check if a seat is reserved for a given row (uses row.selected_seats and explicit reservedSeats)
+export function isSeatReserved(row, seatId, reservedSeats = []) {
+  const reservedList = (() => {
+    if (!row.selected_seats) return [];
+    if (typeof row.selected_seats === 'string') {
+      try { return JSON.parse(row.selected_seats); } catch (e) { return []; }
+    }
+    return row.selected_seats;
+  })();
+  return (Array.isArray(reservedList) && reservedList.includes(seatId)) || reservedSeats.includes(seatId);
 }
