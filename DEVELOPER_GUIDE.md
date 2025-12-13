@@ -1,6 +1,6 @@
 ## Developer notes
 
-### Suggestions API — contact normalization
+### Suggestions API - contact normalization
 
 Summary:
 
@@ -59,7 +59,7 @@ Migration/backfill:
 - A migration was added earlier to consolidate `name`/`notes` into `artist_name`/`message` and to ensure `start_datetime` is canonical for events. See `backend/scripts` for the migration scripts used in development.
 
 If you want this documented elsewhere (in the admin docs or inline component comments), tell me where and I will add it.
-Midway Music Hall — Developer Guide
+Midway Music Hall - Developer Guide
 
 This developer guide documents the codebase, runtime setup, important data
 shapes, the seat-request approval flow, testing tips, and suggestions for
@@ -126,10 +126,10 @@ npm start
 Database schema & migrations
 ---------------------------
 The database schema is in `database/schema.sql`. Basic tables include:
-- `seating` — stores rows/groupings, `selected_seats` is a JSON column.
-- `seat_requests` — requests with `selected_seats` JSON, customer contact,
+- `seating` - stores rows/groupings, `selected_seats` is a JSON column.
+- `seat_requests` - requests with `selected_seats` JSON, customer contact,
   status (pending/approved/denied) and timestamps.
-- `layout_history` — snapshots of admin layout edits (JSON), with pruning.
+- `layout_history` - snapshots of admin layout edits (JSON), with pruning.
 
 Quick local setup (MySQL):
 
@@ -197,33 +197,33 @@ This is a short summary of the most-used endpoints. Prefer reading
   - DELETE /api/events/:id
 
 - Seating
-  - GET /api/seating — returns rows with `selected_seats` field
-  - POST /api/seating — create/update a seating row
-  - PATCH /api/seating/:id — partial update (position, rotation, selected_seats)
+  - GET /api/seating - returns rows with `selected_seats` field
+  - POST /api/seating - create/update a seating row
+  - PATCH /api/seating/:id - partial update (position, rotation, selected_seats)
   - DELETE /api/seating/:id
 
 - Seat requests
-  - GET /api/seat-requests — optional filters: event_id, status
-  - POST /api/seat-requests — submit a new request (customer-facing)
+  - GET /api/seat-requests - optional filters: event_id, status
+  - POST /api/seat-requests - submit a new request (customer-facing)
     * Payload: { event_id, customer_name, contact: { email, phone }, selected_seats: ['Section-Row-1', ...], special_requests }
-  - POST /api/seat-requests/:id/approve — admin approve (transactional)
-  - POST /api/seat-requests/:id/deny — admin deny
+  - POST /api/seat-requests/:id/approve - admin approve (transactional)
+  - POST /api/seat-requests/:id/deny - admin deny
 
 - Layout history
-  - POST /api/layout-history — store snapshot
-  - GET /api/layout-history — list recent
-  - GET /api/layout-history/:id — fetch a snapshot
-  - POST /api/layout-history/prune — manual pruning
+  - POST /api/layout-history - store snapshot
+  - GET /api/layout-history - list recent
+  - GET /api/layout-history/:id - fetch a snapshot
+  - POST /api/layout-history/prune - manual pruning
 
 Frontend structure & important components
 ----------------------------------------
-- `frontend/src/App.js` — main routes and app-level context (API base constant)
-- `frontend/src/components/SeatingChart.js` — main visual surface for seat selection
+- `frontend/src/App.js` - main routes and app-level context (API base constant)
+- `frontend/src/components/SeatingChart.js` - main visual surface for seat selection
   - Important functions: `toggleSeat`, `handleSubmit` (creates seat_request)
   - Shows pending seats (requests with status 'pending') and reserved seats
-- `frontend/src/components/Table6.js` — visual layout for 6-seat tables
+- `frontend/src/components/Table6.js` - visual layout for 6-seat tables
   - Accepts props: `row`, `selectedSeats`, `pendingSeats`, `onToggleSeat`
-- `frontend/src/admin/RequestsModule.js` — admin review UI; handles approve/deny
+- `frontend/src/admin/RequestsModule.js` - admin review UI; handles approve/deny
   - Shows conflict modal on 409 from the approve endpoint
 
 Seat-request approval flow (detailed)

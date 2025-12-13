@@ -27,21 +27,21 @@ npm start
 
 ## Project Structure
 
-- **`frontend/`** — React application with Tailwind CSS
+- **`frontend/`** - React application with Tailwind CSS
   - Single-page landing mode (env: `REACT_APP_SINGLE_PAGE=true`)
   - Full application with admin panel
   - Production build: `frontend/build/`
   - Deployment package: `frontend/midway-music-hall-deploy.zip`
 
-- **`backend/`** — Node.js/Express API server
+- **`backend/`** - Node.js/Express API server
   - Event management endpoints
   - Seating chart system
   - Artist suggestion handling
   - MySQL database integration
 
-- **`database/`** — SQL schema and migration scripts
+- **`database/`** - SQL schema and migration scripts
 
-- **`copilot-instructions/`** — Development documentation
+- **`copilot-instructions/`** - Development documentation
 
 ## Deployment
 

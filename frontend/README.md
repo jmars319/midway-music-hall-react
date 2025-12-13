@@ -1,4 +1,4 @@
-# Frontend — Midway Music Hall
+# Frontend - Midway Music Hall
 
 React application with two modes: single-page landing and full application.
 
@@ -18,11 +18,11 @@ npm start  # Opens http://localhost:3000
 
 ## Structure
 
-- **`src/SinglePageLanding.js`** — Single-page public landing
-- **`src/components/`** — Public components (seating, schedule, navigation)
-- **`src/admin/`** — Admin panel modules (events, seating, requests, suggestions)
-- **`src/pages/`** — Page components (HomePage, LoginPage)
-- **`public/`** — Static assets (logo, favicons, manifest.json)
+- **`src/SinglePageLanding.js`** - Single-page public landing
+- **`src/components/`** - Public components (seating, schedule, navigation)
+- **`src/admin/`** - Admin panel modules (events, seating, requests, suggestions)
+- **`src/pages/`** - Page components (HomePage, LoginPage)
+- **`public/`** - Static assets (logo, favicons, manifest.json)
 
 ## Deployment Package
 
@@ -39,10 +39,10 @@ Copy `.htaccess-deployment` to `.htaccess` on server.
 
 ## Key Components
 
-- **SeatingChart.js** — Interactive seating with seat selection/requests
-- **Table6.js** — 6-seat table visual layout
-- **EventsModule.js** — Admin event CRUD
-- **RequestsModule.js** — Admin seat request approval/denial with conflict detection
+- **SeatingChart.js** - Interactive seating with seat selection/requests
+- **Table6.js** - 6-seat table visual layout
+- **EventsModule.js** - Admin event CRUD
+- **RequestsModule.js** - Admin seat request approval/denial with conflict detection
 
 ## Configuration
 
