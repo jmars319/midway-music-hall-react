@@ -1,8 +1,10 @@
 // LayoutsModule: admin UI to create and manage seating layout templates with visual editor
 import React, { useEffect, useState, useRef } from 'react';
-import { Plus, Edit, Trash2, Star, Eye, Copy, Save, X } from 'lucide-react';
+import { Plus, Edit, Trash2, Star, Eye, Copy, Save, X, ZoomIn, ZoomOut, RotateCcw, Move, Shapes } from 'lucide-react';
 import { API_BASE } from '../App';
 import TableComponent from '../components/TableComponent';
+
+const isDevBuild = process.env.NODE_ENV !== 'production';
 
 const initialForm = {
   name: '',
@@ -23,6 +25,22 @@ const tableShapes = [
   { value: 'booth-4', label: 'Booth (4)', seats: 4 },
   { value: 'standing-10', label: 'Standing (10)', seats: 10 },
   { value: 'standing-20', label: 'Standing (20)', seats: 20 }
+];
+
+const canvasPresets = [
+  { key: 'standard', label: 'Standard (120′ × 80′)', width: 1200, height: 800 },
+  { key: 'wide', label: 'Wide Room (150′ × 90′)', width: 1500, height: 900 },
+  { key: 'deep', label: 'Deep Room (100′ × 140′)', width: 1000, height: 1400 }
+];
+
+const quickObjects = [
+  { key: 'rect-6', label: 'Rect Table (6)', element_type: 'table', table_shape: 'table-6', total_seats: 6, seat_type: 'general' },
+  { key: 'round-8', label: 'Round Table (8)', element_type: 'table', table_shape: 'round-8', total_seats: 8, seat_type: 'general' },
+  { key: 'chair', label: 'Single Chair', element_type: 'chair', table_shape: 'chair', total_seats: 1, seat_type: 'general' },
+  { key: 'dance-floor', label: 'Dance Floor', element_type: 'area', width: 320, height: 220, color: '#f97316' },
+  { key: 'concessions', label: 'Concessions', element_type: 'marker', width: 220, height: 110, color: '#fbbf24' },
+  { key: 'door', label: 'Door', element_type: 'marker', width: 80, height: 24, color: '#60a5fa' },
+  { key: 'pole', label: 'Pole / Column', element_type: 'marker', width: 30, height: 30, color: '#9ca3af' }
 ];
 
 export default function LayoutsModule() {
@@ -49,6 +67,7 @@ export default function LayoutsModule() {
     rotation: 0
   });
   const containerRef = useRef(null);
+  const canvasInnerRef = useRef(null);
   const [draggingRow, setDraggingRow] = useState(null);
   const [showGrid, setShowGrid] = useState(true);
   const [snapToGrid, setSnapToGrid] = useState(true);
@@ -59,6 +78,19 @@ export default function LayoutsModule() {
   const [stageGhostPosition, setStageGhostPosition] = useState(null);
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
   const [resizingStage, setResizingStage] = useState(false);
+  const [canvasSettings, setCanvasSettings] = useState({
+    preset: canvasPresets[0].key,
+    width: canvasPresets[0].width,
+    height: canvasPresets[0].height
+  });
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [panMode, setPanMode] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const panRef = useRef({ startX: 0, startY: 0, startPan: { x: 0, y: 0 } });
+  const [selectedRowId, setSelectedRowId] = useState(null);
+  const [resizingMarker, setResizingMarker] = useState(null);
+  const [debugOverlay, setDebugOverlay] = useState(null);
 
   const fetchLayouts = async () => {
     setLoading(true);
@@ -79,6 +111,17 @@ export default function LayoutsModule() {
   };
 
   useEffect(() => { fetchLayouts(); }, []);
+  useEffect(() => {
+    if (!showEditor) {
+      setPanMode(false);
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+      setSelectedRowId(null);
+      if (isDevBuild) {
+        setDebugOverlay(null);
+      }
+    }
+  }, [showEditor]);
 
   const openAdd = () => {
     setEditing(null);
@@ -89,18 +132,33 @@ export default function LayoutsModule() {
 
   const openEdit = (layout) => {
     setEditingLayout(layout);
-    setLayoutRows(Array.isArray(layout.layout_data) ? layout.layout_data.map((r, idx) => ({ ...r, id: r.id || `temp-${idx}` })) : []);
-    // Load stage position and size from layout metadata if it exists
-    if (layout.stage_position) {
-      setStagePosition(layout.stage_position);
-    } else {
-      setStagePosition({ x: 50, y: 10 });
-    }
-    if (layout.stage_size) {
-      setStageSize(layout.stage_size);
-    } else {
-      setStageSize({ width: 200, height: 80 });
-    }
+    const rows = Array.isArray(layout.layout_data)
+      ? layout.layout_data.map((r, idx) => ({
+          ...r,
+          id: r.id || `temp-${idx}`,
+          element_type: r.element_type || (r.table_shape || r.total_seats ? 'table' : 'marker'),
+          width: r.width || r.marker_width || r.size || (r.element_type === 'chair' ? 60 : 160),
+          height: r.height || r.marker_height || r.size || 120,
+          label: r.label || r.marker_label || r.section_name || ''
+        }))
+      : [];
+    setLayoutRows(rows);
+    const incomingStagePosition = layout.stage_position ? layout.stage_position : { x: 50, y: 10 };
+    const incomingStageSize = layout.stage_size ? layout.stage_size : { width: 200, height: 80 };
+    setStagePosition(incomingStagePosition);
+    setStageSize(incomingStageSize);
+    setCanvasSettings(layout.canvas_settings ? {
+      preset: layout.canvas_settings.preset || canvasPresets[0].key,
+      width: layout.canvas_settings.width || canvasPresets[0].width,
+      height: layout.canvas_settings.height || canvasPresets[0].height
+    } : {
+      preset: canvasPresets[0].key,
+      width: canvasPresets[0].width,
+      height: canvasPresets[0].height
+    });
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setSelectedRowId(null);
     setShowEditor(true);
   };
 
@@ -149,7 +207,10 @@ export default function LayoutsModule() {
         name: formData.name,
         description: formData.description,
         is_default: formData.is_default ? 1 : 0,
-        layout_data: formData.layout_data
+        layout_data: formData.layout_data,
+        stage_position: editing?.stage_position || null,
+        stage_size: editing?.stage_size || null,
+        canvas_settings: editing?.canvas_settings || null
       };
 
       const res = await fetch(url, {
@@ -226,7 +287,8 @@ export default function LayoutsModule() {
   const handleAddRow = () => {
     const shape = tableShapes.find(s => s.value === rowForm.table_shape);
     const newRow = {
-      id: `temp-${Date.now()}`,
+      id: createRowId(),
+      element_type: 'table',
       section_name: rowForm.section_name || 'Main Floor',
       row_label: rowForm.row_label || `Row ${layoutRows.length + 1}`,
       seat_type: rowForm.seat_type,
@@ -237,6 +299,7 @@ export default function LayoutsModule() {
       rotation: rowForm.rotation
     };
     setLayoutRows([...layoutRows, newRow]);
+    setSelectedRowId(newRow.id);
     setShowAddRow(false);
     setRowForm({
       section_name: '',
@@ -250,12 +313,44 @@ export default function LayoutsModule() {
     });
   };
 
+  const handleAddObject = (template) => {
+    const newRow = {
+      id: createRowId(),
+      element_type: template.element_type || 'marker',
+      section_name: template.element_type === 'table' ? template.label : template.label,
+      row_label: template.element_type === 'table' ? `Row ${layoutRows.length + 1}` : '',
+      seat_type: template.seat_type || 'general',
+      table_shape: template.table_shape || null,
+      total_seats: typeof template.total_seats === 'number' ? template.total_seats : 0,
+      pos_x: 50,
+      pos_y: 50,
+      rotation: 0,
+      label: template.label,
+      color: template.color || '#4b5563',
+      width: template.width || 140,
+      height: template.height || 120
+    };
+    setLayoutRows([...layoutRows, newRow]);
+    setSelectedRowId(newRow.id);
+    setShowAddRow(false);
+  };
+
   const handleDeleteRow = (rowId) => {
     setLayoutRows(layoutRows.filter(r => r.id !== rowId));
+    if (selectedRowId === rowId) {
+      setSelectedRowId(null);
+    }
+  };
+
+  const updateRow = (rowId, updates) => {
+    setLayoutRows(prev => prev.map(row => (
+      row.id === rowId ? { ...row, ...updates } : row
+    )));
   };
 
   const handleRowDragStart = (e, row) => {
     setDraggingRow(row);
+    setSelectedRowId(row.id);
     e.dataTransfer.effectAllowed = 'move';
   };
 
@@ -264,27 +359,60 @@ export default function LayoutsModule() {
     return Math.round(value / gridSize) * gridSize;
   };
 
-  const handleCanvasDragOver = (e) => {
-    e.preventDefault();
-    if (!containerRef.current) return;
+  const clampPercent = (value) => Math.max(0, Math.min(100, value));
 
-    const rect = containerRef.current.getBoundingClientRect();
+  const createRowId = () => `row-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+  const getCanvasRect = () => {
+    if (!canvasInnerRef.current) return null;
+    return canvasInnerRef.current.getBoundingClientRect();
+  };
+
+  const calculatePositionFromEvent = (e) => {
+    const rect = getCanvasRect();
+    if (!rect) return { x: 0, y: 0 };
     let x = ((e.clientX - rect.left) / rect.width) * 100;
     let y = ((e.clientY - rect.top) / rect.height) * 100;
-
-    // Snap to grid if enabled
     if (snapToGrid) {
       x = snapToGridValue(x);
       y = snapToGridValue(y);
     }
+    return { x: clampPercent(x), y: clampPercent(y) };
+  };
+
+  const updateDebugOverlay = (coords, clientX, clientY) => {
+    if (!isDevBuild) return;
+    setDebugOverlay({
+      pointer: coords,
+      client: { x: Math.round(clientX), y: Math.round(clientY) },
+      zoom,
+      pan
+    });
+  };
+
+  const handleCanvasPresetChange = (presetKey) => {
+    const preset = canvasPresets.find(p => p.key === presetKey);
+    if (!preset) return;
+    setCanvasSettings({
+      preset: preset.key,
+      width: preset.width,
+      height: preset.height
+    });
+  };
+
+  const handleCanvasDragOver = (e) => {
+    e.preventDefault();
+    if (!canvasInnerRef.current) return;
+    const coords = calculatePositionFromEvent(e);
+    updateDebugOverlay(coords, e.clientX, e.clientY);
 
     if (draggingStage) {
-      setStageGhostPosition({ x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) });
+      setStageGhostPosition(coords);
       return;
     }
     
     if (draggingRow) {
-      setGhostPosition({ x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) });
+      setGhostPosition(coords);
     }
   };
 
@@ -296,25 +424,54 @@ export default function LayoutsModule() {
       return;
     }
     
-    if (!draggingRow || !containerRef.current) return;
+    if (!draggingRow || !canvasInnerRef.current) return;
 
-    const rect = containerRef.current.getBoundingClientRect();
-    let x = ((e.clientX - rect.left) / rect.width) * 100;
-    let y = ((e.clientY - rect.top) / rect.height) * 100;
-
-    // Snap to grid if enabled
-    if (snapToGrid) {
-      x = snapToGridValue(x);
-      y = snapToGridValue(y);
-    }
-
+    const { x, y } = calculatePositionFromEvent(e);
     setLayoutRows(layoutRows.map(r => 
       r.id === draggingRow.id 
-        ? { ...r, pos_x: Math.max(0, Math.min(100, x)), pos_y: Math.max(0, Math.min(100, y)) }
+        ? { ...r, pos_x: clampPercent(x), pos_y: clampPercent(y) }
         : r
     ));
     setDraggingRow(null);
     setGhostPosition(null);
+  };
+
+  const handleWheel = (e) => {
+    if (!showEditor) return;
+    if (e.ctrlKey || e.metaKey) return;
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.1 : -0.1;
+    setZoom(prev => {
+      const next = Math.max(0.5, Math.min(2, parseFloat((prev + delta).toFixed(2))));
+      return next;
+    });
+  };
+
+  const handlePanMouseDown = (e) => {
+    if (!panMode || draggingRow || draggingStage) return;
+    e.preventDefault();
+    setIsPanning(true);
+    panRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startPan: pan
+    };
+  };
+
+  const handlePanMouseMove = (e) => {
+    if (!isPanning) return;
+    e.preventDefault();
+    const { startX, startY, startPan } = panRef.current;
+    setPan({
+      x: startPan.x + (e.clientX - startX),
+      y: startPan.y + (e.clientY - startY)
+    });
+  };
+
+  const handlePanMouseUp = () => {
+    if (isPanning) {
+      setIsPanning(false);
+    }
   };
 
   const handleSaveLayout = async () => {
@@ -329,7 +486,8 @@ export default function LayoutsModule() {
           ...editingLayout,
           layout_data: layoutRows,
           stage_position: stagePosition,
-          stage_size: stageSize
+          stage_size: stageSize,
+          canvas_settings: canvasSettings
         }),
       });
       
@@ -356,19 +514,10 @@ export default function LayoutsModule() {
 
   const handleStageDrop = (e) => {
     e.preventDefault();
-    if (!draggingStage || !containerRef.current) return;
+    if (!draggingStage) return;
 
-    const rect = containerRef.current.getBoundingClientRect();
-    let x = ((e.clientX - rect.left) / rect.width) * 100;
-    let y = ((e.clientY - rect.top) / rect.height) * 100;
-
-    // Snap to grid if enabled
-    if (snapToGrid) {
-      x = snapToGridValue(x);
-      y = snapToGridValue(y);
-    }
-
-    setStagePosition({ x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) });
+    const { x, y } = calculatePositionFromEvent(e);
+    setStagePosition({ x: clampPercent(x), y: clampPercent(y) });
     setDraggingStage(false);
     setStageGhostPosition(null);
   };
@@ -412,6 +561,37 @@ export default function LayoutsModule() {
       document.removeEventListener('mouseup', handleMouseUp);
     };
 
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleMarkerResizeStart = (e, rowId) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const targetRow = layoutRows.find(r => r.id === rowId);
+    if (!targetRow) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startWidth = targetRow.width || 140;
+    const startHeight = targetRow.height || 120;
+
+    const handleMouseMove = (moveEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const deltaY = moveEvent.clientY - startY;
+      setLayoutRows(prev => prev.map(r => (
+        r.id === rowId
+          ? { ...r, width: Math.max(30, startWidth + deltaX), height: Math.max(30, startHeight + deltaY) }
+          : r
+      )));
+    };
+
+    const handleMouseUp = () => {
+      setResizingMarker(null);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    setResizingMarker(rowId);
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
   };
@@ -657,30 +837,56 @@ export default function LayoutsModule() {
                   
                   {/* Render all tables/rows */}
                   <div className="mt-16 space-y-6">
-                    {showPreview.layout_data.map((row, idx) => (
-                      <div 
-                        key={idx} 
-                        className="relative"
-                        style={{
-                          position: row.pos_x && row.pos_y ? 'absolute' : 'relative',
-                          left: row.pos_x ? `${row.pos_x}%` : 'auto',
-                          top: row.pos_y ? `${row.pos_y}%` : 'auto',
-                          transform: row.rotation ? `rotate(${row.rotation}deg)` : 'none'
-                        }}
-                      >
-                        <div className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
-                          {row.section_name || row.section} - Row {row.row_label}
+                    {showPreview.layout_data.map((row, idx) => {
+                      const type = row.element_type || 'table';
+                      if (type !== 'table' && type !== 'chair') {
+                        return (
+                          <div
+                            key={`preview-${idx}`}
+                            className="absolute rounded-lg"
+                            style={{
+                              left: row.pos_x ? `${row.pos_x}%` : 'auto',
+                              top: row.pos_y ? `${row.pos_y}%` : 'auto',
+                              transform: 'translate(-50%, -50%)',
+                              width: row.width || 160,
+                              height: row.height || 120,
+                              backgroundColor: row.color || '#4b5563',
+                              opacity: 0.8
+                            }}
+                          >
+                            <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white text-center px-2">
+                              {row.label || row.section_name || 'Marker'}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div 
+                          key={idx} 
+                          className="absolute"
+                          style={{
+                            left: row.pos_x ? `${row.pos_x}%` : 'auto',
+                            top: row.pos_y ? `${row.pos_y}%` : 'auto',
+                            transform: 'translate(-50%, -50%)'
+                          }}
+                        >
+                          <div className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400 text-center">
+                            {row.section_name || row.section} - Row {row.row_label}
+                          </div>
+                          <div style={{ transform: row.rotation ? `rotate(${row.rotation}deg)` : 'none' }}>
+                            <TableComponent
+                              row={row}
+                              tableShape={row.table_shape || (type === 'chair' ? 'chair' : 'table-6')}
+                              selectedSeats={[]}
+                              pendingSeats={[]}
+                              onToggleSeat={() => {}}
+                              interactive={false}
+                            />
+                          </div>
                         </div>
-                        <TableComponent
-                          row={row}
-                          tableShape={row.table_shape || 'table-6'}
-                          selectedSeats={[]}
-                          pendingSeats={[]}
-                          onToggleSeat={() => {}}
-                          interactive={false}
-                        />
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ) : (
@@ -728,7 +934,7 @@ export default function LayoutsModule() {
             </div>
 
             {/* Grid Controls */}
-            <div className="flex items-center gap-4 px-6 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex flex-wrap items-center gap-4 px-6 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -762,6 +968,58 @@ export default function LayoutsModule() {
                 />
                 <span className="text-sm text-gray-600 dark:text-gray-400 w-8">{gridSize}%</span>
               </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">Canvas:</span>
+                <select
+                  value={canvasSettings.preset}
+                  onChange={(e) => handleCanvasPresetChange(e.target.value)}
+                  className="px-2 py-1 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
+                >
+                  {canvasPresets.map((preset) => (
+                    <option key={preset.key} value={preset.key}>{preset.label}</option>
+                  ))}
+                </select>
+                <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                  <span>{Math.round(canvasSettings.width)}px</span>
+                  <span>×</span>
+                  <span>{Math.round(canvasSettings.height)}px</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">Zoom:</span>
+                <button
+                  onClick={() => setZoom((prev) => Math.max(0.5, parseFloat((prev - 0.1).toFixed(2))))}
+                  className="p-1.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
+                  title="Zoom out"
+                >
+                  <ZoomOut className="h-4 w-4" />
+                </button>
+                <span className="text-sm w-12 text-center">{Math.round(zoom * 100)}%</span>
+                <button
+                  onClick={() => setZoom((prev) => Math.min(2, parseFloat((prev + 0.1).toFixed(2))))}
+                  className="p-1.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
+                  title="Zoom in"
+                >
+                  <ZoomIn className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
+                  className="p-1.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
+                  title="Reset view"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+              </div>
+
+              <button
+                onClick={() => setPanMode(!panMode)}
+                className={`px-3 py-1.5 rounded text-sm flex items-center gap-2 ${panMode ? 'bg-purple-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+              >
+                <Move className="h-4 w-4" />
+                {panMode ? 'Panning Enabled' : 'Pan View'}
+              </button>
             </div>
 
             {/* Main Editor Area */}
@@ -769,9 +1027,14 @@ export default function LayoutsModule() {
               {/* Canvas */}
               <div 
                 ref={containerRef}
-                className="flex-1 bg-gray-100 dark:bg-gray-900 relative overflow-auto"
+                className={`flex-1 bg-gray-100 dark:bg-gray-900 relative overflow-hidden ${panMode ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
                 onDrop={handleCanvasDrop}
                 onDragOver={handleCanvasDragOver}
+                onWheel={handleWheel}
+                onMouseDown={handlePanMouseDown}
+                onMouseMove={handlePanMouseMove}
+                onMouseUp={handlePanMouseUp}
+                onMouseLeave={handlePanMouseUp}
                 style={{
                   backgroundImage: showGrid ? `
                     linear-gradient(to right, rgba(156, 163, 175, 0.2) 1px, transparent 1px),
@@ -780,7 +1043,28 @@ export default function LayoutsModule() {
                   backgroundSize: showGrid ? `${gridSize}% ${gridSize}%` : 'auto'
                 }}
               >
-                <div className="relative" style={{ minHeight: '1600px', minWidth: '100%', padding: '60px' }}>
+                {isDevBuild && debugOverlay && (
+                  <div className="absolute top-3 left-3 bg-black/70 text-white text-xs px-3 py-2 rounded z-40 pointer-events-none space-y-1">
+                    <div>Zoom: {Math.round((debugOverlay.zoom || 0) * 100)}%</div>
+                    <div>Pan: {Math.round(debugOverlay.pan?.x || 0)}px, {Math.round(debugOverlay.pan?.y || 0)}px</div>
+                    {debugOverlay.pointer && (
+                      <div>
+                        Pointer: {debugOverlay.pointer.x.toFixed(1)}%, {debugOverlay.pointer.y.toFixed(1)}%
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div
+                  ref={canvasInnerRef}
+                  className="relative"
+                  style={{
+                    width: `${canvasSettings.width}px`,
+                    height: `${canvasSettings.height}px`,
+                    padding: '60px',
+                    transformOrigin: '0 0',
+                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
+                  }}
+                >
                   {/* Stage Ghost Preview */}
                   {stageGhostPosition && draggingStage && (
                     <div
@@ -865,144 +1149,296 @@ export default function LayoutsModule() {
                     </div>
                   )}
 
-                  {/* Tables */}
-                  {layoutRows.map((row) => (
-                    <div
-                      key={row.id}
-                      draggable
-                      onDragStart={(e) => handleRowDragStart(e, row)}
-                      className="absolute cursor-move hover:ring-2 hover:ring-purple-500 rounded"
-                      style={{
-                        left: `${row.pos_x}%`,
-                        top: `${row.pos_y}%`,
-                        transform: `translate(-50%, -50%)`,
-                        padding: '40px 20px',
-                        minWidth: '120px',
-                        minHeight: '120px'
-                      }}
-                    >
-                      <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-xs font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap z-20">
-                        {row.section_name} - {row.row_label}
-                      </div>
-                      <div className="flex items-center justify-center" style={{ minHeight: '60px' }}>
-                        <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
-                          <TableComponent
-                            row={row}
-                            tableShape={row.table_shape || 'table-6'}
-                            selectedSeats={[]}
-                            pendingSeats={[]}
-                            onToggleSeat={() => {}}
-                            interactive={false}
-                          />
+                  {/* Tables & Objects */}
+                  {layoutRows.map((row) => {
+                    const type = row.element_type || 'table';
+                    const isSelected = selectedRowId === row.id;
+                    const baseStyle = {
+                      left: `${row.pos_x}%`,
+                      top: `${row.pos_y}%`,
+                      transform: 'translate(-50%, -50%)',
+                    };
+
+                    if (type !== 'table' && type !== 'chair') {
+                      const markerWidth = row.width || 160;
+                      const markerHeight = row.height || 120;
+                      return (
+                        <div
+                          key={row.id}
+                          draggable
+                          onDragStart={(e) => handleRowDragStart(e, row)}
+                          onClick={() => setSelectedRowId(row.id)}
+                          className={`absolute cursor-move ${isSelected ? 'ring-2 ring-purple-400' : 'hover:ring-2 hover:ring-purple-500'} rounded-lg`}
+                          style={baseStyle}
+                        >
+                          <div
+                            className="rounded-lg shadow-lg flex items-center justify-center text-xs font-semibold text-gray-900 dark:text-white"
+                            style={{
+                              width: markerWidth,
+                              height: markerHeight,
+                              backgroundColor: row.color || '#4b5563',
+                              position: 'relative',
+                              opacity: 0.9
+                            }}
+                          >
+                            <span>{row.label || row.section_name || 'Marker'}</span>
+                            {type === 'area' && (
+                              <div
+                                onMouseDown={(e) => handleMarkerResizeStart(e, row.id)}
+                                className="absolute -bottom-2 -right-2 w-4 h-4 bg-white dark:bg-gray-900 border border-gray-400 rounded-full cursor-se-resize"
+                                title="Resize"
+                              />
+                            )}
+                          </div>
+                          <div className="mt-1 flex justify-center gap-1">
+                            <button
+                              onClick={() => handleDeleteRow(row.id)}
+                              className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={row.id}
+                        draggable
+                        onDragStart={(e) => handleRowDragStart(e, row)}
+                        onClick={() => setSelectedRowId(row.id)}
+                        className={`absolute cursor-move rounded ${isSelected ? 'ring-2 ring-purple-400' : 'hover:ring-2 hover:ring-purple-500'}`}
+                        style={{ ...baseStyle, padding: '40px 20px', minWidth: '120px', minHeight: '120px' }}
+                      >
+                        <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-xs font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap z-20">
+                          {row.section_name} - {row.row_label}
+                        </div>
+                        <div className="flex items-center justify-center" style={{ minHeight: '60px' }}>
+                          <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
+                            <TableComponent
+                              row={row}
+                              tableShape={row.table_shape || (type === 'chair' ? 'chair' : 'table-6')}
+                              selectedSeats={[]}
+                              pendingSeats={[]}
+                              onToggleSeat={() => {}}
+                              interactive={false}
+                            />
+                          </div>
+                        </div>
+                        <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1 z-20">
+                          <button
+                            onClick={() => handleRotateRow(row.id, -45)}
+                            className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
+                          >
+                            ↶
+                          </button>
+                          <button
+                            onClick={() => handleRotateRow(row.id, 45)}
+                            className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
+                          >
+                            ↷
+                          </button>
+                          <button
+                            onClick={() => handleDeleteRow(row.id)}
+                            className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
                         </div>
                       </div>
-                      <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1 z-20">
-                        <button
-                          onClick={() => handleRotateRow(row.id, -45)}
-                          className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
-                        >
-                          ↶
-                        </button>
-                        <button
-                          onClick={() => handleRotateRow(row.id, 45)}
-                          className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
-                        >
-                          ↷
-                        </button>
-                        <button
-                          onClick={() => handleDeleteRow(row.id)}
-                          className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
               {/* Sidebar */}
               <div className="w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 p-6 overflow-y-auto">
-                <h4 className="font-bold text-lg mb-4">Add Table/Seating</h4>
-                
-                <button
-                  onClick={() => setShowAddRow(!showAddRow)}
-                  className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2 mb-4"
-                >
-                  <Plus className="h-4 w-4" /> Add Row
-                </button>
-
-                {showAddRow && (
-                  <div className="space-y-3 mb-6 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                    <div>
-                      <label className="block text-xs font-medium mb-1">Section</label>
-                      <input
-                        type="text"
-                        value={rowForm.section_name}
-                        onChange={(e) => setRowForm({...rowForm, section_name: e.target.value})}
-                        className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm"
-                        placeholder="Main Floor"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium mb-1">Row Label</label>
-                      <input
-                        type="text"
-                        value={rowForm.row_label}
-                        onChange={(e) => setRowForm({...rowForm, row_label: e.target.value})}
-                        className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm"
-                        placeholder="A"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium mb-1">Table Type</label>
-                      <select
-                        value={rowForm.table_shape}
-                        onChange={(e) => {
-                          const shape = tableShapes.find(s => s.value === e.target.value);
-                          setRowForm({...rowForm, table_shape: e.target.value, total_seats: shape ? shape.seats : 6});
-                        }}
-                        className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm"
-                      >
-                        {tableShapes.map(shape => (
-                          <option key={shape.value} value={shape.value}>
-                            {shape.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium mb-1">Seat Type</label>
-                      <select
-                        value={rowForm.seat_type}
-                        onChange={(e) => setRowForm({...rowForm, seat_type: e.target.value})}
-                        className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm"
-                      >
-                        {seatTypes.map(type => (
-                          <option key={type} value={type}>{type}</option>
-                        ))}
-                      </select>
-                    </div>
+                <h4 className="font-bold text-lg mb-4">Quick Add Objects</h4>
+                <div className="grid grid-cols-1 gap-2 mb-6">
+                  {quickObjects.map((obj) => (
                     <button
-                      onClick={handleAddRow}
-                      className="w-full px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+                      key={obj.key}
+                      onClick={() => handleAddObject(obj)}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-between text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
                     >
-                      Add to Layout
+                      <span className="flex items-center gap-2">
+                        <Shapes className="h-4 w-4 text-purple-400" />
+                        {obj.label}
+                      </span>
+                      <span className="text-xs text-gray-400">{obj.element_type === 'table' ? `${obj.total_seats} seats` : 'marker'}</span>
                     </button>
-                  </div>
-                )}
+                  ))}
+                </div>
 
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-                  <h5 className="font-semibold text-sm mb-2">Current Tables ({layoutRows.length})</h5>
-                  <div className="space-y-2 max-h-96 overflow-y-auto">
-                    {layoutRows.map((row) => (
-                      <div key={row.id} className="text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded">
-                        <div className="font-medium">{row.section_name} - {row.row_label}</div>
-                        <div className="text-gray-500">{row.table_shape} ({row.total_seats} seats)</div>
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+                  <h4 className="font-bold text-lg mb-3">Add Table/Seating</h4>
+                  <button
+                    onClick={() => setShowAddRow(!showAddRow)}
+                    className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2 mb-4"
+                  >
+                    <Plus className="h-4 w-4" /> Add Row
+                  </button>
+
+                  {showAddRow && (
+                    <div className="space-y-3 mb-6 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Section</label>
+                        <input
+                          type="text"
+                          value={rowForm.section_name}
+                          onChange={(e) => setRowForm({...rowForm, section_name: e.target.value})}
+                          className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm"
+                          placeholder="Main Floor"
+                        />
                       </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Row Label</label>
+                        <input
+                          type="text"
+                          value={rowForm.row_label}
+                          onChange={(e) => setRowForm({...rowForm, row_label: e.target.value})}
+                          className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm"
+                          placeholder="A"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Table Type</label>
+                        <select
+                          value={rowForm.table_shape}
+                          onChange={(e) => {
+                            const shape = tableShapes.find(s => s.value === e.target.value);
+                            setRowForm({...rowForm, table_shape: e.target.value, total_seats: shape ? shape.seats : 6});
+                          }}
+                          className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm"
+                        >
+                          {tableShapes.map(shape => (
+                            <option key={shape.value} value={shape.value}>
+                              {shape.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Seat Type</label>
+                        <select
+                          value={rowForm.seat_type}
+                          onChange={(e) => setRowForm({...rowForm, seat_type: e.target.value})}
+                          className="w-full px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm"
+                        >
+                          {seatTypes.map(type => (
+                            <option key={type} value={type}>{type}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        onClick={handleAddRow}
+                        className="w-full px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+                      >
+                        Add to Layout
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+                  <h5 className="font-semibold text-sm mb-2">Current Items ({layoutRows.length})</h5>
+                  <div className="space-y-2 max-h-72 overflow-y-auto">
+                    {layoutRows.map((row) => (
+                      <button
+                        key={row.id}
+                        onClick={() => setSelectedRowId(row.id)}
+                        className={`w-full text-left text-xs p-2 rounded border ${selectedRowId === row.id ? 'border-purple-500 bg-purple-500/10' : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900'}`}
+                      >
+                        <div className="font-medium flex justify-between">
+                          <span>{row.section_name || row.label || 'Object'}</span>
+                          <span className="text-[10px] uppercase text-gray-400">{(row.element_type || 'table')}</span>
+                        </div>
+                        {row.element_type === 'table' ? (
+                          <div className="text-gray-500">{row.table_shape} ({row.total_seats} seats)</div>
+                        ) : (
+                          <div className="text-gray-500">{row.label || row.row_label || 'Marker'}</div>
+                        )}
+                      </button>
                     ))}
                   </div>
                 </div>
+
+                {selectedRowId && (
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+                    <h5 className="font-semibold text-sm mb-2">Selected Object Details</h5>
+                    {(() => {
+                      const row = layoutRows.find(r => r.id === selectedRowId);
+                      if (!row) return null;
+                      const type = row.element_type || 'table';
+                      return (
+                        <div className="space-y-3 text-sm">
+                          {type === 'table' && (
+                            <>
+                              <div>
+                                <label className="block text-xs mb-1">Section</label>
+                                <input
+                                  value={row.section_name || ''}
+                                  onChange={(e) => updateRow(row.id, { section_name: e.target.value })}
+                                  className="w-full px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs mb-1">Row Label</label>
+                                <input
+                                  value={row.row_label || ''}
+                                  onChange={(e) => updateRow(row.id, { row_label: e.target.value })}
+                                  className="w-full px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded"
+                                />
+                              </div>
+                            </>
+                          )}
+                          {type !== 'table' && (
+                            <>
+                              <div>
+                                <label className="block text-xs mb-1">Label</label>
+                                <input
+                                  value={row.label || ''}
+                                  onChange={(e) => updateRow(row.id, { label: e.target.value })}
+                                  className="w-full px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded"
+                                />
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="block text-xs mb-1">Width</label>
+                                  <input
+                                    type="number"
+                                    value={Math.round(row.width || 120)}
+                                    onChange={(e) => updateRow(row.id, { width: Math.max(20, Number(e.target.value) || 20) })}
+                                    className="w-full px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs mb-1">Height</label>
+                                  <input
+                                    type="number"
+                                    value={Math.round(row.height || 120)}
+                                    onChange={(e) => updateRow(row.id, { height: Math.max(20, Number(e.target.value) || 20) })}
+                                    className="w-full px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded"
+                                  />
+                                </div>
+                              </div>
+                              <div>
+                                <label className="block text-xs mb-1">Color</label>
+                                <input
+                                  type="color"
+                                  value={row.color || '#4b5563'}
+                                  onChange={(e) => updateRow(row.id, { color: e.target.value })}
+                                  className="w-full h-10 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded"
+                                />
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
             </div>
           </div>

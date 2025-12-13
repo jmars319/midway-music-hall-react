@@ -1,7 +1,7 @@
 // MediaManager: admin interface for uploading and organizing images
 import React, { useEffect, useState } from 'react';
 import { Upload, Trash2, Image as ImageIcon, X } from 'lucide-react';
-import { API_BASE } from '../App';
+import { API_BASE, SERVER_BASE } from '../App';
 
 const categories = [
   { value: 'all', label: 'All Files', color: 'bg-gray-500' },
@@ -10,6 +10,17 @@ const categories = [
   { value: 'gallery', label: 'Gallery', color: 'bg-green-500' },
   { value: 'other', label: 'Other', color: 'bg-gray-500' },
 ];
+
+const resolveMediaUrl = (fileUrl) => {
+  if (!fileUrl) return '';
+  if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+    return fileUrl;
+  }
+  const fallbackOrigin = (typeof window !== 'undefined' && window.location && window.location.origin !== 'null')
+    ? window.location.origin
+    : '';
+  return `${SERVER_BASE || fallbackOrigin || ''}${fileUrl}`;
+};
 
 export default function MediaManager() {
   const [media, setMedia] = useState([]);
@@ -126,7 +137,8 @@ export default function MediaManager() {
   };
 
   const copyUrl = (url) => {
-    const fullUrl = `${window.location.origin}${url}`;
+    const fullUrl = resolveMediaUrl(url);
+    if (!fullUrl) return;
     navigator.clipboard.writeText(fullUrl);
     alert('URL copied to clipboard!');
   };
@@ -236,7 +248,7 @@ export default function MediaManager() {
             <div key={item.id} className="bg-gray-800 rounded-lg overflow-hidden border border-gray-700 hover:border-purple-500 transition-colors">
               <div className="relative aspect-video">
                 <img
-                  src={`${API_BASE}${item.file_url}`}
+                  src={resolveMediaUrl(item.file_url)}
                   alt={item.alt_text || item.original_name}
                   className="w-full h-full object-cover cursor-pointer"
                   onClick={() => setEditingMedia(item)}
@@ -289,7 +301,7 @@ export default function MediaManager() {
             <div className="p-6">
               <div className="mb-4">
                 <img
-                  src={`${API_BASE}${editingMedia.file_url}`}
+                  src={resolveMediaUrl(editingMedia.file_url)}
                   alt={editingMedia.alt_text || editingMedia.original_name}
                   className="w-full max-h-96 object-contain rounded border border-gray-700"
                 />
