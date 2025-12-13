@@ -1,0 +1,3 @@
+-- Placeholder: add indexes or views to support archive filtering
+-- Example:
+-- CREATE INDEX idx_events_archived_at ON events(archived_at);
