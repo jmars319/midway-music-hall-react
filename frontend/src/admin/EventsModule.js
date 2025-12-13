@@ -139,9 +139,6 @@ export default function EventsModule(){
     }
   };
 
-// Marker: admin events filters and quick actions implemented
-export const EVENTS_ADMIN_UPDATES = true;
-
   const fetchLayouts = async () => {
     try {
       const res = await fetch(`${API_BASE}/seating-layouts`);
