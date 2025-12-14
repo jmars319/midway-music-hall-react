@@ -86,6 +86,18 @@ CREATE TABLE IF NOT EXISTS seating_layout_versions (
   UNIQUE KEY uniq_layout_version (layout_id, version_number)
 );
 
+-- Event categories (used for routing + admin filters)
+CREATE TABLE IF NOT EXISTS event_categories (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  slug VARCHAR(64) NOT NULL,
+  name VARCHAR(191) NOT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  is_system TINYINT(1) NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_event_categories_slug (slug)
+);
+
 -- Events table (stores both single events and recurrence masters)
 CREATE TABLE IF NOT EXISTS events (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -96,6 +108,7 @@ CREATE TABLE IF NOT EXISTS events (
   notes TEXT,
   genre VARCHAR(100),
   category_tags JSON DEFAULT NULL,
+  category_id INT DEFAULT NULL,
   image_url VARCHAR(500),
   hero_image_id INT DEFAULT NULL,
   poster_image_id INT DEFAULT NULL,
@@ -135,12 +148,14 @@ CREATE TABLE IF NOT EXISTS events (
   INDEX idx_events_start (start_datetime),
   INDEX idx_events_status (status),
   INDEX idx_events_venue (venue_code),
+  INDEX idx_events_category (category_id),
   UNIQUE KEY idx_events_slug (slug),
   CONSTRAINT fk_events_layout FOREIGN KEY (layout_id) REFERENCES seating_layouts(id) ON DELETE SET NULL,
   CONSTRAINT fk_events_layout_version FOREIGN KEY (layout_version_id) REFERENCES seating_layout_versions(id) ON DELETE SET NULL,
   CONSTRAINT fk_events_series_master FOREIGN KEY (series_master_id) REFERENCES events(id) ON DELETE SET NULL,
   CONSTRAINT fk_events_hero_media FOREIGN KEY (hero_image_id) REFERENCES media(id) ON DELETE SET NULL,
-  CONSTRAINT fk_events_poster_media FOREIGN KEY (poster_image_id) REFERENCES media(id) ON DELETE SET NULL
+  CONSTRAINT fk_events_poster_media FOREIGN KEY (poster_image_id) REFERENCES media(id) ON DELETE SET NULL,
+  CONSTRAINT fk_events_category FOREIGN KEY (category_id) REFERENCES event_categories(id) ON DELETE SET NULL
 );
 
 -- Recurrence rules (one per series master event)

@@ -71,6 +71,10 @@ const hasBeachSeriesPhrase = (value = '') => {
 };
 
 const isBeachSeriesEvent = (event = {}) => {
+  const categorySlug = (event.category_slug || '').toLowerCase();
+  if (categorySlug === 'beach-bands') {
+    return true;
+  }
   const title = `${event.artist_name || event.title || ''}`.toLowerCase();
   if (/dj/i.test(title)) {
     return false;

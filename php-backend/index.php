@@ -253,6 +253,25 @@ function event_end_expression(string $alias = 'e', int $fallbackHours = 4): stri
     return "COALESCE({$alias}.end_datetime, DATE_ADD($startExpr, INTERVAL {$hours} HOUR))";
 }
 
+function event_has_schedule_expression(string $alias = 'e'): string
+{
+    $validStart = "{$alias}.start_datetime IS NOT NULL";
+    $validDate = "{$alias}.event_date IS NOT NULL";
+    return "($validStart OR $validDate)";
+}
+
+function event_missing_schedule_expression(string $alias = 'e'): string
+{
+    $hasExpr = event_has_schedule_expression($alias);
+    return "(NOT $hasExpr)";
+}
+
+function event_schedule_sort_expression(string $alias = 'e'): string
+{
+    $hasExpr = event_has_schedule_expression($alias);
+    return "CASE WHEN $hasExpr THEN 0 ELSE 1 END";
+}
+
 function events_table_has_column(PDO $pdo, string $column): bool
 {
     static $cache = [];
@@ -261,9 +280,13 @@ function events_table_has_column(PDO $pdo, string $column): bool
         return $cache[$key];
     }
     try {
-        $stmt = $pdo->prepare('SHOW COLUMNS FROM events LIKE ?');
-        $stmt->execute([$column]);
-        $cache[$key] = (bool) $stmt->fetch();
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', $column)) {
+            $cache[$key] = false;
+            return false;
+        }
+        $quoted = str_replace("'", "''", $column);
+        $stmt = $pdo->query("SHOW COLUMNS FROM events LIKE '{$quoted}'");
+        $cache[$key] = (bool) ($stmt->fetch() ?: null);
     } catch (Throwable $error) {
         $cache[$key] = false;
         if (APP_DEBUG) {
@@ -291,6 +314,104 @@ function events_table_has_index(PDO $pdo, string $indexName): bool
         }
     }
     return $cache[$key];
+}
+
+function event_categories_table_exists(PDO $pdo): bool
+{
+    static $exists = null;
+    if ($exists !== null) {
+        return $exists;
+    }
+    try {
+        $pdo->query('SELECT 1 FROM event_categories LIMIT 1');
+        $exists = true;
+    } catch (Throwable $error) {
+        $exists = false;
+        if (APP_DEBUG) {
+            error_log('event_categories_table_exists failure: ' . $error->getMessage());
+        }
+    }
+    return $exists;
+}
+
+function normalize_category_id($value): ?int
+{
+    if ($value === null || $value === '' || $value === false) {
+        return null;
+    }
+    if (!is_numeric($value)) {
+        return null;
+    }
+    $id = (int) $value;
+    return $id > 0 ? $id : null;
+}
+
+function fetch_event_category_by_id(PDO $pdo, int $id): ?array
+{
+    static $cache = [];
+    if (array_key_exists($id, $cache)) {
+        return $cache[$id];
+    }
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM event_categories WHERE id = ? LIMIT 1');
+        $stmt->execute([$id]);
+        $row = $stmt->fetch() ?: null;
+        $cache[$id] = $row;
+        return $row;
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('fetch_event_category_by_id failure: ' . $error->getMessage());
+        }
+        $cache[$id] = null;
+        return null;
+    }
+}
+
+function fetch_event_category_by_slug(PDO $pdo, string $slug): ?array
+{
+    static $cache = [];
+    $key = strtolower($slug);
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM event_categories WHERE slug = ? LIMIT 1');
+        $stmt->execute([$key]);
+        $row = $stmt->fetch() ?: null;
+        $cache[$key] = $row;
+        return $row;
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('fetch_event_category_by_slug failure: ' . $error->getMessage());
+        }
+        $cache[$key] = null;
+        return null;
+    }
+}
+
+function default_event_category_id(PDO $pdo): ?int
+{
+    static $default = null;
+    if ($default !== null) {
+        return $default;
+    }
+    $category = fetch_event_category_by_slug($pdo, 'normal');
+    $default = $category['id'] ?? null;
+    return $default;
+}
+
+function fetch_event_category_with_count(PDO $pdo, int $id): ?array
+{
+    try {
+        $stmt = $pdo->prepare('SELECT c.*, COUNT(e.id) AS usage_count FROM event_categories c LEFT JOIN events e ON e.category_id = c.id WHERE c.id = ? GROUP BY c.id');
+        $stmt->execute([$id]);
+        return $stmt->fetch() ?: null;
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('fetch_event_category_with_count failure: ' . $error->getMessage());
+        }
+        return null;
+    }
 }
 
 function log_admin_session_state(string $message): void
@@ -529,12 +650,15 @@ Notes / Special Requests:
 {$notes}
 TEXT;
 
+    $categorySlug = strtolower(trim((string) ($event['category_slug'] ?? '')));
+    $beachRecipient = (string) Env::get('BEACH_BANDS_EMAIL_TO', 'mmhbeachbands@gmail.com');
+    $staffInbox = $categorySlug === 'beach-bands' ? $beachRecipient : $emailer->staffRecipient();
     $staffSubject = 'New Seat Request - ' . $eventTitle;
-    $replyTo = $customerEmail !== '' ? $customerEmail : $emailer->staffRecipient();
+    $replyTo = $customerEmail !== '' ? $customerEmail : $staffInbox;
 
     try {
         $emailer->send([
-            'to' => $emailer->staffRecipient(),
+            'to' => $staffInbox,
             'from' => $emailer->notificationsSender(),
             'subject' => $staffSubject,
             'body' => $staffBody,
@@ -1024,8 +1148,14 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
     }
     $customerPhoneNormalized = normalize_phone_number($contactPhone) ?: null;
 
-    $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone FROM events WHERE id = ? LIMIT 1');
-    $eventStmt->execute([$eventId]);
+    $hasCategoryTable = event_categories_table_exists($pdo);
+    if ($hasCategoryTable) {
+        $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, ec.slug AS category_slug FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
+        $eventStmt->execute([$eventId]);
+    } else {
+        $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone FROM events WHERE id = ? LIMIT 1');
+        $eventStmt->execute([$eventId]);
+    }
     $event = $eventStmt->fetch();
     if (!$event) {
         throw new SeatRequestException('Event not found', 404);
@@ -1103,6 +1233,7 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
 function list_events(Request $request, ?string $scopeOverride = null): array
 {
     $pdo = Database::connection();
+    $hasCategoryTable = event_categories_table_exists($pdo);
     $params = [];
     $conditions = [];
     $includeDeleted = !empty($request->query['include_deleted']);
@@ -1153,21 +1284,57 @@ function list_events(Request $request, ?string $scopeOverride = null): array
     }
     $nowExpr = "NOW()";
     $endExpr = event_end_expression('e');
-    $orderBy = 'ORDER BY e.start_datetime ASC';
+    $hasScheduleExpr = event_has_schedule_expression('e');
+    $missingScheduleExpr = event_missing_schedule_expression('e');
+    $scheduleSortExpr = event_schedule_sort_expression('e');
+    $orderBy = "ORDER BY $scheduleSortExpr ASC, e.start_datetime ASC, e.event_date ASC, e.id DESC";
     if ($timeframe === 'upcoming') {
-        $conditions[] = "$endExpr >= $nowExpr";
-        $orderBy = 'ORDER BY e.start_datetime ASC';
+        $timeframeCondition = "$endExpr >= $nowExpr";
+        if ($scope === 'public') {
+            $conditions[] = $timeframeCondition;
+        } else {
+            $conditions[] = "($timeframeCondition OR $missingScheduleExpr)";
+        }
+        $orderBy = "ORDER BY $scheduleSortExpr ASC, e.start_datetime ASC, e.event_date ASC, e.id DESC";
     } elseif ($timeframe === 'past') {
-        $conditions[] = "$endExpr < $nowExpr";
-        $orderBy = 'ORDER BY e.start_datetime DESC';
+        $timeframeCondition = "$endExpr < $nowExpr";
+        if ($scope === 'public') {
+            $conditions[] = $timeframeCondition;
+        } else {
+            $conditions[] = "($timeframeCondition OR $missingScheduleExpr)";
+        }
+        $orderBy = "ORDER BY $scheduleSortExpr ASC, e.start_datetime DESC, e.event_date DESC, e.id DESC";
     }
     $where = $conditions ? ('WHERE ' . implode(' AND ', $conditions)) : '';
     $limitClause = "LIMIT $limit OFFSET $offset";
-    $sql = "SELECT e.* FROM events e $where $orderBy $limitClause";
+    $categorySelect = '';
+    $categoryJoin = '';
+    if ($hasCategoryTable) {
+        $categorySelect = ', ec.slug AS category_slug, ec.name AS category_name, ec.is_active AS category_is_active, ec.is_system AS category_is_system';
+        $categoryJoin = ' LEFT JOIN event_categories ec ON ec.id = e.category_id';
+    }
+    $sql = "SELECT e.*{$categorySelect} FROM events e{$categoryJoin} $where $orderBy $limitClause";
     try {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        return $stmt->fetchAll() ?: [];
+        $rows = $stmt->fetchAll() ?: [];
+        if ($scope !== 'public') {
+            $missingIds = [];
+            foreach ($rows as $row) {
+                $start = trim((string) ($row['start_datetime'] ?? ''));
+                $date = trim((string) ($row['event_date'] ?? ''));
+                $hasStart = $start !== '' && $start !== '0000-00-00 00:00:00';
+                $hasDate = $date !== '' && $date !== '0000-00-00';
+                if (!$hasStart && !$hasDate) {
+                    $missingIds[] = (int) ($row['id'] ?? 0);
+                }
+            }
+            if ($missingIds) {
+                $preview = implode(',', array_slice($missingIds, 0, 10));
+                error_log('[events] Admin scope returning events without schedule metadata; ids=' . $preview . (count($missingIds) > 10 ? '...' : ''));
+            }
+        }
+        return $rows;
     } catch (Throwable $error) {
         if (APP_DEBUG) {
             $safeParams = array_map(function ($value) {
@@ -1207,6 +1374,22 @@ function ensure_unique_slug(PDO $pdo, string $base, ?int $ignoreId = null): stri
             $stmt = $pdo->prepare('SELECT id FROM events WHERE slug = ? LIMIT 1');
             $stmt->execute([$slug]);
         }
+        if (!$stmt->fetch()) {
+            break;
+        }
+        $slug = $base . '-' . $i;
+        $i++;
+    }
+    return $slug;
+}
+
+function ensure_unique_category_slug(PDO $pdo, string $base): string
+{
+    $slug = $base;
+    $i = 2;
+    while (true) {
+        $stmt = $pdo->prepare('SELECT id FROM event_categories WHERE slug = ? LIMIT 1');
+        $stmt->execute([$slug]);
         if (!$stmt->fetch()) {
             break;
         }
@@ -1555,7 +1738,15 @@ $router->add('GET', '/api/public/events', function (Request $request) {
 });
 
 $router->add('GET', '/api/events/:id', function ($request, $params) {
-    $stmt = Database::run('SELECT * FROM events WHERE id = ? LIMIT 1', [$params['id']]);
+    $pdo = Database::connection();
+    $hasCategoryTable = event_categories_table_exists($pdo);
+    if ($hasCategoryTable) {
+        $stmt = $pdo->prepare('SELECT e.*, ec.slug AS category_slug, ec.name AS category_name, ec.is_active AS category_is_active, ec.is_system AS category_is_system FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
+        $stmt->execute([$params['id']]);
+    } else {
+        $stmt = $pdo->prepare('SELECT * FROM events WHERE id = ? LIMIT 1');
+        $stmt->execute([$params['id']]);
+    }
     $event = $stmt->fetch();
     if (!$event) {
         return Response::error('Event not found', 404);
@@ -1563,9 +1754,100 @@ $router->add('GET', '/api/events/:id', function ($request, $params) {
     Response::success(['event' => $event]);
 });
 
+$router->add('GET', '/api/event-categories', function () {
+    try {
+        $pdo = Database::connection();
+        if (!event_categories_table_exists($pdo)) {
+            return Response::success(['categories' => []]);
+        }
+        $stmt = $pdo->query('SELECT c.*, COUNT(e.id) AS usage_count FROM event_categories c LEFT JOIN events e ON e.category_id = c.id GROUP BY c.id ORDER BY c.is_system DESC, c.name ASC');
+        $rows = $stmt->fetchAll() ?: [];
+        Response::success(['categories' => $rows]);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('GET /api/event-categories error: ' . $e->getMessage());
+        }
+        Response::error('Failed to fetch categories', 500);
+    }
+});
+
+$router->add('POST', '/api/event-categories', function (Request $request) {
+    try {
+        $pdo = Database::connection();
+        if (!event_categories_table_exists($pdo)) {
+            return Response::error('Categories feature unavailable', 500);
+        }
+        $payload = read_json_body($request);
+        $name = trim((string) ($payload['name'] ?? ''));
+        if ($name === '') {
+            return Response::error('Name is required', 422);
+        }
+        $slugInput = $payload['slug'] ?? $name;
+        $slugBase = slugify_string($slugInput, 'category');
+        $slug = ensure_unique_category_slug($pdo, $slugBase);
+        $isActive = array_key_exists('is_active', $payload) ? (!empty($payload['is_active']) ? 1 : 0) : 1;
+        $stmt = $pdo->prepare('INSERT INTO event_categories (name, slug, is_active, is_system) VALUES (?, ?, ?, 0)');
+        $stmt->execute([$name, $slug, $isActive ? 1 : 0]);
+        $categoryId = (int) $pdo->lastInsertId();
+        $category = fetch_event_category_with_count($pdo, $categoryId);
+        Response::success(['category' => $category]);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('POST /api/event-categories error: ' . $e->getMessage());
+        }
+        Response::error('Failed to create category', 500);
+    }
+});
+
+$router->add('PUT', '/api/event-categories/:id', function (Request $request, $params) {
+    try {
+        $pdo = Database::connection();
+        if (!event_categories_table_exists($pdo)) {
+            return Response::error('Categories feature unavailable', 500);
+        }
+        $categoryId = (int) $params['id'];
+        $category = fetch_event_category_by_id($pdo, $categoryId);
+        if (!$category) {
+            return Response::error('Category not found', 404);
+        }
+        $payload = read_json_body($request);
+        $name = array_key_exists('name', $payload) ? trim((string) $payload['name']) : ($category['name'] ?? '');
+        if ($name === '') {
+            $name = $category['name'];
+        }
+        $targetIsActive = array_key_exists('is_active', $payload) ? (!empty($payload['is_active']) ? 1 : 0) : (int) ($category['is_active'] ?? 1);
+        if (!empty($category['is_system']) && $targetIsActive === 0) {
+            return Response::error('System categories cannot be deactivated', 422);
+        }
+        $replacementId = array_key_exists('replacement_category_id', $payload) ? normalize_category_id($payload['replacement_category_id']) : null;
+        if ($replacementId !== null) {
+            if ($replacementId === $categoryId) {
+                return Response::error('Replacement category must be different', 422);
+            }
+            $replacement = fetch_event_category_by_id($pdo, $replacementId);
+            if (!$replacement) {
+                return Response::error('Replacement category not found', 404);
+            }
+        }
+        $stmt = $pdo->prepare('UPDATE event_categories SET name = ?, is_active = ? WHERE id = ?');
+        $stmt->execute([$name, $targetIsActive ? 1 : 0, $categoryId]);
+        if ($replacementId !== null) {
+            $pdo->prepare('UPDATE events SET category_id = ? WHERE category_id = ?')->execute([$replacementId, $categoryId]);
+        }
+        $updated = fetch_event_category_with_count($pdo, $categoryId);
+        Response::success(['category' => $updated]);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('PUT /api/event-categories/:id error: ' . $e->getMessage());
+        }
+        Response::error('Failed to update category', 500);
+    }
+});
+
 $router->add('POST', '/api/events', function (Request $request) {
     try {
         $pdo = Database::connection();
+        $hasCategoryTable = event_categories_table_exists($pdo);
         $payload = read_json_body($request);
         $artist = trim((string)($payload['artist_name'] ?? $payload['title'] ?? ''));
         if ($artist === '') {
@@ -1609,6 +1891,19 @@ $router->add('POST', '/api/events', function (Request $request) {
             $decoded = json_decode($categoryTags, true);
             $categoryTags = $decoded ? json_encode($decoded) : null;
         }
+        $categoryId = null;
+        if ($hasCategoryTable) {
+            $normalizedCategoryId = normalize_category_id($payload['category_id'] ?? null);
+            if ($normalizedCategoryId !== null) {
+                $categoryRow = fetch_event_category_by_id($pdo, $normalizedCategoryId);
+                if (!$categoryRow) {
+                    return Response::error('Invalid category selection', 422);
+                }
+                $categoryId = (int) $categoryRow['id'];
+            } else {
+                $categoryId = default_event_category_id($pdo);
+            }
+        }
 
         $contactPhoneRaw = $payload['contact_phone_raw'] ?? $payload['contact_phone'] ?? null;
         $contactPhoneNormalized = normalize_phone_number($contactPhoneRaw);
@@ -1616,7 +1911,7 @@ $router->add('POST', '/api/events', function (Request $request) {
         $endString = $endDt ? $endDt->format('Y-m-d H:i:s') : null;
         $doorTime = $payload['door_time'] ?? null;
         $publishAt = $payload['publish_at'] ?? ($status === 'published' && $startString ? $startString : null);
-        $stmt = $pdo->prepare('INSERT INTO events (artist_name, title, slug, description, notes, genre, category_tags, image_url, hero_image_id, poster_image_id, ticket_price, door_price, min_ticket_price, max_ticket_price, ticket_type, seating_enabled, venue_code, venue_section, timezone, start_datetime, end_datetime, door_time, event_date, event_time, age_restriction, status, visibility, publish_at, layout_id, layout_version_id, ticket_url, contact_name, contact_phone_raw, contact_phone_normalized, contact_email, change_note, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt = $pdo->prepare('INSERT INTO events (artist_name, title, slug, description, notes, genre, category_tags, category_id, image_url, hero_image_id, poster_image_id, ticket_price, door_price, min_ticket_price, max_ticket_price, ticket_type, seating_enabled, venue_code, venue_section, timezone, start_datetime, end_datetime, door_time, event_date, event_time, age_restriction, status, visibility, publish_at, layout_id, layout_version_id, ticket_url, contact_name, contact_phone_raw, contact_phone_normalized, contact_email, change_note, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $artist,
             $title,
@@ -1625,6 +1920,7 @@ $router->add('POST', '/api/events', function (Request $request) {
             $payload['notes'] ?? null,
             $payload['genre'] ?? null,
             $categoryTags,
+            $categoryId,
             $payload['image_url'] ?? null,
             $payload['hero_image_id'] ?? null,
             $payload['poster_image_id'] ?? null,
@@ -1670,6 +1966,7 @@ $router->add('POST', '/api/events', function (Request $request) {
 $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
     try {
         $pdo = Database::connection();
+        $hasCategoryTable = event_categories_table_exists($pdo);
         $eventId = (int)$params['id'];
         $existingStmt = $pdo->prepare('SELECT * FROM events WHERE id = ? LIMIT 1');
         $existingStmt->execute([$eventId]);
@@ -1718,6 +2015,23 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             $decoded = json_decode($categoryTags, true);
             $categoryTags = $decoded ? json_encode($decoded) : $existing['category_tags'];
         }
+        $categoryId = $hasCategoryTable ? normalize_category_id($existing['category_id'] ?? null) : null;
+        if ($hasCategoryTable) {
+            if (array_key_exists('category_id', $payload)) {
+                $normalizedCategoryId = normalize_category_id($payload['category_id']);
+                if ($normalizedCategoryId !== null) {
+                    $categoryRow = fetch_event_category_by_id($pdo, $normalizedCategoryId);
+                    if (!$categoryRow) {
+                        return Response::error('Invalid category selection', 422);
+                    }
+                    $categoryId = (int) $categoryRow['id'];
+                } else {
+                    $categoryId = default_event_category_id($pdo);
+                }
+            } elseif ($categoryId === null) {
+                $categoryId = default_event_category_id($pdo);
+            }
+        }
 
         $contactPhoneRaw = $payload['contact_phone_raw'] ?? $payload['contact_phone'] ?? $existing['contact_phone_raw'];
         $contactPhoneNormalized = normalize_phone_number($contactPhoneRaw);
@@ -1725,7 +2039,7 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $endString = $endDt ? $endDt->format('Y-m-d H:i:s') : null;
         $publishAt = $payload['publish_at'] ?? $existing['publish_at'];
 
-        $stmt = $pdo->prepare('UPDATE events SET artist_name = ?, title = ?, slug = ?, description = ?, notes = ?, genre = ?, category_tags = ?, image_url = ?, hero_image_id = ?, poster_image_id = ?, ticket_price = ?, door_price = ?, min_ticket_price = ?, max_ticket_price = ?, ticket_type = ?, seating_enabled = ?, venue_code = ?, venue_section = ?, timezone = ?, start_datetime = ?, end_datetime = ?, door_time = ?, event_date = ?, event_time = ?, age_restriction = ?, status = ?, visibility = ?, publish_at = ?, layout_id = ?, layout_version_id = ?, ticket_url = ?, contact_name = ?, contact_phone_raw = ?, contact_phone_normalized = ?, contact_email = ?, change_note = ?, updated_by = ? WHERE id = ?');
+        $stmt = $pdo->prepare('UPDATE events SET artist_name = ?, title = ?, slug = ?, description = ?, notes = ?, genre = ?, category_tags = ?, category_id = ?, image_url = ?, hero_image_id = ?, poster_image_id = ?, ticket_price = ?, door_price = ?, min_ticket_price = ?, max_ticket_price = ?, ticket_type = ?, seating_enabled = ?, venue_code = ?, venue_section = ?, timezone = ?, start_datetime = ?, end_datetime = ?, door_time = ?, event_date = ?, event_time = ?, age_restriction = ?, status = ?, visibility = ?, publish_at = ?, layout_id = ?, layout_version_id = ?, ticket_url = ?, contact_name = ?, contact_phone_raw = ?, contact_phone_normalized = ?, contact_email = ?, change_note = ?, updated_by = ? WHERE id = ?');
         $stmt->execute([
             $artist,
             $title,
@@ -1734,6 +2048,7 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             $payload['notes'] ?? $existing['notes'],
             $payload['genre'] ?? $existing['genre'],
             $categoryTags,
+            $categoryId,
             $payload['image_url'] ?? $existing['image_url'],
             $payload['hero_image_id'] ?? $existing['hero_image_id'],
             $payload['poster_image_id'] ?? $existing['poster_image_id'],

@@ -100,11 +100,14 @@ const initialForm = {
   age_restriction: 'All Ages',
   venue_section: '',
   layout_id: '',
+  category_id: '',
 };
 
 export default function EventsModule(){
   const [events, setEvents] = useState([]);
   const [layouts, setLayouts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [categoryError, setCategoryError] = useState('');
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -189,9 +192,29 @@ export default function EventsModule(){
     }
   };
 
+  const fetchCategories = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/event-categories`);
+      const data = await res.json();
+      if (data && data.success && Array.isArray(data.categories)) {
+        setCategories(data.categories);
+        setCategoryError('');
+      } else {
+        setCategoryError('Unable to load categories');
+      }
+    } catch (err) {
+      console.error('Failed to load categories', err);
+      setCategoryError('Unable to load categories');
+    }
+  }, []);
+
   useEffect(() => {
     fetchLayouts();
   }, []);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
 
   useEffect(() => {
     fetchEvents();
@@ -223,6 +246,13 @@ export default function EventsModule(){
     if (!event.layout_id) return 'Not assigned';
     const found = layouts.find((layout) => String(layout.id) === String(event.layout_id));
     return found?.name || `Layout #${event.layout_id}`;
+  };
+
+  const categoryLabelForEvent = (event) => {
+    if (!event) return 'Normal';
+    if (event.category_name) return event.category_name;
+    if (event.category_slug === 'beach-bands') return 'Beach Bands';
+    return 'Normal';
   };
 
   const toggleSection = (sectionId) => {
@@ -322,6 +352,14 @@ export default function EventsModule(){
     });
   }, [venueGroups]);
 
+  const categoryOptions = useMemo(() => {
+    if (!categories.length) return [];
+    const currentSelection = formData.category_id ? String(formData.category_id) : '';
+    return [...categories]
+      .filter((cat) => cat.is_active || (currentSelection && String(cat.id) === currentSelection))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [categories, formData.category_id]);
+
   const renderEventCard = (event) => {
     const eventTitle = event.artist_name || event.title || 'Untitled Event';
     const subtitle = event.title && event.title !== eventTitle ? event.title : event.notes;
@@ -344,6 +382,15 @@ export default function EventsModule(){
       : null;
     const seatingBadge = event.seating_enabled
       ? <span className="text-xs font-semibold px-2 py-1 rounded-full bg-purple-500/15 text-purple-200 border border-purple-500/30">Seating Enabled</span>
+      : null;
+    const categoryLabel = categoryLabelForEvent(event);
+    const categoryInactive = event.category_is_active === 0 && event.category_name;
+    const categoryBadge = categoryLabel
+      ? (
+        <span className={`text-xs font-semibold px-2 py-1 rounded-full border ${categoryInactive ? 'bg-gray-700/40 text-gray-200 border-gray-500/30' : 'bg-cyan-500/15 text-cyan-100 border-cyan-500/30'}`}>
+          {categoryInactive ? `${categoryLabel} (inactive)` : categoryLabel}
+        </span>
+      )
       : null;
     const imageSrc = getImageUrlSync(event.image_url || '');
     const archivedAtCopy = isArchived && event.deleted_at
@@ -369,6 +416,7 @@ export default function EventsModule(){
                 {ticketTypeLabel}
               </span>
               {seatingBadge}
+              {categoryBadge}
             </div>
             <h4 className="text-lg font-semibold text-white">{eventTitle}</h4>
             {subtitle && <p className="text-sm text-gray-400">{subtitle}</p>}
@@ -396,6 +444,10 @@ export default function EventsModule(){
           <div>
             <p className="text-xs uppercase text-gray-500 tracking-wide">Price</p>
             <p>{priceCopy}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase text-gray-500 tracking-wide">Category</p>
+            <p>{categoryLabel}{categoryInactive ? ' (inactive)' : ''}</p>
           </div>
           <div>
             <p className="text-xs uppercase text-gray-500 tracking-wide">Venue Section</p>
@@ -524,6 +576,7 @@ export default function EventsModule(){
       age_restriction: event.age_restriction || 'All Ages',
       venue_section: event.venue_section || '',
       layout_id: event.layout_id || '',
+      category_id: event.category_id ? String(event.category_id) : '',
     });
     setImageFile(null);
     setImagePreview(event.image_url ? getImageUrlSync(event.image_url) : null);
@@ -586,6 +639,8 @@ export default function EventsModule(){
       const parsedLayoutId = payload.layout_id && payload.layout_id !== '' ? Number(payload.layout_id) : null;
       const normalizedLayoutId = Number.isFinite(parsedLayoutId) && parsedLayoutId > 0 ? parsedLayoutId : null;
       payload.layout_id = normalizedLayoutId;
+      const parsedCategoryId = payload.category_id && payload.category_id !== '' ? Number(payload.category_id) : null;
+      payload.category_id = Number.isFinite(parsedCategoryId) && parsedCategoryId > 0 ? parsedCategoryId : null;
       if (!payload.layout_id) {
         payload.seating_enabled = false;
         payload.layout_version_id = null;
@@ -717,6 +772,7 @@ export default function EventsModule(){
       image_url: event.image_url || '',
       status: 'draft',
       category_tags: event.category_tags || null,
+      category_id: event.category_id || null,
       hero_image_id: event.hero_image_id || null,
       poster_image_id: event.poster_image_id || null,
     };
@@ -753,6 +809,11 @@ export default function EventsModule(){
       {listError && (
         <div className="mb-6 p-4 rounded-xl border border-red-500/40 bg-red-900/30 text-red-100 text-sm">
           {listError}
+        </div>
+      )}
+      {categoryError && (
+        <div className="mb-6 p-4 rounded-xl border border-amber-500/40 bg-amber-800/30 text-amber-100 text-sm">
+          {categoryError}
         </div>
       )}
 
@@ -911,6 +972,23 @@ export default function EventsModule(){
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Genre</label>
                 <input name="genre" value={formData.genre} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Category</label>
+                <select
+                  name="category_id"
+                  value={formData.category_id}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                >
+                  <option value="">Normal</option>
+                  {categoryOptions.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}{cat.is_active ? '' : ' (inactive)'}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Inactive categories remain selectable if already assigned to this event.</p>
               </div>
 
               <div>

@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import {
   DashboardModule,
   EventsModule,
+  CategoriesModule,
   LayoutsModule,
   SeatRequestsModule,
   SuggestionsModule,
@@ -15,6 +16,7 @@ import ResponsiveImage from '../components/ResponsiveImage';
 const MENU = [
   { key: 'dashboard', label: 'Dashboard', comp: DashboardModule },
   { key: 'events', label: 'Events', comp: EventsModule },
+  { key: 'categories', label: 'Event Categories', comp: CategoriesModule },
   { key: 'layouts', label: 'Seating Layouts', comp: LayoutsModule },
   { key: 'requests', label: 'Seat Requests', comp: SeatRequestsModule },
   { key: 'suggestions', label: 'Suggestions', comp: SuggestionsModule },

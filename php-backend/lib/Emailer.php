@@ -9,6 +9,7 @@ class Emailer
     private static ?self $instance = null;
 
     private bool $sendEmails;
+    private string $appEnv;
     private string $apiKey;
     private string $staffEmail;
     private string $alertsEmail;
@@ -18,13 +19,10 @@ class Emailer
     private function __construct()
     {
         $this->apiKey = (string) Env::get('SENDGRID_API_KEY', '');
+        $this->appEnv = strtolower((string) Env::get('APP_ENV', 'development'));
         $sendToggle = Env::get('SEND_EMAILS', null);
-        if ($sendToggle !== null) {
-            $this->sendEmails = filter_var($sendToggle, FILTER_VALIDATE_BOOL);
-        } else {
-            $env = strtolower((string) Env::get('APP_ENV', ''));
-            $this->sendEmails = $env === 'production';
-        }
+        $sendEnabled = $sendToggle !== null ? filter_var($sendToggle, FILTER_VALIDATE_BOOL) : false;
+        $this->sendEmails = ($this->appEnv === 'production') && $sendEnabled;
 
         $this->staffEmail = (string) Env::get('STAFF_EMAIL_TO', 'midwayeventcenter@gmail.com');
         $this->alertsEmail = (string) Env::get('ALERTS_EMAIL_TO', 'support@jamarq.digital');
@@ -86,7 +84,7 @@ class Emailer
         $replyTo = $options['reply_to'] ?? null;
         $contentType = $options['content_type'] ?? 'text/plain';
 
-        if (!$this->sendEmails) {
+        if (!$this->sendEmails || $this->appEnv !== 'production') {
             $this->logPreview('skip', $recipients, $subject, $body);
             return true;
         }
