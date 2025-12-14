@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS event_categories (
   name VARCHAR(191) NOT NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   is_system TINYINT(1) NOT NULL DEFAULT 0,
+  seat_request_email_to VARCHAR(255) DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_event_categories_slug (slug)
@@ -139,6 +140,7 @@ CREATE TABLE IF NOT EXISTS events (
   contact_phone_raw VARCHAR(50),
   contact_phone_normalized VARCHAR(20),
   contact_email VARCHAR(255),
+  seat_request_email_override VARCHAR(255) DEFAULT NULL,
   change_note VARCHAR(255),
   created_by VARCHAR(191),
   updated_by VARCHAR(191),
@@ -193,6 +195,20 @@ CREATE TABLE IF NOT EXISTS event_recurrence_exceptions (
   UNIQUE KEY uniq_recurrence_exception (recurrence_id, exception_date),
   CONSTRAINT fk_recurrence_exception FOREIGN KEY (recurrence_id) REFERENCES event_recurrence_rules(id) ON DELETE CASCADE
 );
+
+-- Audit trail for admin actions
+CREATE TABLE IF NOT EXISTS audit_log (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  actor VARCHAR(191) NOT NULL,
+  action VARCHAR(191) NOT NULL,
+  entity_type VARCHAR(191) NOT NULL,
+  entity_id VARCHAR(191) DEFAULT NULL,
+  meta_json JSON DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_audit_log_action (action),
+  INDEX idx_audit_log_entity (entity_type, entity_id),
+  INDEX idx_audit_log_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Seating rows (legacy row list + spatial metadata)
 CREATE TABLE IF NOT EXISTS seating (
