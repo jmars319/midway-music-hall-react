@@ -99,7 +99,6 @@ export default function RecurringEvents({ series = [] }) {
                             <p className="text-white font-medium">{formatDateTime(occ.start_datetime)}</p>
                             <p className="text-gray-400 text-sm">{formatTime(occ.start_datetime)} · {occ.venue_code || 'MMH'}</p>
                           </div>
-                          <span className="text-xs px-3 py-1 rounded-full bg-purple-500/20 text-purple-200">RSVP in Admin</span>
                         </div>
                       ))}
                     </div>

@@ -16,7 +16,30 @@ const TICKET_TYPE_LABELS = {
   hybrid: 'Hybrid / Mixed'
 };
 
+const DEFAULT_STAFF_INBOX = 'midwayeventcenter@gmail.com';
+const SEAT_ROUTING_SOURCE_LABELS = {
+  event: 'Event override for this show',
+  category: 'Category-specific inbox',
+  category_slug: 'Beach Bands auto-routing',
+  default: 'Default staff inbox',
+};
+
 const SESSION_TIMEZONE = 'America/New_York';
+
+const SORT_OPTIONS = [
+  { value: 'start_asc', label: 'Start date (upcoming first)' },
+  { value: 'start_desc', label: 'Start date (recent first)' },
+  { value: 'category', label: 'Category' },
+  { value: 'venue', label: 'Venue' },
+  { value: 'status', label: 'Status' },
+  { value: 'title_az', label: 'Title (A–Z)' },
+  { value: 'archived_state', label: 'Archived state' },
+];
+
+const GROUP_OPTIONS = [
+  { value: 'category', label: 'Group by category' },
+  { value: 'venue', label: 'Group by venue' },
+];
 
 const parseEventDate = (event) => {
   if (event.start_datetime) {
@@ -65,6 +88,13 @@ const formatDoorTime = (event) => {
   }).format(date);
 };
 
+const eventAllowsSeatRequests = (event = {}) => {
+  if (!event) return false;
+  if (Number(event.seating_enabled) === 1) return true;
+  if (event.layout_id || event.layout_version_id) return true;
+  return false;
+};
+
 const formatPrice = (value) => {
   if (value === null || value === undefined || value === '') return null;
   const num = Number(value);
@@ -79,6 +109,22 @@ const formatPriceDisplay = (event) => {
     if (min && max) return `${min} - ${max}`;
   }
   return formatPrice(event.ticket_price) || formatPrice(event.door_price) || 'TBD';
+};
+
+const resolveSeatRoutingInfo = (event = {}) => {
+  const email = event.seat_request_target_email || DEFAULT_STAFF_INBOX;
+  const sourceKey = event.seat_request_target_source || 'default';
+  const label = SEAT_ROUTING_SOURCE_LABELS[sourceKey] || SEAT_ROUTING_SOURCE_LABELS.default;
+  return { email, sourceKey, label };
+};
+
+const normalizePriceInput = (value) => {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  if (trimmed === '') return null;
+  const num = Number(trimmed);
+  if (Number.isNaN(num)) return null;
+  return Number(num.toFixed(2));
 };
 
 const isRecurringEvent = (event) => Boolean(event.is_series_master || event.series_master_id);
@@ -101,6 +147,7 @@ const initialForm = {
   venue_section: '',
   layout_id: '',
   category_id: '',
+  seat_request_email_override: '',
 };
 
 export default function EventsModule(){
@@ -122,9 +169,16 @@ export default function EventsModule(){
     timeframe: 'upcoming',
     recurringOnly: false,
     seatingOnly: false,
+    needsScheduleOnly: false,
     search: '',
+    venue: 'all',
+    category: 'all',
+    sortBy: 'start_asc',
+    groupBy: 'category',
   });
   const [listError, setListError] = useState('');
+  const [seriesExpanded, setSeriesExpanded] = useState({});
+  const [seriesActionId, setSeriesActionId] = useState(null);
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -134,8 +188,12 @@ export default function EventsModule(){
         limit: '500',
         scope: 'admin',
       });
+      params.set('include_series_masters', '1');
       if (filters.status !== 'all') {
         params.set('status', filters.status);
+      }
+      if (filters.venue && filters.venue !== 'all') {
+        params.set('venue', filters.venue);
       }
       if (filters.timeframe === 'archived') {
         params.set('archived', '1');
@@ -178,7 +236,7 @@ export default function EventsModule(){
     } finally {
       setLoading(false);
     }
-  }, [filters.status, filters.timeframe]);
+  }, [filters.status, filters.timeframe, filters.venue]);
 
   const fetchLayouts = async () => {
     try {
@@ -242,18 +300,38 @@ export default function EventsModule(){
     }
   }, [collapsedSections]);
 
+  const categoryLookup = useMemo(() => {
+    const map = new Map();
+    categories.forEach((cat) => {
+      map.set(String(cat.id), cat);
+    });
+    return map;
+  }, [categories]);
+
   const layoutNameForEvent = (event) => {
     if (!event.layout_id) return 'Not assigned';
     const found = layouts.find((layout) => String(layout.id) === String(event.layout_id));
     return found?.name || `Layout #${event.layout_id}`;
   };
 
-  const categoryLabelForEvent = (event) => {
+  const categoryLabelForEvent = useCallback((event) => {
     if (!event) return 'Normal';
     if (event.category_name) return event.category_name;
+    if (event.category_id && categoryLookup.has(String(event.category_id))) {
+      return categoryLookup.get(String(event.category_id)).name;
+    }
     if (event.category_slug === 'beach-bands') return 'Beach Bands';
     return 'Normal';
-  };
+  }, [categoryLookup]);
+
+  const categorySlugForEvent = useCallback((event) => {
+    if (!event) return 'normal';
+    if (event.category_slug) return event.category_slug;
+    if (event.category_id && categoryLookup.has(String(event.category_id))) {
+      return categoryLookup.get(String(event.category_id)).slug;
+    }
+    return 'normal';
+  }, [categoryLookup]);
 
   const toggleSection = (sectionId) => {
     setCollapsedSections((prev) => ({
@@ -272,85 +350,267 @@ export default function EventsModule(){
     });
   };
 
-  const filteredEvents = useMemo(() => {
+  const normalizeEventStatus = (event) => (event?.status || 'draft').toLowerCase();
+  const isEventArchived = (event) => Boolean(event?.archived_at);
+  const buildSearchText = (event, extras = []) => {
+    const haystack = [
+      event.artist_name,
+      event.title,
+      event.genre,
+      event.notes,
+      event.description,
+      event.venue_section,
+      event.ticket_url,
+      ...extras,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack;
+  };
+  const occurrenceDateForInstance = (event) => {
+    if (event.event_date) return event.event_date;
+    if (event.start_datetime) {
+      return event.start_datetime.split(' ')[0];
+    }
+    return null;
+  };
+
+  const eventItems = useMemo(() => {
     if (!events.length) return [];
+    const seriesMap = new Map();
+    const ensureSeriesEntry = (id) => {
+      const key = Number(id);
+      if (!seriesMap.has(key)) {
+        seriesMap.set(key, { master: null, instances: [] });
+      }
+      return seriesMap.get(key);
+    };
+    events.forEach((event) => {
+      if (Number(event.is_series_master) === 1) {
+        ensureSeriesEntry(event.id).master = event;
+      }
+    });
+    events.forEach((event) => {
+      if (event.series_master_id) {
+        ensureSeriesEntry(event.series_master_id).instances.push(event);
+      }
+    });
+    const items = [];
+    const createSingleItem = (event) => {
+      const status = normalizeEventStatus(event);
+      const archived = isEventArchived(event);
+      const bucket = archived ? 'archived' : (status === 'published' ? 'published' : 'drafts');
+      const date = parseEventDate(event);
+      const hasSeating = eventAllowsSeatRequests(event);
+      const titleSortValue = `${event.artist_name || event.title || ''}`.toLowerCase();
+      return {
+        type: 'event',
+        id: `event-${event.id}`,
+        event,
+        bucket,
+        status,
+        venueCode: normalizeVenueKey(event.venue_code),
+        categorySlug: categorySlugForEvent(event),
+        categoryLabel: categoryLabelForEvent(event),
+        searchText: buildSearchText(event),
+        sortDate: date ? date.getTime() : 0,
+        hasSeating,
+        needsSchedule: Boolean(event.missing_schedule),
+        titleSortValue,
+      };
+    };
+    const createSeriesItem = (entry) => {
+      const master = entry.master;
+      const sortedInstances = [...entry.instances].sort((a, b) => {
+        const aDate = parseEventDate(a);
+        const bDate = parseEventDate(b);
+        const aVal = aDate ? aDate.getTime() : 0;
+        const bVal = bDate ? bDate.getTime() : 0;
+        return aVal - bVal;
+      });
+      let publishedCount = 0;
+      let draftCount = 0;
+      let archivedCount = 0;
+      let skippedCount = 0;
+      let hasSeating = false;
+      sortedInstances.forEach((instance) => {
+        const status = normalizeEventStatus(instance);
+        const archived = isEventArchived(instance);
+        if (archived || status === 'archived') {
+          archivedCount += 1;
+        } else if (status === 'published') {
+          publishedCount += 1;
+        } else {
+          draftCount += 1;
+        }
+        if (instance.skipped_instance_exception_id) {
+          skippedCount += 1;
+        }
+        if (eventAllowsSeatRequests(instance)) {
+          hasSeating = true;
+        }
+      });
+      if (!hasSeating && master && eventAllowsSeatRequests(master)) {
+        hasSeating = true;
+      }
+      const nextInstance = sortedInstances.find(
+        (instance) => !instance.skipped_instance_exception_id && !isEventArchived(instance)
+      ) || sortedInstances[0] || null;
+      const nextDate = nextInstance ? parseEventDate(nextInstance) : null;
+      const bucket = publishedCount > 0 ? 'published' : (draftCount > 0 ? 'drafts' : 'archived');
+      const categorySlug = categorySlugForEvent(master || nextInstance);
+      const categoryLabel = categoryLabelForEvent(master || nextInstance);
+      const venueCode = normalizeVenueKey((master && master.venue_code) || (nextInstance && nextInstance.venue_code));
+      const searchText = buildSearchText(master || nextInstance || {}, sortedInstances.map((inst) => inst.event_date));
+      const masterId = master ? master.id : (sortedInstances[0]?.series_master_id ?? `temp-${sortedInstances[0]?.id ?? Date.now()}`);
+      const hasMissingInstance = sortedInstances.some((instance) => instance.missing_schedule);
+      const needsSchedule = Boolean((master && master.missing_schedule) || hasMissingInstance);
+      const masterTitle = master?.artist_name || master?.title || nextInstance?.artist_name || nextInstance?.title || 'Recurring Series';
+      return {
+        type: 'series',
+        id: `series-${masterId}`,
+        master,
+        instances: sortedInstances,
+        bucket,
+        categorySlug,
+        categoryLabel,
+        venueCode,
+        searchText,
+        sortDate: nextDate ? nextDate.getTime() : 0,
+        hasSeating,
+        needsSchedule,
+        titleSortValue: masterTitle.toLowerCase(),
+        summary: {
+          publishedCount,
+          draftCount,
+          archivedCount,
+          skippedCount,
+          totalInstances: sortedInstances.length,
+          nextInstance,
+        },
+      };
+    };
+    events.forEach((event) => {
+      if (event.series_master_id) {
+        return;
+      }
+      if (Number(event.is_series_master) === 1) {
+        const entry = seriesMap.get(Number(event.id)) || { master: event, instances: [] };
+        entry.master = event;
+        items.push(createSeriesItem(entry));
+      } else {
+        items.push(createSingleItem(event));
+      }
+    });
+    seriesMap.forEach((entry, masterId) => {
+      if (!entry.master && entry.instances.length) {
+        const placeholder = { ...entry.instances[0], id: masterId, is_series_master: 1 };
+        entry.master = placeholder;
+        items.push(createSeriesItem(entry));
+      }
+    });
+    return items;
+  }, [events, categoryLabelForEvent, categorySlugForEvent]);
+
+  const filteredItems = useMemo(() => {
+    if (!eventItems.length) return [];
     const searchValue = filters.search.trim().toLowerCase();
-    return events.filter((event) => {
-      if (filters.status !== 'all' && (event.status || 'draft') !== filters.status) {
+    return eventItems.filter((item) => {
+      if (filters.recurringOnly && item.type !== 'series') {
         return false;
       }
-      if (filters.seatingOnly && !event.seating_enabled) {
+      if (filters.seatingOnly && !item.hasSeating) {
         return false;
       }
-      if (filters.recurringOnly && !isRecurringEvent(event)) {
+      if (filters.needsScheduleOnly && !item.needsSchedule) {
         return false;
       }
-      if (searchValue) {
-        const haystack = [
-          event.artist_name,
-          event.title,
-          event.genre,
-          event.notes,
-          event.description,
-          event.venue_section,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
-        if (!haystack.includes(searchValue)) {
+      if (filters.category !== 'all' && item.categorySlug !== filters.category) {
+        return false;
+      }
+      if (filters.venue !== 'all' && item.venueCode !== filters.venue) {
+        return false;
+      }
+      if (filters.status !== 'all') {
+        const bucketKey = filters.status === 'draft' ? 'drafts' : filters.status;
+        if (item.bucket !== bucketKey) {
           return false;
         }
       }
+      if (searchValue && item.searchText && !item.searchText.includes(searchValue)) {
+        return false;
+      }
       return true;
     });
-  }, [events, filters]);
+  }, [eventItems, filters]);
 
-  const venueGroups = useMemo(() => {
-    if (!filteredEvents.length) return [];
-    const sorted = [...filteredEvents].sort((a, b) => {
-      const aDate = parseEventDate(a);
-      const bDate = parseEventDate(b);
-      const aValue = aDate ? aDate.getTime() : 0;
-      const bValue = bDate ? bDate.getTime() : 0;
-      return aValue - bValue;
-    });
-    const grouped = sorted.reduce((acc, event) => {
-      const venueKey = normalizeVenueKey(event.venue_code);
-      if (!acc[venueKey]) {
-        acc[venueKey] = {
-          key: venueKey,
-          label: VENUE_LABELS[venueKey] || 'Events',
+  const sortedItems = useMemo(() => {
+    const compare = (a, b) => {
+      switch (filters.sortBy) {
+        case 'start_desc':
+          return (b.sortDate || 0) - (a.sortDate || 0);
+        case 'category':
+          return (a.categoryLabel || '').localeCompare(b.categoryLabel || '');
+        case 'venue':
+          return (VENUE_LABELS[a.venueCode] || a.venueCode || '').localeCompare(VENUE_LABELS[b.venueCode] || b.venueCode || '');
+        case 'status':
+          const order = { published: 0, drafts: 1, archived: 2 };
+          return (order[a.bucket] ?? 3) - (order[b.bucket] ?? 3);
+        case 'title_az':
+          return (a.titleSortValue || '').localeCompare(b.titleSortValue || '');
+        case 'archived_state':
+          return (a.bucket === 'archived' ? 1 : 0) - (b.bucket === 'archived' ? 1 : 0);
+        case 'start_asc':
+        default:
+          return (a.sortDate || 0) - (b.sortDate || 0);
+      }
+    };
+    return [...filteredItems].sort(compare);
+  }, [filteredItems, filters.sortBy]);
+
+  const groupedSections = useMemo(() => {
+    if (!sortedItems.length) return [];
+    const groups = new Map();
+    sortedItems.forEach((item) => {
+      const groupKey = filters.groupBy === 'venue'
+        ? `venue-${item.venueCode || 'unknown'}`
+        : `category-${item.categorySlug || 'normal'}`;
+      const label = filters.groupBy === 'venue'
+        ? (VENUE_LABELS[item.venueCode] || 'Events')
+        : (item.categoryLabel || 'Normal');
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          key: groupKey,
+          label,
           published: [],
           drafts: [],
-          archived: []
-        };
+          archived: [],
+        });
       }
-      const isArchived = Boolean(event.archived_at);
-      const eventStatus = event.status || 'draft';
-      let bucket = 'drafts';
-      if (isArchived) {
-        bucket = 'archived';
-      } else if (eventStatus === 'published') {
-        bucket = 'published';
+      const bucketKey = item.bucket || 'drafts';
+      const target = groups.get(groupKey);
+      if (bucketKey === 'published') {
+        target.published.push(item);
+      } else if (bucketKey === 'archived') {
+        target.archived.push(item);
+      } else {
+        target.drafts.push(item);
       }
-      acc[venueKey][bucket].push(event);
-      return acc;
-    }, {});
-    return Object.values(grouped);
-  }, [filteredEvents]);
-
-  const sectionIds = useMemo(() => {
-    return venueGroups.flatMap((group) => {
-      const ids = [
-        `${group.key}-published`,
-        `${group.key}-drafts`,
-      ];
-      if (group.archived.length) {
-        ids.push(`${group.key}-archived`);
-      }
-      return ids;
     });
-  }, [venueGroups]);
+    return Array.from(groups.values());
+  }, [sortedItems, filters.groupBy]);
+
+  const sectionIds = useMemo(() => groupedSections.flatMap((group) => {
+    const ids = [
+      `${group.key}-published`,
+      `${group.key}-drafts`,
+    ];
+    if (group.archived.length) {
+      ids.push(`${group.key}-archived`);
+    }
+    return ids;
+  }), [groupedSections]);
 
   const categoryOptions = useMemo(() => {
     if (!categories.length) return [];
@@ -359,6 +619,15 @@ export default function EventsModule(){
       .filter((cat) => cat.is_active || (currentSelection && String(cat.id) === currentSelection))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [categories, formData.category_id]);
+
+  const categoryFilterOptions = useMemo(() => {
+    if (!categories.length) return [];
+    return [...categories].sort((a, b) => a.name.localeCompare(b.name));
+  }, [categories]);
+  const editingSeatRouting = useMemo(() => {
+    if (!editing) return null;
+    return resolveSeatRoutingInfo(editing);
+  }, [editing]);
 
   const renderEventCard = (event) => {
     const eventTitle = event.artist_name || event.title || 'Untitled Event';
@@ -396,6 +665,15 @@ export default function EventsModule(){
     const archivedAtCopy = isArchived && event.deleted_at
       ? new Date(event.deleted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
       : null;
+    const seatRouting = resolveSeatRoutingInfo(event);
+    const hasSeatRequests = eventAllowsSeatRequests(event);
+    const missingScheduleBadge = event.missing_schedule
+      ? (
+        <span className="text-xs font-semibold px-2 py-1 rounded-full bg-amber-500/20 text-amber-100 border border-amber-400/40">
+          Needs date &amp; time
+        </span>
+      )
+      : null;
 
     return (
       <div key={event.id} className="bg-gray-900 rounded-xl border border-gray-700 p-4 shadow-sm">
@@ -412,6 +690,7 @@ export default function EventsModule(){
               </span>
               {visibilityBadge}
               {recurrenceBadge}
+              {missingScheduleBadge}
               <span className="text-xs font-semibold px-2 py-1 rounded-full bg-blue-500/15 text-blue-200 border border-blue-500/30">
                 {ticketTypeLabel}
               </span>
@@ -473,6 +752,21 @@ export default function EventsModule(){
           )}
         </div>
 
+        <div className="mt-4 p-3 rounded-lg border border-gray-800 bg-gray-950/60 text-sm text-gray-200">
+          <p className="text-xs uppercase tracking-wide text-gray-500">Seat requests</p>
+          {hasSeatRequests ? (
+            <>
+              <p className="text-white font-semibold">{seatRouting.email}</p>
+              <p className="text-xs text-gray-400">Route: {seatRouting.label}</p>
+              {event.seat_request_email_override && (
+                <p className="text-xs text-amber-200 mt-1">Event override in effect.</p>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-gray-400">Seat reservations are disabled for this event.</p>
+          )}
+        </div>
+
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
           <button
             onClick={() => duplicateEvent(event)}
@@ -523,6 +817,159 @@ export default function EventsModule(){
     );
   };
 
+  const renderSeriesInstanceRow = (seriesItem, instance) => {
+    const status = normalizeEventStatus(instance);
+    const archived = isEventArchived(instance);
+    const statusClasses = status === 'published'
+      ? 'bg-green-500/15 text-green-200 border border-green-500/30'
+      : archived
+        ? 'bg-gray-500/15 text-gray-200 border border-gray-500/30'
+        : 'bg-yellow-500/15 text-yellow-200 border border-yellow-500/30';
+    const statusLabel = archived ? 'Archived' : (status === 'published' ? 'Published' : 'Draft');
+    const isSkipped = Boolean(instance.skipped_instance_exception_id);
+    const isBusy = seriesActionId === instance.id;
+    const missingSchedule = Boolean(instance.missing_schedule);
+    return (
+      <div key={`series-instance-${instance.id}`} className={`flex flex-col md:flex-row md:items-center justify-between gap-3 border border-gray-800 rounded-lg p-3 ${isSkipped ? 'bg-gray-900/60' : 'bg-gray-900/40'}`}>
+        <div>
+          <p className="text-base font-medium text-white">{formatDateDisplay(instance)} · {formatTimeDisplay(instance)}</p>
+          <div className="flex flex-wrap gap-2 mt-1">
+            <span className={`text-xs font-semibold px-2 py-1 rounded-full ${statusClasses}`}>{statusLabel}</span>
+            {isSkipped && (
+              <span className="text-xs font-semibold px-2 py-1 rounded-full bg-red-500/15 text-red-200 border border-red-500/30">
+                Skipped
+              </span>
+            )}
+            {missingSchedule && (
+              <span className="text-xs font-semibold px-2 py-1 rounded-full bg-amber-500/20 text-amber-100 border border-amber-400/40">
+                Needs date &amp; time
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-500 mt-1">Slug: {instance.slug}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => openEdit(instance)}
+            className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm"
+          >
+            Edit
+          </button>
+          {isSkipped ? (
+            <button
+              disabled={isBusy}
+              onClick={() => unskipSeriesInstance(instance)}
+              className="px-3 py-2 rounded bg-green-600 hover:bg-green-700 text-white text-sm disabled:opacity-50"
+            >
+              Re-enable
+            </button>
+          ) : (
+            <button
+              disabled={isBusy}
+              onClick={() => skipSeriesInstance(instance)}
+              className="px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white text-sm disabled:opacity-50"
+            >
+              Skip Date
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderSeriesCard = (seriesItem) => {
+    const master = seriesItem.master || {};
+    const eventTitle = master.artist_name || master.title || 'Recurring Series';
+    const subtitle = master.title && master.title !== eventTitle ? master.title : master.notes;
+    const expanded = !!seriesExpanded[seriesItem.id];
+    const toggleSeries = () => {
+      setSeriesExpanded((prev) => ({
+        ...prev,
+        [seriesItem.id]: !expanded,
+      }));
+    };
+    const nextInstance = seriesItem.summary?.nextInstance;
+    const instanceCount = seriesItem.summary?.totalInstances || seriesItem.instances.length;
+    const skippedCount = seriesItem.summary?.skippedCount || 0;
+    const seatRouting = resolveSeatRoutingInfo(master || seriesItem.summary?.nextInstance || {});
+    const hasSeatRequests = Boolean(seriesItem.hasSeating);
+    const missingScheduleBadge = seriesItem.needsSchedule ? (
+      <span className="text-xs font-semibold px-2 py-1 rounded-full bg-amber-500/20 text-amber-100 border border-amber-400/40">
+        Needs date &amp; time
+      </span>
+    ) : null;
+    return (
+      <div key={seriesItem.id} className="bg-gray-900 rounded-xl border border-blue-800/50 p-4 shadow-sm">
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold px-2 py-1 rounded-full bg-blue-500/15 text-blue-200 border border-blue-500/30">
+              Recurring Series
+            </span>
+            <span className="text-xs font-semibold px-2 py-1 rounded-full bg-cyan-500/15 text-cyan-100 border border-cyan-500/30">
+              {seriesItem.categoryLabel}
+            </span>
+            <span className="text-xs font-semibold px-2 py-1 rounded-full bg-gray-500/15 text-gray-200 border border-gray-600">
+              {VENUE_LABELS[seriesItem.venueCode] || 'Venue TBD'}
+            </span>
+            {missingScheduleBadge}
+          </div>
+          <div>
+            <h4 className="text-lg font-semibold text-white">{eventTitle}</h4>
+            {subtitle && <p className="text-sm text-gray-400">{subtitle}</p>}
+          </div>
+          <p className="text-sm text-gray-400">
+            {instanceCount} instances · {skippedCount} skipped · Next: {nextInstance ? `${formatDateDisplay(nextInstance)} (${formatTimeDisplay(nextInstance)})` : 'Not scheduled'}
+          </p>
+        </div>
+        <div className="mt-4 flex flex-wrap justify-between gap-2">
+          <button
+            type="button"
+            onClick={toggleSeries}
+            className="px-4 py-2 rounded bg-amber-400 text-gray-900 text-sm font-semibold border border-amber-200 hover:bg-amber-300 transition"
+          >
+            {expanded ? 'Hide Dates' : 'Show Dates'}
+          </button>
+          <button
+            type="button"
+            onClick={() => openEdit(master)}
+            className="px-3 py-2 rounded bg-blue-600 text-white text-sm hover:bg-blue-700"
+          >
+            Edit Series
+          </button>
+        </div>
+        <div className="mt-4 p-3 rounded-lg border border-gray-800 bg-gray-950/60 text-sm text-gray-200">
+          <p className="text-xs uppercase tracking-wide text-gray-500">Seat requests</p>
+          {hasSeatRequests ? (
+            <>
+              <p className="text-white font-semibold">{seatRouting.email}</p>
+              <p className="text-xs text-gray-400">Route: {seatRouting.label}</p>
+            </>
+          ) : (
+            <p className="text-sm text-gray-400">Seat reservations disabled for this series.</p>
+          )}
+        </div>
+        {expanded && (
+          <div className="mt-4 space-y-3">
+            {seriesItem.instances.length === 0 ? (
+              <div className="p-4 bg-gray-900 border border-gray-800 rounded text-sm text-gray-400">
+                No upcoming instances. Add dates from the event editor.
+              </div>
+            ) : (
+              seriesItem.instances.map((instance) => renderSeriesInstanceRow(seriesItem, instance))
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderListItem = (item) => {
+    if (item.type === 'series') {
+      return renderSeriesCard(item);
+    }
+    return renderEventCard(item.event);
+  };
+
   const renderEventSection = (heading, list, sectionId) => {
     const collapsed = !!collapsedSections[sectionId];
     return (
@@ -546,7 +993,7 @@ export default function EventsModule(){
             </div>
           ) : (
             <div className="space-y-4">
-              {list.map(renderEventCard)}
+              {list.map(renderListItem)}
             </div>
           )
         )}
@@ -577,6 +1024,7 @@ export default function EventsModule(){
       venue_section: event.venue_section || '',
       layout_id: event.layout_id || '',
       category_id: event.category_id ? String(event.category_id) : '',
+      seat_request_email_override: event.seat_request_email_override || '',
     });
     setImageFile(null);
     setImagePreview(event.image_url ? getImageUrlSync(event.image_url) : null);
@@ -636,11 +1084,14 @@ export default function EventsModule(){
       const method = editing ? 'PUT' : 'POST';
       const url = editing ? `${API_BASE}/events/${editing.id}` : `${API_BASE}/events`;
       const payload = { ...formData, image_url: finalImageUrl };
+      payload.ticket_price = normalizePriceInput(payload.ticket_price);
+      payload.door_price = normalizePriceInput(payload.door_price);
       const parsedLayoutId = payload.layout_id && payload.layout_id !== '' ? Number(payload.layout_id) : null;
       const normalizedLayoutId = Number.isFinite(parsedLayoutId) && parsedLayoutId > 0 ? parsedLayoutId : null;
       payload.layout_id = normalizedLayoutId;
       const parsedCategoryId = payload.category_id && payload.category_id !== '' ? Number(payload.category_id) : null;
       payload.category_id = Number.isFinite(parsedCategoryId) && parsedCategoryId > 0 ? parsedCategoryId : null;
+      payload.seat_request_email_override = (payload.seat_request_email_override || '').trim() || null;
       if (!payload.layout_id) {
         payload.seating_enabled = false;
         payload.layout_version_id = null;
@@ -775,6 +1226,7 @@ export default function EventsModule(){
       category_id: event.category_id || null,
       hero_image_id: event.hero_image_id || null,
       poster_image_id: event.poster_image_id || null,
+      seat_request_email_override: event.seat_request_email_override || null,
     };
     try {
       const res = await fetch(`${API_BASE}/events`, {
@@ -792,6 +1244,66 @@ export default function EventsModule(){
     } catch (err) {
       console.error('Duplicate event error', err);
       alert('Failed to duplicate event');
+    }
+  };
+
+  const skipSeriesInstance = async (instance) => {
+    if (seriesActionId) return;
+    if (!instance.series_master_id) {
+      alert('This instance is not linked to a recurring series.');
+      return;
+    }
+    const occurrenceDate = occurrenceDateForInstance(instance);
+    if (!occurrenceDate) {
+      alert('Unable to determine the event date for this instance.');
+      return;
+    }
+    if (!window.confirm(`Hide ${instance.artist_name || instance.title || 'this event'} on ${occurrenceDate}?`)) {
+      return;
+    }
+    setSeriesActionId(instance.id);
+    try {
+      const res = await fetch(`${API_BASE}/events/${instance.series_master_id}/recurrence/exceptions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          exception_date: occurrenceDate,
+          exception_type: 'skip',
+          notes: 'Hidden via admin panel',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || 'Failed to skip instance');
+      }
+      fetchEvents();
+    } catch (err) {
+      console.error('skipSeriesInstance error', err);
+      alert(err.message || 'Failed to hide this date.');
+    } finally {
+      setSeriesActionId(null);
+    }
+  };
+
+  const unskipSeriesInstance = async (instance) => {
+    if (seriesActionId) return;
+    const exceptionId = instance.skipped_instance_exception_id;
+    if (!exceptionId) {
+      return;
+    }
+    setSeriesActionId(instance.id);
+    try {
+      const res = await fetch(`${API_BASE}/recurrence-exceptions/${exceptionId}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || 'Failed to restore date');
+      }
+      fetchEvents();
+    } catch (err) {
+      console.error('unskipSeriesInstance error', err);
+      alert(err.message || 'Failed to restore this date.');
+    } finally {
+      setSeriesActionId(null);
     }
   };
 
@@ -845,6 +1357,33 @@ export default function EventsModule(){
                 <option value="archived">Archived</option>
               </select>
             </div>
+            <div className="flex flex-col">
+              <label className="text-xs uppercase text-gray-400 mb-1">Venue</label>
+              <select
+                value={filters.venue}
+                onChange={(e) => setFilters((prev) => ({ ...prev, venue: e.target.value }))}
+                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
+              >
+                <option value="all">All venues</option>
+                <option value="MMH">Midway Music Hall</option>
+                <option value="TGP">Gathering Place</option>
+              </select>
+            </div>
+            <div className="flex flex-col">
+              <label className="text-xs uppercase text-gray-400 mb-1">Category</label>
+              <select
+                value={filters.category}
+                onChange={(e) => setFilters((prev) => ({ ...prev, category: e.target.value }))}
+                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
+              >
+                <option value="all">All categories</option>
+                {categoryFilterOptions.map((cat) => (
+                  <option key={cat.slug} value={cat.slug}>
+                    {cat.name}{cat.is_active ? '' : ' (inactive)'}
+                  </option>
+                ))}
+              </select>
+            </div>
             <label className="inline-flex items-center gap-2 text-sm text-gray-300">
               <input
                 type="checkbox"
@@ -863,6 +1402,39 @@ export default function EventsModule(){
               />
               With seating only
             </label>
+            <label className="inline-flex items-center gap-2 text-sm text-gray-300">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-600"
+                checked={filters.needsScheduleOnly}
+                onChange={(e) => setFilters((prev) => ({ ...prev, needsScheduleOnly: e.target.checked }))}
+              />
+              Needs date/time only
+            </label>
+            <div className="flex flex-col">
+              <label className="text-xs uppercase text-gray-400 mb-1">Sort</label>
+              <select
+                value={filters.sortBy}
+                onChange={(e) => setFilters((prev) => ({ ...prev, sortBy: e.target.value }))}
+                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col">
+              <label className="text-xs uppercase text-gray-400 mb-1">Grouping</label>
+              <select
+                value={filters.groupBy}
+                onChange={(e) => setFilters((prev) => ({ ...prev, groupBy: e.target.value }))}
+                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
+              >
+                {GROUP_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div>
             <label className="sr-only" htmlFor="event-search">Search events</label>
@@ -891,7 +1463,7 @@ export default function EventsModule(){
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin h-10 w-10 border-4 border-purple-500 border-t-transparent rounded-full" />
         </div>
-      ) : filteredEvents.length === 0 ? (
+      ) : sortedItems.length === 0 ? (
         <div className="p-6 bg-gray-800 rounded-xl border border-gray-700 text-center text-gray-400">
           {events.length === 0
             ? 'No events yet. Click "Add Event" to create your first listing.'
@@ -918,7 +1490,7 @@ export default function EventsModule(){
             </div>
           )}
           <div className="space-y-10">
-            {venueGroups.map((group) => {
+            {groupedSections.map((group) => {
               const viewingArchivedOnly = filters.timeframe === 'archived';
               const includeArchivedInline = filters.timeframe === 'all';
               const groupTotal = viewingArchivedOnly
@@ -1002,13 +1574,31 @@ export default function EventsModule(){
               </div>
 
               <div>
-                <label className="block text-sm text-gray-300 mb-1">Ticket Price*</label>
-                <input name="ticket_price" value={formData.ticket_price} onChange={handleChange} type="number" step="0.01" required className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
+                <label className="block text-sm text-gray-300 mb-1">Ticket Price</label>
+                <input
+                  name="ticket_price"
+                  value={formData.ticket_price}
+                  onChange={handleChange}
+                  type="number"
+                  step="0.01"
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="Leave blank for free shows"
+                />
+                <p className="text-xs text-gray-400 mt-1">Leave blank if this event is free or donation-based.</p>
               </div>
 
               <div>
-                <label className="block text-sm text-gray-300 mb-1">Door Price*</label>
-                <input name="door_price" value={formData.door_price} onChange={handleChange} type="number" step="0.01" required className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
+                <label className="block text-sm text-gray-300 mb-1">Door Price</label>
+                <input
+                  name="door_price"
+                  value={formData.door_price}
+                  onChange={handleChange}
+                  type="number"
+                  step="0.01"
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="Leave blank if no door cover"
+                />
+                <p className="text-xs text-gray-400 mt-1">If there is no separate door price, leave blank.</p>
               </div>
 
               <div>
@@ -1036,6 +1626,23 @@ export default function EventsModule(){
                   ))}
                 </select>
                 <p className="text-xs text-gray-400 mt-1">Select a saved layout or leave as None if this event doesn't use seat reservations</p>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm text-gray-300 mb-1">Seat request email (optional)</label>
+                <input
+                  type="email"
+                  name="seat_request_email_override"
+                  value={formData.seat_request_email_override}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="Leave blank for default routing"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  {editingSeatRouting
+                    ? `Currently routed to ${editingSeatRouting.email} (${editingSeatRouting.label}).`
+                    : 'Leave blank to use the Beach Bands inbox for beach shows or the main staff inbox for everything else.'}
+                </p>
               </div>
 
               <div className="md:col-span-2">

@@ -112,3 +112,15 @@ export const eventHasSeating = (event = {}) => {
   }
   return false;
 };
+
+export const isRecurringEvent = (event = {}) => {
+  if (!event) return false;
+  if (Number(event.is_series_master) === 1 || Number(event.series_master_id) > 0) {
+    return true;
+  }
+  if (event.recurrence_rule_id || event.parent_recurrence_rule_id) {
+    return true;
+  }
+  const slug = (event.category_slug || '').toLowerCase();
+  return slug === 'recurring';
+};

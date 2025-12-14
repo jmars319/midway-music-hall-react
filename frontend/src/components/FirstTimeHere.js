@@ -1,61 +1,72 @@
 import React from 'react';
 import { MapPin, Shield, Ban, PhoneCall, Info, Car } from 'lucide-react';
-
-const infoCards = [
-  {
-    id: 'address',
-    icon: MapPin,
-    title: 'Address',
-    description: '11141 Old US Hwy 52, Winston-Salem, NC 27107',
-    detail: 'Midway Town Center · Exit 100',
-  },
-  {
-    id: 'family',
-    icon: Shield,
-    title: 'Family Policy',
-    description: 'Family venue. Please keep language respectful.',
-    detail: 'We want everyone to feel welcome.',
-  },
-  {
-    id: 'refunds',
-    icon: Ban,
-    title: 'Refunds',
-    description: 'All ticket sales are final.',
-    detail: 'NO REFUNDS',
-  },
-  {
-    id: 'reservations',
-    icon: Info,
-    title: 'Reservations',
-    description: 'Seat reservations are request-only for now.',
-    detail: 'Staff will call to confirm.',
-  },
-  {
-    id: 'contact',
-    icon: PhoneCall,
-    title: 'Best Contact',
-    description: (
-      <>
-        Donna Cheek · Venue Manager
-        <br />
-        <a href="tel:13367934218" className="text-purple-200 hover:text-white underline">336-793-4218</a>
-        {' · '}
-        <a href="mailto:midwayeventcenter@gmail.com" className="text-purple-200 hover:text-white underline">midwayeventcenter@gmail.com</a>
-      </>
-    ),
-    detail: 'Main point of contact',
-  },
-  {
-    id: 'parking',
-    icon: Car,
-    title: 'Parking & Access',
-    description: 'Surface lot parking directly in front of the venue.',
-    detail: 'Accessible entrance available.',
-  },
-];
+import useSiteContent from '../hooks/useSiteContent';
 
 // Short onboarding block for first-time visitors.
 export default function FirstTimeHere() {
+  const siteContent = useSiteContent();
+  const primaryContact = (siteContent.contacts || [])[0];
+  const infoCards = [
+    {
+      id: 'address',
+      icon: MapPin,
+      title: 'Address',
+      description: siteContent.business?.address || '11141 Old US Hwy 52, Winston-Salem, NC 27107',
+      detail: siteContent.map?.subtext || 'Midway Town Center · Exit 100',
+    },
+    {
+      id: 'family',
+      icon: Shield,
+      title: 'Family Policy',
+      description: siteContent.policies?.family || 'Family venue. Please keep language respectful.',
+      detail: 'We want everyone to feel welcome.',
+    },
+    {
+      id: 'refunds',
+      icon: Ban,
+      title: 'Refunds',
+      description: siteContent.policies?.refunds || 'All ticket sales are final.',
+      detail: 'NO REFUNDS',
+    },
+    {
+      id: 'reservations',
+      icon: Info,
+      title: 'Reservations',
+      description: siteContent.box_office_note || 'Seat reservations are request-only for now.',
+      detail: 'Staff will call to confirm.',
+    },
+    {
+      id: 'contact',
+      icon: PhoneCall,
+      title: 'Best Contact',
+      description: (
+        <>
+          {(primaryContact?.name || 'Donna Cheek')}{primaryContact?.title ? ` · ${primaryContact.title}` : ' · Venue Manager'}
+          <br />
+          {primaryContact?.phone && (
+            <>
+              <a href={`tel:${primaryContact.phone.replace(/[^0-9+]/g, '')}`} className="text-purple-200 hover:text-white underline">
+                {primaryContact.phone}
+              </a>
+              {' · '}
+            </>
+          )}
+          <a href={`mailto:${primaryContact?.email || 'midwayeventcenter@gmail.com'}`} className="text-purple-200 hover:text-white underline">
+            {primaryContact?.email || 'midwayeventcenter@gmail.com'}
+          </a>
+        </>
+      ),
+      detail: 'Main point of contact',
+    },
+    {
+      id: 'parking',
+      icon: Car,
+      title: 'Parking & Access',
+      description: 'Surface lot parking directly in front of the venue.',
+      detail: 'Accessible entrance available.',
+    },
+  ];
+
   return (
     <section className="py-12 bg-gray-950" aria-labelledby="first-time-here">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

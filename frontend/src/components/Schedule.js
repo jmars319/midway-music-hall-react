@@ -4,7 +4,8 @@ import { Calendar, DollarSign, Users, Share2, CalendarPlus, DoorOpen } from 'luc
 import EventSeatingModal from './EventSeatingModal';
 import ResponsiveImage from './ResponsiveImage';
 import { API_BASE, getImageUrlSync } from '../App';
-import { formatEventDateTimeLabel, formatDoorsLabel, eventHasSeating } from '../utils/eventFormat';
+import { formatEventDateTimeLabel, formatDoorsLabel, eventHasSeating, isRecurringEvent } from '../utils/eventFormat';
+import { getCategoryBadge } from '../utils/categoryLabels';
 
 const formatPriceValue = (value) => {
   if (value === null || value === undefined || value === '') return null;
@@ -73,6 +74,11 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                 id={event.id ? `event-${event.id}` : undefined}
                 className="bg-gray-800 rounded-xl border border-gray-700/70 hover:border-purple-400/60 transition p-4 flex flex-col gap-4"
               >
+                {(!event.start_datetime && !event.event_date) && (
+                  <div className="text-xs font-semibold text-amber-200 bg-amber-500/10 border border-amber-400/30 rounded-full px-3 py-1 w-fit">
+                    Needs date & time
+                  </div>
+                )}
                 <div className="flex items-start gap-4">
                   <div className="w-20 h-20 rounded-lg overflow-hidden bg-gray-800 flex-shrink-0">
                     <ResponsiveImage
@@ -89,11 +95,15 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                         <h3 className="text-lg font-semibold">{event.artist_name || event.title || event.name || 'Untitled'}</h3>
                         <p className="text-sm text-gray-400">{event.genre || event.venue_section || ''}</p>
                       </div>
-                      {event.isBeachSeries && (
-                        <span className="text-xs px-2 py-1 rounded-full bg-cyan-500/20 text-cyan-100 uppercase tracking-wide whitespace-nowrap">
-                          Beach Music
-                        </span>
-                      )}
+                      {(() => {
+                        const badge = getCategoryBadge(event);
+                        if (!badge) return null;
+                        return (
+                          <span className={`text-xs px-2 py-1 rounded-full uppercase tracking-wide whitespace-nowrap ${badge.classes}`}>
+                            {badge.label}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <div className="text-sm text-gray-300 space-y-1">
                       <div className="flex items-center">
@@ -159,7 +169,7 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                       </button>
                     </>
                   )}
-                  {eventHasSeating(event) && (
+                  {eventHasSeating(event) && !isRecurringEvent(event) && (
                     <button
                       onClick={() => handleRequestSeats(event)}
                       className="inline-flex items-center gap-2 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded transition"

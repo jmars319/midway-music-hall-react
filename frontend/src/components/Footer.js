@@ -1,15 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 // Footer: small presentational component rendered at bottom of site
 import { MapPin, Phone, Mail, Facebook, Instagram, Twitter } from 'lucide-react';
-import { API_BASE } from '../App';
-
-const business = {
-  name: 'Midway Music Hall',
-  address: '11141 Old US Hwy 52, Winston-Salem, NC 27107',
-  phone: '(336) 793-4218',
-  email: 'midwayeventcenter@gmail.com',
-  boxOffice: 'Contact for event information'
-};
+import useSiteContent from '../hooks/useSiteContent';
 
 const scrollToSection = (id) => {
   const el = document.getElementById(id);
@@ -17,38 +9,31 @@ const scrollToSection = (id) => {
 };
 
 export default function Footer({ onAdminClick, onNavigate }){
-  const [facebookUrl, setFacebookUrl] = useState('https://www.facebook.com/midwaymusichall');
-  const [instagramUrl, setInstagramUrl] = useState('https://www.instagram.com/midwaymusichall');
-  const [twitterUrl, setTwitterUrl] = useState('https://twitter.com/midwaymusichall');
-
-  useEffect(() => {
-    fetch(`${API_BASE}/settings`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.settings) {
-          if (data.settings.facebook_url) setFacebookUrl(data.settings.facebook_url);
-          if (data.settings.instagram_url) setInstagramUrl(data.settings.instagram_url);
-          if (data.settings.twitter_url) setTwitterUrl(data.settings.twitter_url);
-        }
-      })
-      .catch(() => {});
-  }, []);
+  const siteContent = useSiteContent();
+  const business = siteContent.business || {};
+  const primaryContact = (siteContent.contacts || [])[0];
+  const boxOfficeNote = siteContent.box_office_note || 'Seat reservations are request-only with a 24-hour hold window.';
+  const social = siteContent.social || {};
 
   return (
     <footer className="bg-gray-900 border-t border-purple-500/15 text-gray-300 mt-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           <div>
-            <h4 className="text-white font-bold mb-3">{business.name}</h4>
+            <h4 className="text-white font-bold mb-3">{business.name || 'Midway Music Hall'}</h4>
             <div className="text-sm text-gray-400">
-              <div className="flex items-center gap-2"><MapPin className="h-4 w-4" /> {business.address}</div>
+              <div className="flex items-center gap-2"><MapPin className="h-4 w-4" /> {business.address || '11141 Old US Hwy 52, Winston-Salem, NC 27107'}</div>
               <div className="flex items-center gap-2 mt-2">
                 <Phone className="h-4 w-4" /> 
-                <a href="tel:+13367934218" className="hover:text-purple-400 transition">{business.phone}</a>
+                <a href={`tel:${(business.phone || '336-793-4218').replace(/[^0-9+]/g, '')}`} className="hover:text-purple-400 transition">
+                  {business.phone || '336-793-4218'}
+                </a>
               </div>
               <div className="flex items-center gap-2 mt-2">
                 <Mail className="h-4 w-4" /> 
-                <a href="mailto:midwayeventcenter@gmail.com" className="hover:text-purple-400 transition">{business.email}</a>
+                <a href={`mailto:${business.email || 'midwayeventcenter@gmail.com'}`} className="hover:text-purple-400 transition">
+                  {business.email || 'midwayeventcenter@gmail.com'}
+                </a>
               </div>
             </div>
           </div>
@@ -70,12 +55,22 @@ export default function Footer({ onAdminClick, onNavigate }){
           <div>
             <h4 className="text-white font-bold mb-3">Box Office & Reservations</h4>
             <div className="text-sm text-gray-400 space-y-2">
-              <p>Seat reservations are request-only with a 24-hour hold window. Staff will call or text to confirm every request.</p>
-              <p className="flex flex-col">
-                <span className="text-gray-300 font-medium">Donna Cheek · Venue Manager</span>
-                <a href="tel:+13367934218" className="text-purple-300 hover:text-white transition">336-793-4218</a>
-                <a href="mailto:midwayeventcenter@gmail.com" className="text-purple-300 hover:text-white transition">midwayeventcenter@gmail.com</a>
-              </p>
+              <p>{boxOfficeNote}</p>
+              {primaryContact && (
+                <p className="flex flex-col">
+                  <span className="text-gray-300 font-medium">{primaryContact.name}{primaryContact.title ? ` · ${primaryContact.title}` : ''}</span>
+                  {primaryContact.phone && (
+                    <a href={`tel:${primaryContact.phone.replace(/[^0-9+]/g, '')}`} className="text-purple-300 hover:text-white transition">
+                      {primaryContact.phone}
+                    </a>
+                  )}
+                  {primaryContact.email && (
+                    <a href={`mailto:${primaryContact.email}`} className="text-purple-300 hover:text-white transition">
+                      {primaryContact.email}
+                    </a>
+                  )}
+                </p>
+              )}
               <p className="text-xs text-gray-500">
                 Voicemail is monitored daily. Leave your name, party size, and event date for the quickest callback.
               </p>
@@ -85,13 +80,13 @@ export default function Footer({ onAdminClick, onNavigate }){
           <div>
             <h4 className="text-white font-bold mb-3">Follow Us</h4>
             <div className="flex items-center gap-3">
-              <a href={facebookUrl} target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
+              <a href={social.facebook || 'https://www.facebook.com/midwaymusichall'} target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
                 <Facebook className="h-5 w-5" />
               </a>
-              <a href={instagramUrl} target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
+              <a href={social.instagram || 'https://www.instagram.com/midwaymusichall'} target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
                 <Instagram className="h-5 w-5" />
               </a>
-              <a href={twitterUrl} target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
+              <a href={social.twitter || 'https://twitter.com/midwaymusichall'} target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
                 <Twitter className="h-5 w-5" />
               </a>
             </div>

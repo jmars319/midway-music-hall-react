@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Music, Users, Star, Heart, MapPin, Shield, Phone, Mail } from 'lucide-react';
 import { API_BASE } from '../App';
+import useSiteContent from '../hooks/useSiteContent';
 
 // TODO: Confirm actual capacity; using neutral phrasing for now.
 const features = [
@@ -11,24 +12,10 @@ const features = [
   { icon: Heart, title: 'Local First', description: 'We prioritize regional artists, dance instructors, and community partners.' }
 ];
 
-const contacts = [
-  {
-    name: 'Donna Cheek · Venue Manager',
-    phone: '336-793-4218',
-    email: 'midwayeventcenter@gmail.com',
-    role: 'Main contact for all events',
-  },
-  {
-    name: 'Sandra Marshall · Beach Music Coordinator',
-    phone: '336-223-5570',
-    email: 'mmhbeachbands@gmail.com',
-    role: '2026 Carolina Beach Music Series',
-  },
-];
-
 export default function About(){
   const [aboutTitle, setAboutTitle] = useState('About Midway Music Hall');
   const [aboutDescription, setAboutDescription] = useState('Midway Music Hall is an intimate live music venue in Winston-Salem, North Carolina. We focus on reliable sound, curated dance nights, and a welcoming community experience.\n\nJoin us for weekly shows, private rentals, and community gatherings that celebrate Carolina beach music, shag culture, Americana roots, and classic country with the occasional rock feature.');
+  const siteContent = useSiteContent();
 
   useEffect(() => {
     fetch(`${API_BASE}/settings`)
@@ -88,8 +75,8 @@ export default function About(){
                   <MapPin className="h-5 w-5 text-purple-300 mt-1" />
                   <div>
                     <h4 className="font-semibold text-white">Address</h4>
-                    <p className="text-gray-300">11141 Old US Hwy 52, Winston-Salem, NC 27107</p>
-                    <p className="text-gray-400 text-sm mt-1">Midway Town Center Shopping Center - Exit 100 off Hwy 52</p>
+                    <p className="text-gray-300">{siteContent.business?.address || '11141 Old US Hwy 52, Winston-Salem, NC 27107'}</p>
+                    <p className="text-gray-400 text-sm mt-1">{siteContent.map?.subtext || 'Midway Town Center Shopping Center - Exit 100 off Hwy 52'}</p>
                   </div>
                 </div>
               </div>
@@ -99,8 +86,10 @@ export default function About(){
                   <Shield className="h-5 w-5 text-purple-300 mt-1" />
                   <div>
                     <h4 className="font-semibold text-white">Family Policy</h4>
-                    <p className="text-gray-300">Family venue - no profanity or disrespectful behavior.</p>
-                    <p className="text-gray-300 mt-2 uppercase tracking-wide">Refunds: NO REFUNDS</p>
+                    <p className="text-gray-300">{siteContent.policies?.family || 'Family venue - no profanity or disrespectful behavior.'}</p>
+                    <p className="text-gray-300 mt-2 uppercase tracking-wide">
+                      Refunds: {siteContent.policies?.refunds || 'NO REFUNDS'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -108,17 +97,22 @@ export default function About(){
               <div className="bg-gray-800 rounded-2xl border border-gray-700 p-5">
                 <h4 className="font-semibold text-white mb-4">Contacts</h4>
                 <div className="space-y-4">
-                  {contacts.map((contact) => (
-                    <div key={contact.email}>
+                  {(siteContent.contacts || []).map((contact) => (
+                    <div key={`${contact.email}-${contact.phone}`}>
                       <p className="text-white font-semibold">{contact.name}</p>
-                      <p className="text-gray-400 text-sm">{contact.role}</p>
+                      {contact.title && <p className="text-gray-400 text-sm">{contact.title}</p>}
+                      {contact.notes && <p className="text-xs text-gray-500 mt-1">{contact.notes}</p>}
                       <div className="flex flex-wrap items-center gap-4 text-sm mt-1">
-                        <a href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`} className="flex items-center gap-1 text-purple-300 hover:text-purple-100">
-                          <Phone className="h-4 w-4" /> {contact.phone}
-                        </a>
-                        <a href={`mailto:${contact.email}`} className="flex items-center gap-1 text-purple-300 hover:text-purple-100">
-                          <Mail className="h-4 w-4" /> {contact.email}
-                        </a>
+                        {contact.phone && (
+                          <a href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`} className="flex items-center gap-1 text-purple-300 hover:text-purple-100">
+                            <Phone className="h-4 w-4" /> {contact.phone}
+                          </a>
+                        )}
+                        {contact.email && (
+                          <a href={`mailto:${contact.email}`} className="flex items-center gap-1 text-purple-300 hover:text-purple-100">
+                            <Mail className="h-4 w-4" /> {contact.email}
+                          </a>
+                        )}
                       </div>
                     </div>
                   ))}

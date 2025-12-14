@@ -1,8 +1,10 @@
 import React from 'react';
 import { Phone } from 'lucide-react';
-import lessons from '../data/lessons';
+import useSiteContent from '../hooks/useSiteContent';
 
 export default function LessonsSection() {
+  const siteContent = useSiteContent();
+  const lessons = siteContent.lessons || [];
   return (
     <section className="py-12 bg-gray-900 border-t border-b border-purple-500/20" id="lessons">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

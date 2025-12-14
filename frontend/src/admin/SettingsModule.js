@@ -123,27 +123,8 @@ export default function SettingsModule(){
       ) : (
         <form onSubmit={handleSave} className="bg-gray-800 rounded-xl p-6 border border-purple-500/30 max-w-3xl">
           {error && <div className="mb-4 p-3 bg-red-600/10 border border-red-600 text-red-400 rounded">{error}</div>}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-gray-300 mb-1">Business Name</label>
-              <input name="business_name" value={settings.business_name || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-300 mb-1">Phone</label>
-              <input name="business_phone" value={settings.business_phone || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-300 mb-1">Email</label>
-              <input name="business_email" value={settings.business_email || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-sm text-gray-300 mb-1">Address</label>
-              <input name="business_address" value={settings.business_address || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
-            </div>
+          <div className="mb-6 p-3 bg-blue-500/10 border border-blue-500/30 text-blue-100 rounded text-sm">
+            Business contact info, social links, policies, and lessons are now managed under <strong>Site Content</strong>.
           </div>
           
           <div className="mt-10 pt-6 border-t border-gray-700">
@@ -291,24 +272,6 @@ export default function SettingsModule(){
                 <label className="block text-sm text-gray-300 mb-1">About Description</label>
                 <textarea name="about_description" value={settings.about_description || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" rows="5" placeholder="Description of your venue..." />
                 <p className="text-xs text-gray-400 mt-1">Use double line breaks to separate paragraphs</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 pt-6 border-t border-gray-700">
-            <h3 className="text-lg font-bold mb-4">Social Media Links</h3>
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Facebook URL</label>
-                <input name="facebook_url" value={settings.facebook_url || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" placeholder="https://facebook.com/yourpage" />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Instagram URL</label>
-                <input name="instagram_url" value={settings.instagram_url || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" placeholder="https://instagram.com/yourpage" />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Twitter URL</label>
-                <input name="twitter_url" value={settings.twitter_url || ''} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" placeholder="https://twitter.com/yourpage" />
               </div>
             </div>
           </div>

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { CheckCircle, XCircle, Trash2, Edit3, RefreshCw, X, Clock, ChevronDown, ChevronRight, Plus } from 'lucide-react';
+import { CheckCircle, XCircle, Trash2, Edit3, RefreshCw, X, Clock, ChevronDown, ChevronRight, Plus, Info } from 'lucide-react';
 import { API_BASE } from '../App';
 import TableComponent from '../components/TableComponent';
 import { seatingLegendSwatches, seatingStatusLabels } from '../utils/seatingTheme';
@@ -44,6 +44,20 @@ const STATUS_HELP_TEXT = {
 };
 
 const DETAIL_STATUS_OPTIONS = ['new', 'contacted', 'waiting', 'confirmed', 'declined', 'closed', 'spam', 'expired'];
+const DEFAULT_STAFF_INBOX = 'midwayeventcenter@gmail.com';
+const ROUTING_SOURCES = {
+  event: 'Event override for this show',
+  category: 'Category inbox set in Event Categories',
+  category_slug: 'Beach Bands auto-routing',
+  default: 'Default Midway staff inbox',
+};
+
+const resolveRoutingInfo = (request = {}) => {
+  const email = request.seat_request_target_email || DEFAULT_STAFF_INBOX;
+  const sourceKey = request.seat_request_target_source || 'default';
+  const label = ROUTING_SOURCES[sourceKey] || ROUTING_SOURCES.default;
+  return { email, label };
+};
 
 const formatDateTime = (value) => {
   if (!value) return 'N/A';
@@ -542,6 +556,7 @@ export default function SeatRequestsModule() {
               const holdDisplay = req.hold_expires_at
                 ? formatDateTime(req.hold_expires_at)
                 : (isFinalStatus(status) ? 'Released' : 'Not set');
+              const routing = resolveRoutingInfo(req);
               return (
                 <tr
                   key={req.id}
@@ -580,6 +595,11 @@ export default function SeatRequestsModule() {
                   <td className={`px-4 py-3 align-top text-sm ${isExpired ? 'text-gray-500 line-through' : 'text-gray-200'}`}>
                     <div>{req.customer_email || 'No email'}</div>
                     <div className={`text-xs ${isExpired ? 'text-gray-600 line-through' : 'text-gray-400'}`}>{req.customer_phone || 'No phone'}</div>
+                    <div className="mt-2 text-xs text-gray-400">
+                      Seat requests notify:{' '}
+                      <span className="text-gray-100">{routing.email}</span>
+                      <div className="text-[11px] text-gray-500">{routing.label}</div>
+                    </div>
                   </td>
                   <td className="px-4 py-3 align-top">
                     <span className={`px-3 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${badge} ${expiredHold ? 'ring-1 ring-red-500/60' : ''}`}>
@@ -761,7 +781,9 @@ export default function SeatRequestsModule() {
         />
       )}
 
-      {selectedRequest && editForm && (
+      {selectedRequest && editForm && (() => {
+        const detailRouting = resolveRoutingInfo(selectedRequest || {});
+        return (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-900 rounded-2xl max-w-4xl w-full border border-purple-500/30 shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
@@ -774,6 +796,16 @@ export default function SeatRequestsModule() {
               </button>
             </div>
             <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div className="bg-gray-800 border border-gray-700/80 rounded-xl p-4 flex items-start gap-3">
+                <div className="p-2 bg-purple-600/20 rounded-full text-purple-200">
+                  <Info className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-400">Seat requests notify</p>
+                  <p className="text-lg text-white font-semibold">{detailRouting.email}</p>
+                  <p className="text-sm text-gray-400">{detailRouting.label}</p>
+                </div>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Customer name</label>
@@ -912,7 +944,7 @@ export default function SeatRequestsModule() {
             </div>
           </div>
         </div>
-      )}
+      )})()}
     </div>
   );
 }

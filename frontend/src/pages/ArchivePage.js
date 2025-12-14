@@ -5,6 +5,7 @@ import Footer from '../components/Footer';
 import ResponsiveImage from '../components/ResponsiveImage';
 import { API_BASE, getImageUrlSync } from '../App';
 import { formatEventDateTimeLabel } from '../utils/eventFormat';
+import { getCategoryBadge } from '../utils/categoryLabels';
 
 const PAGE_LIMIT = 20;
 
@@ -139,6 +140,15 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
                                 {event.venue_code}
                               </span>
                             )}
+                            {(() => {
+                              const badge = getCategoryBadge(event);
+                              if (!badge) return null;
+                              return (
+                                <span className={`px-2 py-1 text-xs rounded-full ${badge.classes}`}>
+                                  {badge.label}
+                                </span>
+                              );
+                            })()}
                           </div>
                           <h3 className="text-xl font-semibold">
                             {event.artist_name || event.title || 'Midway Music Hall Event'}

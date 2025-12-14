@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { API_BASE } from '../App';
 
-const initialEditState = { id: null, name: '' };
+const initialEditState = { id: null, name: '', seat_request_email_to: '' };
 
 export default function CategoriesModule() {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [newName, setNewName] = useState('');
+  const [newSeatEmail, setNewSeatEmail] = useState('');
   const [creating, setCreating] = useState(false);
   const [editState, setEditState] = useState(initialEditState);
   const [pendingAction, setPendingAction] = useState(null);
@@ -44,13 +45,17 @@ export default function CategoriesModule() {
       const res = await fetch(`${API_BASE}/event-categories`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim() }),
+        body: JSON.stringify({
+          name: newName.trim(),
+          seat_request_email_to: newSeatEmail.trim() || null,
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data?.success) {
         throw new Error(data?.message || 'Failed to create category');
       }
       setNewName('');
+      setNewSeatEmail('');
       await loadCategories();
     } catch (err) {
       console.error('Create category failed', err);
@@ -61,7 +66,11 @@ export default function CategoriesModule() {
   };
 
   const startRename = (category) => {
-    setEditState({ id: category.id, name: category.name });
+    setEditState({
+      id: category.id,
+      name: category.name,
+      seat_request_email_to: category.seat_request_email_to || '',
+    });
   };
 
   const cancelRename = () => {
@@ -74,7 +83,10 @@ export default function CategoriesModule() {
       const res = await fetch(`${API_BASE}/event-categories/${editState.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editState.name.trim() }),
+        body: JSON.stringify({
+          name: editState.name.trim(),
+          seat_request_email_to: (editState.seat_request_email_to || '').trim() || null,
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data?.success) {
@@ -166,6 +178,16 @@ export default function CategoriesModule() {
               className="w-full px-3 py-2 rounded bg-gray-800 text-white border border-gray-700"
             />
           </div>
+          <div className="flex-1">
+            <label className="block text-sm text-gray-300 mb-1">Seat request email (optional)</label>
+            <input
+              type="email"
+              value={newSeatEmail}
+              onChange={(e) => setNewSeatEmail(e.target.value)}
+              placeholder="Defaults to staff inbox"
+              className="w-full px-3 py-2 rounded bg-gray-800 text-white border border-gray-700"
+            />
+          </div>
           <button
             type="submit"
             disabled={creating || !newName.trim()}
@@ -174,7 +196,7 @@ export default function CategoriesModule() {
             {creating ? 'Adding...' : 'Add Category'}
           </button>
         </div>
-        <p className="text-xs text-gray-500">Slug is auto-generated and remains stable after creation.</p>
+        <p className="text-xs text-gray-500">Slug is auto-generated and remains stable after creation. Leave the seat request email empty to use the standard staff inbox or automatic Beach Bands routing.</p>
       </form>
 
       {error && (
@@ -196,6 +218,7 @@ export default function CategoriesModule() {
                 <th className="px-4 py-3 text-left">Slug</th>
                 <th className="px-4 py-3 text-left">Status</th>
                 <th className="px-4 py-3 text-left">Type</th>
+                <th className="px-4 py-3 text-left">Seat requests go to</th>
                 <th className="px-4 py-3 text-left">Events</th>
                 <th className="px-4 py-3 text-left">Actions</th>
               </tr>
@@ -207,17 +230,18 @@ export default function CategoriesModule() {
                   <tr key={category.id}>
                     <td className="px-4 py-3">
                       {editing ? (
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <input
                             type="text"
                             value={editState.name}
                             onChange={(e) => setEditState((prev) => ({ ...prev, name: e.target.value }))}
                             className="px-2 py-1 rounded bg-gray-800 border border-gray-600 flex-1"
+                            placeholder="Category name"
                           />
                           <button
                             type="button"
                             onClick={saveRename}
-                            className="px-2 py-1 rounded bg-green-600 text-white text-xs"
+                            className="px-2 py-1 rounded bg-green-600 text-white text-xs disabled:opacity-50"
                             disabled={!editState.name.trim()}
                           >
                             Save
@@ -241,6 +265,31 @@ export default function CategoriesModule() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-400">{category.is_system ? 'System' : 'Custom'}</td>
+                    <td className="px-4 py-3 text-sm">
+                      {editing ? (
+                        <div className="space-y-1">
+                          <input
+                            type="email"
+                            value={editState.seat_request_email_to}
+                            onChange={(e) => setEditState((prev) => ({ ...prev, seat_request_email_to: e.target.value }))}
+                            className="w-full px-2 py-1 rounded bg-gray-800 border border-gray-600"
+                            placeholder="Default staff inbox"
+                          />
+                          <p className="text-xs text-gray-500">Leave blank to use the standard staff inbox.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <p className="text-gray-200">
+                            {category.seat_request_email_to || 'Default staff inbox'}
+                          </p>
+                          {category.seat_request_email_to ? (
+                            <span className="text-xs text-amber-200">Custom inbox</span>
+                          ) : (
+                            <span className="text-xs text-gray-500">Follows beach-band / default rules</span>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3">{category.usage_count || 0}</td>
                     <td className="px-4 py-3 space-x-2">
                       {!editing && (

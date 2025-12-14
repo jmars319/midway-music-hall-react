@@ -2,6 +2,7 @@ import React from 'react';
 import { Sparkles } from 'lucide-react';
 import { getImageUrlSync } from '../App';
 import { formatEventDateTimeLabel, formatDoorsLabel } from '../utils/eventFormat';
+import { getCategoryBadge } from '../utils/categoryLabels';
 import ResponsiveImage from './ResponsiveImage';
 
 // Highlights the next few headline events at the top of the public site.
@@ -52,6 +53,15 @@ export default function FeaturedEvents({ events = [], loading = false }) {
                 <p className="text-sm text-purple-300 uppercase tracking-wide mb-2">
                   {formatEventDateTimeLabel(event)}
                 </p>
+                {(() => {
+                  const badge = getCategoryBadge(event);
+                  if (!badge) return null;
+                  return (
+                    <span className={`inline-block text-xs px-2 py-1 rounded-full mb-3 ${badge.classes}`}>
+                      {badge.label}
+                    </span>
+                  );
+                })()}
                 <h3 className="text-2xl font-semibold text-white">{event.artist_name || event.title}</h3>
                 <p className="text-gray-300 mt-3 flex-1">{event.description || event.notes || 'Live at Midway Music Hall'}</p>
                 {formatDoorsLabel(event) && (
