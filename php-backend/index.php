@@ -272,6 +272,24 @@ function event_schedule_sort_expression(string $alias = 'e'): string
     return "CASE WHEN $hasExpr THEN 0 ELSE 1 END";
 }
 
+function event_has_schedule_metadata(array $event): bool
+{
+    $start = trim((string) ($event['start_datetime'] ?? ''));
+    if ($start !== '' && $start !== '0000-00-00 00:00:00') {
+        return true;
+    }
+    $date = trim((string) ($event['event_date'] ?? ''));
+    if ($date !== '' && $date !== '0000-00-00') {
+        return true;
+    }
+    return false;
+}
+
+function event_missing_schedule_metadata(array $event): bool
+{
+    return !event_has_schedule_metadata($event);
+}
+
 function events_table_has_column(PDO $pdo, string $column): bool
 {
     static $cache = [];
@@ -329,6 +347,24 @@ function event_categories_table_exists(PDO $pdo): bool
         $exists = false;
         if (APP_DEBUG) {
             error_log('event_categories_table_exists failure: ' . $error->getMessage());
+        }
+    }
+    return $exists;
+}
+
+function audit_log_table_exists(PDO $pdo): bool
+{
+    static $exists = null;
+    if ($exists !== null) {
+        return $exists;
+    }
+    try {
+        $pdo->query('SELECT 1 FROM audit_log LIMIT 1');
+        $exists = true;
+    } catch (Throwable $error) {
+        $exists = false;
+        if (APP_DEBUG) {
+            error_log('audit_log_table_exists failure: ' . $error->getMessage());
         }
     }
     return $exists;
@@ -412,6 +448,39 @@ function fetch_event_category_with_count(PDO $pdo, int $id): ?array
         }
         return null;
     }
+}
+
+function fetch_business_settings(): array
+{
+    $settings = [];
+    try {
+        $stmt = Database::run('SELECT setting_key, setting_value FROM business_settings');
+        while ($row = $stmt->fetch()) {
+            $key = $row['setting_key'] ?? null;
+            if ($key === null) {
+                continue;
+            }
+            $settings[$key] = $row['setting_value'];
+        }
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('fetch_business_settings failure: ' . $error->getMessage());
+        }
+    }
+    return $settings;
+}
+
+function decode_settings_json(array $settings, string $key, $default = [])
+{
+    if (!array_key_exists($key, $settings)) {
+        return $default;
+    }
+    $raw = (string) $settings[$key];
+    if (trim($raw) === '') {
+        return $default;
+    }
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) ? $decoded : $default;
 }
 
 function log_admin_session_state(string $message): void
@@ -650,9 +719,7 @@ Notes / Special Requests:
 {$notes}
 TEXT;
 
-    $categorySlug = strtolower(trim((string) ($event['category_slug'] ?? '')));
-    $beachRecipient = (string) Env::get('BEACH_BANDS_EMAIL_TO', 'mmhbeachbands@gmail.com');
-    $staffInbox = $categorySlug === 'beach-bands' ? $beachRecipient : $emailer->staffRecipient();
+    [$staffInbox] = determine_seat_request_recipient($event);
     $staffSubject = 'New Seat Request - ' . $eventTitle;
     $replyTo = $customerEmail !== '' ? $customerEmail : $staffInbox;
 
@@ -685,7 +752,7 @@ Request summary:
 - Notes: {$notes}
 - Phone: {$customerPhoneLine}
 
-Our team will review your request and will follow up with availability and next steps. If you need to update your request, just reply to this email or contact us at {$emailer->staffRecipient()}.
+Our team will review your request and will follow up with availability and next steps. If you need to update your request, just reply to this email or contact us at {$staffInbox}.
 
 Thank you,
 Midway Music Hall
@@ -697,7 +764,7 @@ TEXT;
             'from' => $emailer->notificationsSender(),
             'subject' => 'Seat Request Received - ' . $eventTitle,
             'body' => $customerBody,
-            'reply_to' => $emailer->staffRecipient(),
+            'reply_to' => $staffInbox,
         ]);
     } catch (Throwable $sendError) {
         error_log('[email] Seat request customer confirmation failed: ' . $sendError->getMessage());
@@ -966,13 +1033,81 @@ function seat_request_admin_actor(): string
     return 'admin';
 }
 
+function audit_log_actor(): string
+{
+    $session = current_admin_session();
+    if ($session && isset($session['user'])) {
+        $user = $session['user'];
+        foreach (['display_name', 'username', 'email'] as $field) {
+            if (!empty($user[$field])) {
+                return (string) $user[$field];
+            }
+        }
+    }
+    return seat_request_admin_actor() ?: 'system';
+}
+
+function record_audit(string $action, string $entityType, $entityId = null, array $meta = []): void
+{
+    try {
+        $pdo = Database::connection();
+        if (!audit_log_table_exists($pdo)) {
+            return;
+        }
+        $actor = audit_log_actor();
+        $entityValue = $entityId !== null ? (string) $entityId : null;
+        $metaJson = $meta ? json_encode($meta) : null;
+        $stmt = $pdo->prepare('INSERT INTO audit_log (actor, action, entity_type, entity_id, meta_json) VALUES (?, ?, ?, ?, ?)');
+        $stmt->execute([$actor, $action, $entityType, $entityValue, $metaJson]);
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('record_audit failure: ' . $error->getMessage());
+        }
+    }
+}
+
+/**
+ * Determine which inbox should receive seat request notifications for an event.
+ *
+ * @return array{0:string,1:string} [recipientEmail, source]
+ */
+function determine_seat_request_recipient(array $eventRow): array
+{
+    $emailer = Emailer::instance();
+    $defaultRecipient = $emailer->staffRecipient();
+    $categorySlug = strtolower(trim((string)($eventRow['category_slug'] ?? '')));
+    $eventOverride = trim((string)($eventRow['seat_request_email_override'] ?? ''));
+    if ($eventOverride !== '') {
+        return [$eventOverride, 'event'];
+    }
+    $categoryOverride = trim((string)($eventRow['category_seat_request_email_to'] ?? ''));
+    if ($categoryOverride !== '') {
+        return [$categoryOverride, 'category'];
+    }
+    if ($categorySlug === 'beach-bands') {
+        $beachRecipient = (string) Env::get('BEACH_BANDS_EMAIL_TO', 'mmhbeachbands@gmail.com');
+        return [$beachRecipient, 'category_slug'];
+    }
+    return [$defaultRecipient, 'default'];
+}
+
 function expire_stale_holds(PDO $pdo): void
 {
     $statuses = array_merge(open_seat_request_statuses(), ['hold', 'pending']);
     $placeholders = implode(',', array_fill(0, count($statuses), '?'));
-    $sql = "UPDATE seat_requests SET status = 'expired', change_note = 'auto-expired hold', hold_expires_at = NULL, updated_at = NOW() WHERE status IN ($placeholders) AND hold_expires_at IS NOT NULL AND hold_expires_at < NOW()";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($statuses);
+    $selectSql = "SELECT id FROM seat_requests WHERE status IN ($placeholders) AND hold_expires_at IS NOT NULL AND hold_expires_at < NOW()";
+    $select = $pdo->prepare($selectSql);
+    $select->execute($statuses);
+    $expiredIds = $select->fetchAll(PDO::FETCH_COLUMN);
+    if (!$expiredIds) {
+        return;
+    }
+    $updateSql = "UPDATE seat_requests SET status = 'expired', change_note = 'auto-expired hold', hold_expires_at = NULL, updated_at = NOW() WHERE status IN ($placeholders) AND hold_expires_at IS NOT NULL AND hold_expires_at < NOW()";
+    $update = $pdo->prepare($updateSql);
+    $update->execute($statuses);
+    foreach ($expiredIds as $expiredId) {
+        record_audit('seat_request.expire', 'seat_request', (int) $expiredId);
+    }
 }
 
 function snapshot_layout_version(PDO $pdo, ?int $layoutId, string $changeNote = 'auto-snapshot'): ?int
@@ -1150,10 +1285,10 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
 
     $hasCategoryTable = event_categories_table_exists($pdo);
     if ($hasCategoryTable) {
-        $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, ec.slug AS category_slug FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
+        $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, e.seat_request_email_override, ec.slug AS category_slug, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
         $eventStmt->execute([$eventId]);
     } else {
-        $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone FROM events WHERE id = ? LIMIT 1');
+        $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone, seat_request_email_override FROM events WHERE id = ? LIMIT 1');
         $eventStmt->execute([$eventId]);
     }
     $event = $eventStmt->fetch();
@@ -1238,6 +1373,7 @@ function list_events(Request $request, ?string $scopeOverride = null): array
     $conditions = [];
     $includeDeleted = !empty($request->query['include_deleted']);
     $scope = $scopeOverride ? strtolower($scopeOverride) : strtolower((string)($request->query['scope'] ?? 'admin'));
+    $includeSeriesMasters = $scope !== 'public' && !empty($request->query['include_series_masters']);
     $venue = strtoupper(trim((string)($request->query['venue'] ?? '')));
     $status = strtolower(trim((string)($request->query['status'] ?? '')));
     $limit = (int)($request->query['limit'] ?? 200);
@@ -1256,7 +1392,11 @@ function list_events(Request $request, ?string $scopeOverride = null): array
         $params[] = $venue;
     }
     if ($status) {
-        $conditions[] = 'e.status = ?';
+        if ($includeSeriesMasters) {
+            $conditions[] = '(e.status = ? OR e.is_series_master = 1)';
+        } else {
+            $conditions[] = 'e.status = ?';
+        }
         $params[] = $status;
     }
     if ($hasArchivedColumn) {
@@ -1310,22 +1450,33 @@ function list_events(Request $request, ?string $scopeOverride = null): array
     $categorySelect = '';
     $categoryJoin = '';
     if ($hasCategoryTable) {
-        $categorySelect = ', ec.slug AS category_slug, ec.name AS category_name, ec.is_active AS category_is_active, ec.is_system AS category_is_system';
+        $categorySelect = ', ec.slug AS category_slug, ec.name AS category_name, ec.is_active AS category_is_active, ec.is_system AS category_is_system, ec.seat_request_email_to AS category_seat_request_email_to';
         $categoryJoin = ' LEFT JOIN event_categories ec ON ec.id = e.category_id';
     }
-    $sql = "SELECT e.*{$categorySelect} FROM events e{$categoryJoin} $where $orderBy $limitClause";
+    $recurrenceSelect = ', rr_self.id AS recurrence_rule_id, rr_parent.id AS parent_recurrence_rule_id, rx_skip.id AS skipped_instance_exception_id, rx_skip.exception_date AS skipped_instance_exception_date';
+    $occurrenceDateExpr = "COALESCE(e.event_date, DATE(e.start_datetime))";
+    $recurrenceJoin = ' LEFT JOIN event_recurrence_rules rr_self ON rr_self.event_id = e.id LEFT JOIN event_recurrence_rules rr_parent ON rr_parent.event_id = e.series_master_id LEFT JOIN event_recurrence_exceptions rx_skip ON rx_skip.recurrence_id = rr_parent.id AND rx_skip.exception_type = \'skip\' AND rx_skip.exception_date = ' . $occurrenceDateExpr;
+    $sql = "SELECT e.*{$categorySelect}{$recurrenceSelect} FROM events e{$categoryJoin}{$recurrenceJoin} $where $orderBy $limitClause";
     try {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll() ?: [];
+        if ($scope === 'public' && $rows) {
+            $rows = array_values(array_filter($rows, function ($row) {
+                return empty($row['skipped_instance_exception_id']);
+            }));
+        }
         if ($scope !== 'public') {
+            foreach ($rows as &$row) {
+                [$targetEmail, $targetSource] = determine_seat_request_recipient($row);
+                $row['seat_request_target_email'] = $targetEmail;
+                $row['seat_request_target_source'] = $targetSource;
+                $row['missing_schedule'] = event_missing_schedule_metadata($row);
+            }
+            unset($row);
             $missingIds = [];
             foreach ($rows as $row) {
-                $start = trim((string) ($row['start_datetime'] ?? ''));
-                $date = trim((string) ($row['event_date'] ?? ''));
-                $hasStart = $start !== '' && $start !== '0000-00-00 00:00:00';
-                $hasDate = $date !== '' && $date !== '0000-00-00';
-                if (!$hasStart && !$hasDate) {
+                if (!empty($row['missing_schedule'])) {
                     $missingIds[] = (int) ($row['id'] ?? 0);
                 }
             }
@@ -1610,6 +1761,7 @@ $router->add('POST', '/api/events/:id/archive', function ($request, $params) {
         }
         Database::run('UPDATE events SET status = ?, visibility = ? WHERE id = ?', ['archived', 'private', $targetId]);
     }
+    record_audit('event.archive', 'event', $targetId);
     Response::success(['archived' => true]);
 });
 
@@ -1627,6 +1779,10 @@ $router->add('POST', '/api/events/:id/restore', function (Request $request, $par
         }
         Database::run('UPDATE events SET status = ?, visibility = ? WHERE id = ?', [$status, $visibility, $targetId]);
     }
+    record_audit('event.unarchive', 'event', $targetId, [
+        'status' => $status,
+        'visibility' => $visibility,
+    ]);
     Response::success(['archived' => false]);
 });
 
@@ -1741,7 +1897,7 @@ $router->add('GET', '/api/events/:id', function ($request, $params) {
     $pdo = Database::connection();
     $hasCategoryTable = event_categories_table_exists($pdo);
     if ($hasCategoryTable) {
-        $stmt = $pdo->prepare('SELECT e.*, ec.slug AS category_slug, ec.name AS category_name, ec.is_active AS category_is_active, ec.is_system AS category_is_system FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
+        $stmt = $pdo->prepare('SELECT e.*, ec.slug AS category_slug, ec.name AS category_name, ec.is_active AS category_is_active, ec.is_system AS category_is_system, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
         $stmt->execute([$params['id']]);
     } else {
         $stmt = $pdo->prepare('SELECT * FROM events WHERE id = ? LIMIT 1');
@@ -1750,6 +1906,11 @@ $router->add('GET', '/api/events/:id', function ($request, $params) {
     $event = $stmt->fetch();
     if (!$event) {
         return Response::error('Event not found', 404);
+    }
+    if ($event) {
+        [$targetEmail, $targetSource] = determine_seat_request_recipient($event);
+        $event['seat_request_target_email'] = $targetEmail;
+        $event['seat_request_target_source'] = $targetSource;
     }
     Response::success(['event' => $event]);
 });
@@ -1771,6 +1932,80 @@ $router->add('GET', '/api/event-categories', function () {
     }
 });
 
+$router->add('GET', '/api/audit-log', function (Request $request) {
+    $session = current_admin_session();
+    if (!$session) {
+        return Response::error('Unauthorized', 401);
+    }
+    try {
+        $pdo = Database::connection();
+        if (!audit_log_table_exists($pdo)) {
+            return Response::success(['logs' => []]);
+        }
+        $conditions = [];
+        $params = [];
+        $limit = (int) ($request->query['limit'] ?? 200);
+        $limit = max(1, min($limit, 1000));
+        $action = trim((string) ($request->query['action'] ?? ''));
+        if ($action !== '') {
+            $conditions[] = 'action = ?';
+            $params[] = $action;
+        }
+        $entityType = trim((string) ($request->query['entity_type'] ?? ''));
+        if ($entityType !== '') {
+            $conditions[] = 'entity_type = ?';
+            $params[] = $entityType;
+        }
+        $actor = trim((string) ($request->query['actor'] ?? ''));
+        if ($actor !== '') {
+            $conditions[] = 'actor = ?';
+            $params[] = $actor;
+        }
+        $entityId = trim((string) ($request->query['entity_id'] ?? ''));
+        if ($entityId !== '') {
+            $conditions[] = 'entity_id = ?';
+            $params[] = $entityId;
+        }
+        $dateFrom = trim((string) ($request->query['date_from'] ?? ''));
+        if ($dateFrom !== '') {
+            $conditions[] = 'created_at >= ?';
+            $params[] = $dateFrom;
+        }
+        $dateTo = trim((string) ($request->query['date_to'] ?? ''));
+        if ($dateTo !== '') {
+            $conditions[] = 'created_at <= ?';
+            $params[] = $dateTo;
+        }
+        $where = $conditions ? ('WHERE ' . implode(' AND ', $conditions)) : '';
+        $sql = "SELECT id, actor, action, entity_type, entity_id, meta_json, created_at FROM audit_log $where ORDER BY created_at DESC, id DESC LIMIT $limit";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $logs = [];
+        while ($row = $stmt->fetch()) {
+            $meta = null;
+            if (!empty($row['meta_json'])) {
+                $decoded = json_decode($row['meta_json'], true);
+                $meta = is_array($decoded) ? $decoded : null;
+            }
+            $logs[] = [
+                'id' => (int) $row['id'],
+                'actor' => $row['actor'],
+                'action' => $row['action'],
+                'entity_type' => $row['entity_type'],
+                'entity_id' => $row['entity_id'],
+                'meta' => $meta,
+                'created_at' => $row['created_at'],
+            ];
+        }
+        Response::success(['logs' => $logs]);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('GET /api/audit-log error: ' . $e->getMessage());
+        }
+        Response::error('Failed to fetch audit log', 500);
+    }
+});
+
 $router->add('POST', '/api/event-categories', function (Request $request) {
     try {
         $pdo = Database::connection();
@@ -1786,10 +2021,23 @@ $router->add('POST', '/api/event-categories', function (Request $request) {
         $slugBase = slugify_string($slugInput, 'category');
         $slug = ensure_unique_category_slug($pdo, $slugBase);
         $isActive = array_key_exists('is_active', $payload) ? (!empty($payload['is_active']) ? 1 : 0) : 1;
-        $stmt = $pdo->prepare('INSERT INTO event_categories (name, slug, is_active, is_system) VALUES (?, ?, ?, 0)');
-        $stmt->execute([$name, $slug, $isActive ? 1 : 0]);
+        $seatEmail = null;
+        if (array_key_exists('seat_request_email_to', $payload)) {
+            $rawSeat = trim((string) $payload['seat_request_email_to']);
+            if ($rawSeat !== '' && !filter_var($rawSeat, FILTER_VALIDATE_EMAIL)) {
+                return Response::error('Please enter a valid email address for seat requests.', 422);
+            }
+            $seatEmail = $rawSeat !== '' ? $rawSeat : null;
+        }
+        $stmt = $pdo->prepare('INSERT INTO event_categories (name, slug, is_active, is_system, seat_request_email_to) VALUES (?, ?, ?, 0, ?)');
+        $stmt->execute([$name, $slug, $isActive ? 1 : 0, $seatEmail]);
         $categoryId = (int) $pdo->lastInsertId();
         $category = fetch_event_category_with_count($pdo, $categoryId);
+        record_audit('category.create', 'event_category', $categoryId, [
+            'slug' => $slug,
+            'is_active' => (bool) $isActive,
+            'seat_request_email_to' => $seatEmail,
+        ]);
         Response::success(['category' => $category]);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
@@ -1829,12 +2077,26 @@ $router->add('PUT', '/api/event-categories/:id', function (Request $request, $pa
                 return Response::error('Replacement category not found', 404);
             }
         }
-        $stmt = $pdo->prepare('UPDATE event_categories SET name = ?, is_active = ? WHERE id = ?');
-        $stmt->execute([$name, $targetIsActive ? 1 : 0, $categoryId]);
+        $seatEmail = $category['seat_request_email_to'] ?? null;
+        if (array_key_exists('seat_request_email_to', $payload)) {
+            $rawSeat = trim((string) $payload['seat_request_email_to']);
+            if ($rawSeat !== '' && !filter_var($rawSeat, FILTER_VALIDATE_EMAIL)) {
+                return Response::error('Please enter a valid email address for seat requests.', 422);
+            }
+            $seatEmail = $rawSeat !== '' ? $rawSeat : null;
+        }
+        $stmt = $pdo->prepare('UPDATE event_categories SET name = ?, is_active = ?, seat_request_email_to = ? WHERE id = ?');
+        $stmt->execute([$name, $targetIsActive ? 1 : 0, $seatEmail, $categoryId]);
         if ($replacementId !== null) {
             $pdo->prepare('UPDATE events SET category_id = ? WHERE category_id = ?')->execute([$replacementId, $categoryId]);
         }
         $updated = fetch_event_category_with_count($pdo, $categoryId);
+        record_audit('category.update', 'event_category', $categoryId, [
+            'is_active' => (bool) $targetIsActive,
+            'replacement_id' => $replacementId,
+            'name' => $name,
+            'seat_request_email_to' => $seatEmail,
+        ]);
         Response::success(['category' => $updated]);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
@@ -1905,13 +2167,22 @@ $router->add('POST', '/api/events', function (Request $request) {
             }
         }
 
+        $seatRequestOverride = null;
+        if (array_key_exists('seat_request_email_override', $payload)) {
+            $rawOverride = trim((string) $payload['seat_request_email_override']);
+            if ($rawOverride !== '' && !filter_var($rawOverride, FILTER_VALIDATE_EMAIL)) {
+                return Response::error('seat_request_email_override must be a valid email address.', 422);
+            }
+            $seatRequestOverride = $rawOverride !== '' ? $rawOverride : null;
+        }
+
         $contactPhoneRaw = $payload['contact_phone_raw'] ?? $payload['contact_phone'] ?? null;
         $contactPhoneNormalized = normalize_phone_number($contactPhoneRaw);
         $startString = $startDt ? $startDt->format('Y-m-d H:i:s') : null;
         $endString = $endDt ? $endDt->format('Y-m-d H:i:s') : null;
         $doorTime = $payload['door_time'] ?? null;
         $publishAt = $payload['publish_at'] ?? ($status === 'published' && $startString ? $startString : null);
-        $stmt = $pdo->prepare('INSERT INTO events (artist_name, title, slug, description, notes, genre, category_tags, category_id, image_url, hero_image_id, poster_image_id, ticket_price, door_price, min_ticket_price, max_ticket_price, ticket_type, seating_enabled, venue_code, venue_section, timezone, start_datetime, end_datetime, door_time, event_date, event_time, age_restriction, status, visibility, publish_at, layout_id, layout_version_id, ticket_url, contact_name, contact_phone_raw, contact_phone_normalized, contact_email, change_note, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt = $pdo->prepare('INSERT INTO events (artist_name, title, slug, description, notes, genre, category_tags, category_id, image_url, hero_image_id, poster_image_id, ticket_price, door_price, min_ticket_price, max_ticket_price, ticket_type, seating_enabled, venue_code, venue_section, timezone, start_datetime, end_datetime, door_time, event_date, event_time, age_restriction, status, visibility, publish_at, layout_id, layout_version_id, ticket_url, contact_name, contact_phone_raw, contact_phone_normalized, contact_email, seat_request_email_override, change_note, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $artist,
             $title,
@@ -1949,11 +2220,20 @@ $router->add('POST', '/api/events', function (Request $request) {
             $contactPhoneRaw,
             $contactPhoneNormalized,
             $payload['contact_email'] ?? null,
+            $seatRequestOverride,
             'created via API',
             'api',
             'api'
         ]);
         $id = (int)$pdo->lastInsertId();
+        record_audit('event.create', 'event', $id, [
+            'slug' => $slug,
+            'status' => $status,
+            'visibility' => $visibility,
+            'venue' => $venueCode,
+            'category_id' => $categoryId,
+            'seating_enabled' => (bool) $seatingEnabled,
+        ]);
         Response::success(['id' => $id, 'slug' => $slug]);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
@@ -2033,13 +2313,22 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             }
         }
 
+        $seatRequestOverride = $existing['seat_request_email_override'] ?? null;
+        if (array_key_exists('seat_request_email_override', $payload)) {
+            $rawOverride = trim((string) $payload['seat_request_email_override']);
+            if ($rawOverride !== '' && !filter_var($rawOverride, FILTER_VALIDATE_EMAIL)) {
+                return Response::error('seat_request_email_override must be a valid email address.', 422);
+            }
+            $seatRequestOverride = $rawOverride !== '' ? $rawOverride : null;
+        }
+
         $contactPhoneRaw = $payload['contact_phone_raw'] ?? $payload['contact_phone'] ?? $existing['contact_phone_raw'];
         $contactPhoneNormalized = normalize_phone_number($contactPhoneRaw);
         $startString = $startDt ? $startDt->format('Y-m-d H:i:s') : null;
         $endString = $endDt ? $endDt->format('Y-m-d H:i:s') : null;
         $publishAt = $payload['publish_at'] ?? $existing['publish_at'];
 
-        $stmt = $pdo->prepare('UPDATE events SET artist_name = ?, title = ?, slug = ?, description = ?, notes = ?, genre = ?, category_tags = ?, category_id = ?, image_url = ?, hero_image_id = ?, poster_image_id = ?, ticket_price = ?, door_price = ?, min_ticket_price = ?, max_ticket_price = ?, ticket_type = ?, seating_enabled = ?, venue_code = ?, venue_section = ?, timezone = ?, start_datetime = ?, end_datetime = ?, door_time = ?, event_date = ?, event_time = ?, age_restriction = ?, status = ?, visibility = ?, publish_at = ?, layout_id = ?, layout_version_id = ?, ticket_url = ?, contact_name = ?, contact_phone_raw = ?, contact_phone_normalized = ?, contact_email = ?, change_note = ?, updated_by = ? WHERE id = ?');
+        $stmt = $pdo->prepare('UPDATE events SET artist_name = ?, title = ?, slug = ?, description = ?, notes = ?, genre = ?, category_tags = ?, category_id = ?, image_url = ?, hero_image_id = ?, poster_image_id = ?, ticket_price = ?, door_price = ?, min_ticket_price = ?, max_ticket_price = ?, ticket_type = ?, seating_enabled = ?, venue_code = ?, venue_section = ?, timezone = ?, start_datetime = ?, end_datetime = ?, door_time = ?, event_date = ?, event_time = ?, age_restriction = ?, status = ?, visibility = ?, publish_at = ?, layout_id = ?, layout_version_id = ?, ticket_url = ?, contact_name = ?, contact_phone_raw = ?, contact_phone_normalized = ?, contact_email = ?, seat_request_email_override = ?, change_note = ?, updated_by = ? WHERE id = ?');
         $stmt->execute([
             $artist,
             $title,
@@ -2077,9 +2366,18 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             $contactPhoneRaw,
             $contactPhoneNormalized,
             $payload['contact_email'] ?? $existing['contact_email'],
+            $seatRequestOverride,
             $payload['change_note'] ?? 'updated via API',
             'api',
             $eventId
+        ]);
+        record_audit('event.update', 'event', $eventId, [
+            'slug' => $slug,
+            'status' => $status,
+            'visibility' => $visibility,
+            'venue' => $venueCode,
+            'category_id' => $categoryId,
+            'seating_enabled' => (bool) $seatingEnabled,
         ]);
         Response::success(['id' => $eventId, 'slug' => $slug]);
     } catch (Throwable $e) {
@@ -2104,6 +2402,9 @@ $router->add('DELETE', '/api/events/:id', function (Request $request, $params) {
                 return Response::error('Event not found', 404);
             }
         }
+        record_audit('event.delete', 'event', (int) $params['id'], [
+            'mode' => $force ? 'hard' : 'soft',
+        ]);
         Response::success();
     } catch (Throwable $e) {
         if (APP_DEBUG) {
@@ -2173,6 +2474,14 @@ $router->add('POST', '/api/events/:id/recurrence', function (Request $request, $
             ]);
             $recurrenceId = (int)Database::connection()->lastInsertId();
         }
+        record_audit('recurrence.save', 'event', (int) $params['id'], [
+            'recurrence_id' => $recurrenceId,
+            'frequency' => $frequency,
+            'interval' => $interval,
+            'byweekday' => $byweekday,
+            'starts_on' => $startsOn,
+            'ends_on' => $payload['ends_on'] ?? null,
+        ]);
         Response::success(['recurrence_id' => $recurrenceId]);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
@@ -2185,6 +2494,9 @@ $router->add('POST', '/api/events/:id/recurrence', function (Request $request, $
 $router->add('DELETE', '/api/events/:id/recurrence', function ($request, $params) {
     try {
         $stmt = Database::run('DELETE FROM event_recurrence_rules WHERE event_id = ?', [$params['id']]);
+        if ($stmt->rowCount() > 0) {
+            record_audit('recurrence.delete', 'event', (int) $params['id']);
+        }
         Response::success(['deleted' => $stmt->rowCount()]);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
@@ -2216,7 +2528,13 @@ $router->add('POST', '/api/events/:id/recurrence/exceptions', function (Request 
             $payload['notes'] ?? null,
             'api'
         ]);
-        Response::success(['exception_id' => (int)Database::connection()->lastInsertId()]);
+        $exceptionId = (int)Database::connection()->lastInsertId();
+        record_audit('recurrence.exception.add', 'event', (int) $params['id'], [
+            'exception_id' => $exceptionId,
+            'exception_date' => $exceptionDate,
+            'exception_type' => $type,
+        ]);
+        Response::success(['exception_id' => $exceptionId]);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
             error_log('POST /api/events/:id/recurrence/exceptions error: ' . $e->getMessage());
@@ -2227,10 +2545,17 @@ $router->add('POST', '/api/events/:id/recurrence/exceptions', function (Request 
 
 $router->add('DELETE', '/api/recurrence-exceptions/:id', function ($request, $params) {
     try {
-        $stmt = Database::run('DELETE FROM event_recurrence_exceptions WHERE id = ?', [$params['id']]);
-        if ($stmt->rowCount() === 0) {
+        $fetch = Database::run('SELECT rx.id, rx.recurrence_id, rx.exception_date, rr.event_id FROM event_recurrence_exceptions rx LEFT JOIN event_recurrence_rules rr ON rr.id = rx.recurrence_id WHERE rx.id = ? LIMIT 1', [$params['id']]);
+        $row = $fetch->fetch();
+        if (!$row) {
             return Response::error('Exception not found', 404);
         }
+        Database::run('DELETE FROM event_recurrence_exceptions WHERE id = ?', [$params['id']]);
+        record_audit('recurrence.exception.delete', 'recurrence_exception', (int) $row['id'], [
+            'event_id' => $row['event_id'] ?? null,
+            'recurrence_id' => $row['recurrence_id'] ?? null,
+            'exception_date' => $row['exception_date'] ?? null,
+        ]);
         Response::success();
     } catch (Throwable $e) {
         if (APP_DEBUG) {
@@ -2526,7 +2851,21 @@ $router->add('GET', '/api/seat-requests', function (Request $request) {
             }
         }
         $where = $filters ? ('WHERE ' . implode(' AND ', $filters)) : '';
-        $sql = 'SELECT sr.*, e.title as event_title, e.start_datetime FROM seat_requests sr LEFT JOIN events e ON sr.event_id = e.id ' . $where . ' ORDER BY sr.created_at DESC';
+        $sql = <<<SQL
+SELECT
+    sr.*,
+    e.title AS event_title,
+    e.start_datetime,
+    e.seat_request_email_override,
+    ec.slug AS category_slug,
+    ec.name AS category_name,
+    ec.seat_request_email_to AS category_seat_request_email_to
+FROM seat_requests sr
+LEFT JOIN events e ON sr.event_id = e.id
+LEFT JOIN event_categories ec ON ec.id = e.category_id
+$where
+ORDER BY sr.created_at DESC
+SQL;
         $stmt = $pdo->prepare($sql);
         $stmt->execute($values);
         $requests = [];
@@ -2543,6 +2882,9 @@ $router->add('GET', '/api/seat-requests', function (Request $request) {
             $row['status_raw'] = $row['status'];
             $row['status'] = normalize_seat_request_status($row['status']);
             $row['status_normalized'] = $row['status'];
+            [$targetEmail, $targetSource] = determine_seat_request_recipient($row);
+            $row['seat_request_target_email'] = $targetEmail;
+            $row['seat_request_target_source'] = $targetSource;
             $requests[] = $row;
         }
         Response::success(['requests' => $requests]);
@@ -2571,6 +2913,13 @@ $router->add('POST', '/api/admin/seat-requests', function (Request $request) {
             'allow_status_override' => true,
             'forced_status' => $statusOverride,
         ]);
+        $seatId = (int) ($result['seat_request']['id'] ?? 0);
+        if ($seatId > 0) {
+            record_audit('seat_request.manual_create', 'seat_request', $seatId, [
+                'event_id' => $result['seat_request']['event_id'] ?? null,
+                'status' => $result['seat_request']['status'] ?? null,
+            ]);
+        }
         Response::success($result);
     } catch (SeatRequestException $validationError) {
         Response::error($validationError->getMessage(), $validationError->httpStatus, $validationError->payload);
@@ -2629,6 +2978,9 @@ $router->add('POST', '/api/seat-requests/:id/approve', function ($request, $para
         $pdo->prepare('UPDATE seat_requests SET status = ?, finalized_at = NOW(), hold_expires_at = NULL, updated_at = NOW(), updated_by = ?, change_note = ? WHERE id = ?')
             ->execute(['confirmed', $actor, 'approved via admin', $rid]);
         $pdo->commit();
+        record_audit('seat_request.approve', 'seat_request', $rid, [
+            'seats' => $seats,
+        ]);
         Response::success();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -2650,6 +3002,7 @@ $router->add('POST', '/api/seat-requests/:id/deny', function ($request, $params)
     if ($stmt->rowCount() === 0) {
         return Response::error('Seat request not found', 404);
     }
+    record_audit('seat_request.deny', 'seat_request', (int) $params['id']);
     Response::success();
 });
 
@@ -2700,9 +3053,11 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
         if (!$existing) {
             return Response::error('Seat request not found', 404);
         }
+        $originalStatus = normalize_seat_request_status($existing['status'] ?? 'new');
         $targetStatus = normalize_seat_request_status($existing['status'] ?? 'new');
         $fields = [];
         $values = [];
+        $metaChanges = [];
         if (array_key_exists('status', $payload)) {
             $newStatus = normalize_seat_request_status($payload['status']);
             if (!in_array($newStatus, canonical_seat_request_statuses(), true)) {
@@ -2712,6 +3067,9 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
                 return Response::error('Use the finalize action to confirm seats', 400);
             }
             $targetStatus = $newStatus;
+            if ($newStatus !== $originalStatus) {
+                $metaChanges['status'] = ['from' => $originalStatus, 'to' => $newStatus];
+            }
             $fields[] = 'status = ?';
             $values[] = $newStatus;
             if ($newStatus === 'confirmed') {
@@ -2741,6 +3099,7 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
             $values[] = json_encode($seatList);
             $fields[] = 'total_seats = ?';
             $values[] = count($seatList);
+            $metaChanges['seats'] = count($seatList);
         }
         foreach (['customer_name','customer_email','customer_phone','special_requests','staff_notes'] as $col) {
             if (array_key_exists($col, $payload)) {
@@ -2754,6 +3113,7 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
         }
         if (array_key_exists('hold_expires_at', $payload)) {
             $rawExpiry = $payload['hold_expires_at'];
+            $metaChanges['hold_override'] = true;
             if ($rawExpiry === null || $rawExpiry === '') {
                 $fields[] = 'hold_expires_at = NULL';
             } else {
@@ -2775,6 +3135,9 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
         $sql = 'UPDATE seat_requests SET ' . implode(', ', $fields) . ' WHERE id = ?';
         $stmt = $pdo->prepare($sql);
         $stmt->execute($values);
+        if (!empty($metaChanges)) {
+            record_audit('seat_request.update', 'seat_request', $requestId, $metaChanges);
+        }
         Response::success();
     } catch (Throwable $e) {
         if (APP_DEBUG) {
@@ -2789,6 +3152,7 @@ $router->add('DELETE', '/api/seat-requests/:id', function ($request, $params) {
     if ($stmt->rowCount() === 0) {
         return Response::error('Seat request not found', 404);
     }
+    record_audit('seat_request.delete', 'seat_request', (int) $params['id']);
     Response::success();
 });
 
@@ -3138,11 +3502,7 @@ $router->add('DELETE', '/api/media/:id', function ($request, $params) {
 
 $router->add('GET', '/api/settings', function () {
     try {
-        $stmt = Database::run('SELECT * FROM business_settings');
-        $settings = [];
-        while ($row = $stmt->fetch()) {
-            $settings[$row['setting_key']] = $row['setting_value'];
-        }
+        $settings = fetch_business_settings();
         Response::success(['settings' => $settings]);
     } catch (Throwable $error) {
         if (APP_DEBUG) {
@@ -3152,14 +3512,110 @@ $router->add('GET', '/api/settings', function () {
     }
 });
 
+$router->add('GET', '/api/site-content', function () {
+    try {
+        $settings = fetch_business_settings();
+        $defaultContacts = [
+            [
+                'name' => 'Donna Cheek',
+                'title' => 'Venue Manager',
+                'phone' => '336-793-4218',
+                'email' => 'midwayeventcenter@gmail.com',
+                'notes' => 'Main contact for all events and seat requests.',
+            ],
+            [
+                'name' => 'Sandra Marshall',
+                'title' => 'Beach Music Coordinator',
+                'phone' => '336-223-5570',
+                'email' => 'mmhbeachbands@gmail.com',
+                'notes' => 'Carolina Beach Music Series bookings.',
+            ],
+        ];
+        $defaultLessons = [
+            [
+                'id' => 'line-all-levels',
+                'title' => 'Line Dance Lessons - All Skill Levels',
+                'schedule' => 'Mondays · 5:30 – 7:30 PM',
+                'price' => '$7 / person',
+                'instructor' => 'Jackie Phillips',
+                'phone' => '727-776-1555',
+                'description' => 'High-energy session covering foundations plus new choreography each week.',
+            ],
+            [
+                'id' => 'line-seniors',
+                'title' => 'Line Dance Lessons - 55+ Beginner',
+                'schedule' => 'Wednesdays · 11:00 AM – Noon',
+                'price' => '$7 / person',
+                'instructor' => 'Brenda Holcomb',
+                'phone' => '336-816-5544',
+                'description' => 'Gentle pacing for beginners and seniors who want to get comfortable on the floor.',
+            ],
+            [
+                'id' => 'shag-all-levels',
+                'title' => 'Shag Dance Lessons - All Levels',
+                'schedule' => 'Tuesdays · 6:30 PM',
+                'price' => '$12 / person',
+                'instructor' => 'Vickie Chambers',
+                'phone' => '336-989-0156',
+                'description' => 'Classic beach music shag instruction with individualized coaching.',
+            ],
+        ];
+        $contacts = decode_settings_json($settings, 'site_contacts_json', $defaultContacts);
+        $lessons = decode_settings_json($settings, 'lessons_json', $defaultLessons);
+        $business = [
+            'name' => $settings['business_name'] ?? 'Midway Music Hall',
+            'address' => $settings['business_address'] ?? '11141 Old US Hwy 52, Winston-Salem, NC 27107',
+            'phone' => $settings['business_phone'] ?? '336-793-4218',
+            'email' => $settings['business_email'] ?? 'midwayeventcenter@gmail.com',
+        ];
+        $map = [
+            'address_label' => $settings['map_address_label'] ?? '11141 Old U.S. Hwy 52, Winston-Salem, NC 27107',
+            'subtext' => $settings['map_subtext'] ?? 'Midway Town Center · Exit 100 off Hwy 52',
+            'embed_url' => $settings['map_embed_url'] ?? 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3274.058364949036!2d-80.22422352346647!3d35.99506067241762!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x8853e93a2da3c6f3%3A0x7fe2bff7e76bc3ab!2s11141%20Old%20U.S.%2052%2C%20Winston-Salem%2C%20NC%2027107!5e0!3m2!1sen!2sus!4v1734046800!5m2!1sen!2sus',
+        ];
+        $policies = [
+            'family' => $settings['policy_family_text'] ?? 'Family venue – please keep language respectful.',
+            'refunds' => $settings['policy_refund_text'] ?? 'All ticket sales are final. NO REFUNDS.',
+            'notes' => $settings['policy_additional_text'] ?? '',
+        ];
+        $boxOfficeNote = $settings['box_office_note'] ?? 'Seat reservations are request-only with a 24-hour hold window. Staff will call or text to confirm every request.';
+        $social = [
+            'facebook' => $settings['facebook_url'] ?? 'https://www.facebook.com/midwaymusichall',
+            'instagram' => $settings['instagram_url'] ?? 'https://www.instagram.com/midwaymusichall',
+            'twitter' => $settings['twitter_url'] ?? 'https://twitter.com/midwaymusichall',
+        ];
+        Response::success([
+            'content' => [
+                'business' => $business,
+                'map' => $map,
+                'contacts' => $contacts,
+                'policies' => $policies,
+                'box_office_note' => $boxOfficeNote,
+                'lessons' => $lessons,
+                'social' => $social,
+            ],
+        ]);
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('GET /api/site-content error: ' . $error->getMessage());
+        }
+        Response::error('Failed to fetch site content', 500);
+    }
+});
+
 $router->add('PUT', '/api/settings', function (Request $request) {
     try {
         $payload = read_json_body($request);
+        $changedKeys = [];
         foreach ($payload as $key => $value) {
             Database::run(
                 'INSERT INTO business_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?',
                 [$key, $value, $value]
             );
+            $changedKeys[] = $key;
+        }
+        if ($changedKeys) {
+            record_audit('settings.update', 'settings', null, ['keys' => $changedKeys]);
         }
         Response::success();
     } catch (Throwable $error) {

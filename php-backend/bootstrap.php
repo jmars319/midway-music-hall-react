@@ -68,8 +68,21 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 $requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
-$configuredOrigin = Env::get('CORS_ALLOW_ORIGIN', '*');
-$allowOrigin = $configuredOrigin === '*' && $requestOrigin ? $requestOrigin : $configuredOrigin;
+$configuredOrigins = Env::get('CORS_ALLOW_ORIGINS', Env::get('CORS_ALLOW_ORIGIN', 'https://midwaymusichall.net,http://localhost:3000'));
+$originList = array_values(array_filter(array_map('trim', explode(',', (string) $configuredOrigins))));
+$matchedOrigin = null;
+if ($requestOrigin && $originList) {
+    foreach ($originList as $candidate) {
+        if (strcasecmp($candidate, $requestOrigin) === 0) {
+            $matchedOrigin = $candidate;
+            break;
+        }
+    }
+}
+if (!$matchedOrigin) {
+    $matchedOrigin = $originList[0] ?? '*';
+}
+$allowOrigin = $matchedOrigin ?: '*';
 $sendCredentials = $allowOrigin !== '*';
 header('Access-Control-Allow-Origin: ' . $allowOrigin);
 if ($allowOrigin !== '*') {
