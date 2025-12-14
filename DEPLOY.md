@@ -1,5 +1,7 @@
 # Deployment Guide - Quick Reference
 
+> **Legacy note:** These steps describe the earlier static-only deployment. The live project now uses the `/api` backend plus the root `.htaccess`. Always consult `DEPLOYMENT_GUIDE.md` for the authoritative process; this file remains for historical reference.
+
 Single-page landing deployment to GoDaddy cPanel with Cloudflare SSL.
 
 ## Prerequisites

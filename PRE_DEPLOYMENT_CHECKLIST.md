@@ -1,87 +1,60 @@
-# Pre-Deployment Checklist
+# Midway Music Hall – Pre-Deployment Checklist
 
-## Files to Upload to GoDaddy cPanel
+Use this sheet right before uploading to GoDaddy. All steps assume the site lives in `public_html/midwaymusichall.net/` and the backend resides in `/api`.
 
-### ✅ Required Files (in midway-music-hall-deploy.zip)
-- [ ] index.html
-- [ ] asset-manifest.json
-- [ ] static/css/ folder with CSS files
-- [ ] static/js/ folder with JS files
-- [ ] robots.txt (for SEO)
-- [ ] favicon.svg or favicon.ico
-- [ ] 404.html (optional error page)
+---
 
-### ✅ .htaccess Configuration
-- [ ] Upload `.htaccess-deployment` file
-- [ ] Rename to `.htaccess` in cPanel
-- [ ] Verify file permissions: 644
+## Build + code sanity
+- [ ] `npm install && npm run lint`
+- [ ] `npm run build` (output: `frontend/build/`)
+- [ ] `php -l php-backend/index.php php-backend/bootstrap.php php-backend/lib/Emailer.php`
+- [ ] `.htaccess` (repo root) reviewed – includes HTTPS + `/api` + `/uploads` + SPA fallback
+- [ ] `php-backend/.env.production.example` updated locally with the keys we expect to set in production
 
-### ✅ Cloudflare SSL Setup
-- [ ] Domain added to Cloudflare
-- [ ] Nameservers updated at GoDaddy
-- [ ] DNS records configured (A records for @ and www)
-- [ ] SSL/TLS mode set to "Full" (NOT Flexible)
-- [ ] "Always Use HTTPS" enabled
-- [ ] Auto Minify enabled (CSS, JS, HTML)
+## Files to upload
+- [ ] Copy **contents** of `frontend/build/` into `public_html/midwaymusichall.net/`
+- [ ] Copy entire `php-backend/` folder to `public_html/midwaymusichall.net/api/`
+- [ ] Upload the root `.htaccess` to `public_html/midwaymusichall.net/.htaccess`
+- [ ] Ensure `api/uploads/` exists and permissions allow PHP writes (775)
+- [ ] Confirm no other `.htaccess` files remain in subfolders (avoid conflicts)
 
-### ✅ GoDaddy cPanel Configuration
-- [ ] Files uploaded to `public_html/` directory
-- [ ] Old files removed/backed up
-- [ ] Folder permissions: 755
-- [ ] File permissions: 644
-- [ ] .htaccess is active and readable
+## Environment & safety
+- [ ] Create `public_html/midwaymusichall.net/api/.env` using the production example
+- [ ] Double-check DB host/name/user/password entries
+- [ ] `APP_ENV=production`
+- [ ] `SEND_EMAILS=false` (we only enable after live testing)
+- [ ] `CORS_ALLOW_ORIGIN=https://midwaymusichall.net`
+- [ ] `ADMIN_SESSION_COOKIE_SECURE=true`
+- [ ] Save `.env` with permissions 640 (or equivalent)
 
-### ✅ Testing Checklist
-- [ ] Site loads with HTTPS (green padlock)
-- [ ] HTTP redirects to HTTPS
-- [ ] All sections visible:
-  - [ ] Upcoming Events (Dec 2025)
-  - [ ] Ongoing/Classes
-  - [ ] Beach Bands 2026
-  - [ ] About with contacts
-  - [ ] Location map
-- [ ] Phone links work (tel:)
-- [ ] Email links work (mailto:)
-- [ ] Skip navigation works (Tab key)
-- [ ] Mobile responsive
-- [ ] Page loads under 3 seconds
-- [ ] No console errors
+## Database creation/import (phpMyAdmin)
+- [ ] Create DB + user in cPanel “MySQL Databases” and grant full privileges
+- [ ] In phpMyAdmin → select the new DB → Import `database/20250320_full_seed_nodb.sql`
+- [ ] Run compat migrations from `DB_DEPLOY.md` if phpMyAdmin warns about unsupported clauses
+- [ ] Execute verification queries from `DB_DEPLOY.md` (categories, audit log, recurrence counts)
+- [ ] Update `.env` with the created DB credentials
 
-### ✅ Performance Verification
-- [ ] Run Google PageSpeed Insights
-- [ ] Check SSL Labs (should be A or A+)
-- [ ] Verify Cloudflare caching active
-- [ ] Test from mobile device
+## Cloudflare / DNS
+- [ ] Domain added to Cloudflare, nameservers pointed from GoDaddy
+- [ ] A records (`@`, `www`) → GoDaddy server IP, proxied (orange cloud)
+- [ ] SSL mode set to **Full** (or Full Strict)
+- [ ] “Always Use HTTPS” + “Automatic HTTPS Rewrites” enabled
+- [ ] Brotli + Auto Minify enabled, Rocket Loader disabled
 
-### ✅ DNS Propagation
-- [ ] Check whatsmydns.net for nameserver propagation
-- [ ] Wait 2-24 hours if needed (usually 15-30 minutes)
-- [ ] Clear browser cache and test
+## GoDaddy hosting checks
+- [ ] `public_html/midwaymusichall.net/` contains build output + `api/`
+- [ ] Folder permissions 755; files 644
+- [ ] `.htaccess` visible (enable “show hidden files” in File Manager)
+- [ ] `api/uploads/` is writable
+- [ ] PHP version matches local (8.x) and has required extensions (curl, json, mysqli)
 
-## Missing Something?
+## Final verification before switching DNS / announcing launch
+- [ ] Visit `https://midwaymusichall.net` (or temporary preview URL) – hero + sections load
+- [ ] `/thegatheringplace` renders with correct seating buttons
+- [ ] `/api/health` (or similar endpoint) responds 200 without exposing sensitive info
+- [ ] `/admin` login works; Events, Categories, Site Content, Seat Requests, Audit Log all load
+- [ ] `[email:skip]` entries appear in backend logs when triggering seat-request actions
+- [ ] `robots.txt`, `sitemap.xml`, and `manifest.json` resolve
+- [ ] Run the steps in `DEPLOY_SMOKE_TEST.md` (document each pass/fail)
 
-If the site doesn't load properly:
-
-1. **Check .htaccess**: Ensure it's named correctly (not .htaccess.txt)
-2. **Check Cloudflare SSL**: Must be "Full" not "Flexible"
-3. **Check file permissions**: 755 for folders, 644 for files
-4. **Check DNS**: Verify A records point to correct IP
-5. **Clear cache**: Cloudflare cache + browser cache
-
-## Quick Deploy Command
-
-To rebuild and create fresh deployment package:
-
-```bash
-cd frontend
-REACT_APP_SINGLE_PAGE=true npm run build
-cd build
-zip -r ../midway-music-hall-deploy.zip .
-cd ..
-```
-
-## Support
-
-- Cloudflare: https://community.cloudflare.com/
-- GoDaddy: 480-505-8877
-- GitHub Repo: https://github.com/jmars319/midway-music-hall-react
+If any box remains unchecked, pause deployment and resolve the blocker first. Keep SEND_EMAILS disabled until the team explicitly decides to test live emails.

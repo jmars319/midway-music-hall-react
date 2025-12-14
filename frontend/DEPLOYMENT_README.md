@@ -1,5 +1,7 @@
 # 🚀 Deployment Package Ready
 
+> **Legacy note:** These instructions describe the earlier static-only deployment that used `frontend/.htaccess-deployment`. The project now deploys the React build plus the `/api` backend as documented in `../DEPLOYMENT_GUIDE.md`. Keep this file for historical reference only.
+
 ## Files in This Package
 
 This deployment package (`midway-music-hall-deploy.zip`) contains:

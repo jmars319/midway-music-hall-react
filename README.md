@@ -45,14 +45,16 @@ npm start
 
 ## Deployment
 
-See **`DEPLOYMENT_GUIDE.md`** for complete cPanel/Cloudflare deployment instructions.
+See **`DEPLOYMENT_GUIDE.md`** for the authoritative GoDaddy/Cloudflare steps (includes `/api` backend layout, DB import, and smoke tests).
 
-**Quick Deploy:**
-1. Build: `cd frontend && REACT_APP_SINGLE_PAGE=true npm run build`
-2. Extract: `frontend/midway-music-hall-deploy.zip` (2.9 MB)
-3. Upload to cPanel `public_html/` directory
-4. Copy `frontend/.htaccess-deployment` to `public_html/.htaccess`
-5. Configure Cloudflare SSL (Free plan)
+**Quick Deploy (summary – still read the guide):**
+1. `cd frontend && npm run build`
+2. Upload the **contents** of `frontend/build/` into `public_html/midwaymusichall.net/`
+3. Copy the repo `php-backend/` folder to `public_html/midwaymusichall.net/api/`
+4. Upload the root `.htaccess` into `public_html/midwaymusichall.net/.htaccess`
+5. Create/update `api/.env` (keep `SEND_EMAILS=false` until production testing)
+6. Create/import the database using `database/20250320_full_seed_nodb.sql`
+7. Configure Cloudflare DNS + SSL (Full mode) and run `DEPLOY_SMOKE_TEST.md`
 
 ## Features
 

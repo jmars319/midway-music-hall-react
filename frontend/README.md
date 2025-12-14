@@ -1,5 +1,7 @@
 # Frontend - Midway Music Hall
 
+> **Deployment note:** The production site now uses the `/api` backend layout documented in `../DEPLOYMENT_GUIDE.md`. Always deploy the root `.htaccess`; the old `frontend/.htaccess-deployment` file has been retired.
+
 React application with two modes: single-page landing and full application.
 
 ## Build & Run
@@ -35,7 +37,7 @@ Contains production build with:
 - robots.txt, 404.html
 - Ready for cPanel upload
 
-Copy `.htaccess-deployment` to `.htaccess` on server.
+Use the repository root `.htaccess` at deployment time (already configured for HTTPS, `/api`, and SPA fallback).
 
 ## Key Components
 
@@ -51,4 +53,3 @@ Copy `.htaccess-deployment` to `.htaccess` on server.
 - **Styling:** Tailwind CSS (see `tailwind.config.js`)
 
 See `../DEVELOPER_GUIDE.md` for detailed component architecture.
-

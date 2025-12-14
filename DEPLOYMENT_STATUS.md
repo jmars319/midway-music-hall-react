@@ -1,5 +1,7 @@
 # ✅ Deployment Package Complete - Nothing Missing!
 
+> **Legacy note:** This summary predates the `/api` deployment layout and root `.htaccess` that now ships with the project. For current steps, always follow `DEPLOYMENT_GUIDE.md`, `PRE_DEPLOYMENT_CHECKLIST.md`, and `DB_DEPLOY.md`. Do **not** use `frontend/.htaccess-deployment`; the root `.htaccess` is the single source of truth.
+
 **Date:** November 30, 2025  
 **Status:** READY FOR DEPLOYMENT ✅
 
