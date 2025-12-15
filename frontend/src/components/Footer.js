@@ -14,6 +14,7 @@ export default function Footer({ onAdminClick, onNavigate }){
   const primaryContact = (siteContent.contacts || [])[0];
   const boxOfficeNote = siteContent.box_office_note || 'Seat reservations are request-only with a 24-hour hold window.';
   const social = siteContent.social || {};
+  const reviewLink = (siteContent.review && siteContent.review.google_review_url) || '';
 
   return (
     <footer className="bg-gray-900 border-t border-purple-500/15 text-gray-300 mt-12">
@@ -96,6 +97,11 @@ export default function Footer({ onAdminClick, onNavigate }){
         <div className="mt-8 border-t border-gray-800 pt-6 text-center text-sm text-gray-500 flex flex-col md:flex-row items-center justify-between gap-4">
           <span>© {new Date().getFullYear()} Midway Music Hall - All rights reserved.</span>
           <div className="flex items-center gap-4 text-xs text-gray-400">
+            {reviewLink && (
+              <a href={reviewLink} target="_blank" rel="noopener noreferrer" className="hover:text-purple-300 transition">
+                Leave a Google review
+              </a>
+            )}
             {onAdminClick && (
               <button onClick={onAdminClick} className="hover:text-purple-300 transition">
                 Admin Login

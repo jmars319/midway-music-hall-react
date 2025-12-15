@@ -222,7 +222,9 @@ const transformEvents = (events) => {
 
   const recurringSeriesBase = buildRecurringSeries(masters, decoratedOccurrences, startOfToday);
   const existingRecurringKeys = new Set(recurringSeriesBase.map((series) => series.key));
-  const recurringCandidates = decoratedOccurrences.length ? decoratedOccurrences : decoratedSingles;
+  const recurringCandidates = decoratedOccurrences.length
+    ? [...decoratedOccurrences, ...decoratedSingles]
+    : decoratedSingles;
   const manualRecurring = buildManualRecurringSeries(recurringCandidates, startOfToday, existingRecurringKeys);
   const recurringSeries = [...recurringSeriesBase, ...manualRecurring];
   const recurringEventIds = new Set(

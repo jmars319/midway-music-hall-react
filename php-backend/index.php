@@ -199,6 +199,142 @@ function slugify_string(?string $value, string $fallback = 'event'): string
     return $value !== '' ? $value : $fallback;
 }
 
+function parse_layout_snapshot($snapshot): array
+{
+    if (!$snapshot) {
+        return [];
+    }
+    if (is_array($snapshot)) {
+        return $snapshot;
+    }
+    if (!is_string($snapshot)) {
+        return [];
+    }
+    $decoded = json_decode($snapshot, true);
+    if (is_array($decoded)) {
+        if (isset($decoded[0])) {
+            return $decoded;
+        }
+        if (isset($decoded['layout_data']) && is_array($decoded['layout_data'])) {
+            return $decoded['layout_data'];
+        }
+    }
+    return [];
+}
+
+function normalize_seat_labels_for_row($value): array
+{
+    if ($value === null) {
+        return [];
+    }
+    if (is_string($value)) {
+        $decoded = json_decode($value, true);
+        if (is_array($decoded)) {
+            return normalize_seat_labels_for_row($decoded);
+        }
+        return [];
+    }
+    if (!is_array($value)) {
+        return [];
+    }
+    $normalized = [];
+    foreach ($value as $key => $label) {
+        $trimmed = trim((string)($label ?? ''));
+        if ($trimmed !== '') {
+            $normalized[(string)$key] = $trimmed;
+        }
+    }
+    return $normalized;
+}
+
+function seat_row_is_interactive(array $row): bool
+{
+    $type = strtolower((string)($row['element_type'] ?? $row['elementType'] ?? 'table'));
+    return $type === 'table' || $type === 'chair';
+}
+
+function build_seat_id_for_row(array $row, int $seatNumber): string
+{
+    $section = trim((string)($row['section_name'] ?? $row['section'] ?? 'Section'));
+    $rowLabel = trim((string)($row['row_label'] ?? $row['row'] ?? 'Row'));
+    $sectionPart = $section !== '' ? $section : 'Section';
+    $rowPart = $rowLabel !== '' ? $rowLabel : 'Row';
+    return $sectionPart . '-' . $rowPart . '-' . $seatNumber;
+}
+
+function build_default_seat_label(array $row, int $seatNumber): string
+{
+    $base = $row['row_label'] ?? $row['row'] ?? 'Row';
+    $totalSeats = isset($row['total_seats']) ? (int) $row['total_seats'] : 0;
+    if ($totalSeats <= 1) {
+        return $base !== '' ? $base : 'Row';
+    }
+    $index = max(0, $seatNumber - 1);
+    $alphabetSize = 26;
+    if ($index < $alphabetSize) {
+        return ($base ?: 'Row') . chr(65 + $index);
+    }
+    $repeat = intdiv($index, $alphabetSize) + 1;
+    $remainder = $index % $alphabetSize;
+    return ($base ?: 'Row') . str_repeat(chr(65 + $remainder), $repeat);
+}
+
+function build_seat_label_for_row(array $row, int $seatNumber): string
+{
+    $labels = normalize_seat_labels_for_row($row['seat_labels'] ?? $row['seatLabels'] ?? null);
+    if (isset($labels[(string)$seatNumber])) {
+        return $labels[(string)$seatNumber];
+    }
+    return build_default_seat_label($row, $seatNumber);
+}
+
+function build_seat_label_map_from_rows(array $rows): array
+{
+    $map = [];
+    foreach ($rows as $row) {
+        if (!is_array($row) || !seat_row_is_interactive($row)) {
+            continue;
+        }
+        $total = (int)($row['total_seats'] ?? 0);
+        if ($total <= 0) {
+            continue;
+        }
+        for ($i = 1; $i <= $total; $i++) {
+            $seatId = build_seat_id_for_row($row, $i);
+            $map[$seatId] = build_seat_label_for_row($row, $i);
+        }
+    }
+    return $map;
+}
+
+function describe_seat_display(string $seatId, ?string $label = null): string
+{
+    if (!$label || trim($label) === '' || $label === $seatId) {
+        return $seatId;
+    }
+    return $label . ' (' . $seatId . ')';
+}
+
+function build_display_seat_list(array $seatRequest): array
+{
+    $seats = parse_selected_seats($seatRequest['selected_seats'] ?? []);
+    if (!$seats) {
+        return [];
+    }
+    if (!empty($seatRequest['seat_display_labels']) && is_array($seatRequest['seat_display_labels'])) {
+        return $seatRequest['seat_display_labels'];
+    }
+    $rows = parse_layout_snapshot($seatRequest['seat_map_snapshot'] ?? null);
+    if (!$rows) {
+        return $seats;
+    }
+    $labels = build_seat_label_map_from_rows($rows);
+    return array_map(function ($seatId) use ($labels) {
+        $label = $labels[$seatId] ?? null;
+        return describe_seat_display($seatId, $label);
+    }, $seats);
+}
+
 function normalize_phone_number($value): ?string
 {
     if ($value === null) {
@@ -676,9 +812,9 @@ function notify_seat_request_emails(array $seatRequest, array $event): void
     }
     $timestamp = format_datetime_eastern(now_eastern());
     $eventDate = format_event_datetime_for_email($event);
-    $seatList = decode_seat_list($seatRequest['selected_seats'] ?? []);
+    $seatList = build_display_seat_list($seatRequest);
     $seatCount = count($seatList);
-    $seatSummary = $seatList ? implode(', ', $seatList) : 'None provided';
+    $seatSummary = $seatCount ? implode(', ', $seatList) : 'None provided';
     $notes = trim((string) ($seatRequest['special_requests'] ?? ''));
     $notes = $notes !== '' ? $notes : 'None provided';
     $holdExpiresLine = '';
@@ -1355,6 +1491,9 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
     $createdStmt = $pdo->prepare('SELECT * FROM seat_requests WHERE id = ? LIMIT 1');
     $createdStmt->execute([$id]);
     $created = $createdStmt->fetch() ?: ['id' => $id];
+    if ($created) {
+        $created['seat_display_labels'] = build_display_seat_list($created);
+    }
     try {
         notify_seat_request_emails($created, $event);
     } catch (Throwable $notifyError) {
@@ -2885,6 +3024,7 @@ SQL;
             [$targetEmail, $targetSource] = determine_seat_request_recipient($row);
             $row['seat_request_target_email'] = $targetEmail;
             $row['seat_request_target_source'] = $targetSource;
+            $row['seat_display_labels'] = build_display_seat_list($row);
             $requests[] = $row;
         }
         Response::success(['requests' => $requests]);
@@ -3584,6 +3724,9 @@ $router->add('GET', '/api/site-content', function () {
             'instagram' => $settings['instagram_url'] ?? 'https://www.instagram.com/midwaymusichall',
             'twitter' => $settings['twitter_url'] ?? 'https://twitter.com/midwaymusichall',
         ];
+        $review = [
+            'google_review_url' => $settings['google_review_url'] ?? '',
+        ];
         Response::success([
             'content' => [
                 'business' => $business,
@@ -3593,6 +3736,7 @@ $router->add('GET', '/api/site-content', function () {
                 'box_office_note' => $boxOfficeNote,
                 'lessons' => $lessons,
                 'social' => $social,
+                'review' => $review,
             ],
         ]);
     } catch (Throwable $error) {

@@ -1,6 +1,11 @@
 import React from 'react';
 import { Users } from 'lucide-react';
 import { seatingStatusClasses } from '../utils/seatingTheme';
+import { buildSeatId, buildSeatLabel } from '../utils/seatLabelUtils';
+
+const shapeAliases = {
+  'table-8-rect': 'table-8',
+};
 
 // Helper to get seat styling based on type
 const seatTypeClass = (type) => {
@@ -38,6 +43,7 @@ export default function TableComponent({
   reservedSeats = []
 }) {
   const shape = tableShape || row.table_shape || row.seat_type || 'table-6';
+  const normalizedShape = shapeAliases[shape] || shape;
   
   // Parse reserved seats from DB
   const reservedList = (() => {
@@ -66,18 +72,11 @@ export default function TableComponent({
     return `absolute flex items-center justify-center rounded-full ${classes}`;
   };
 
-  // Generate seat label (AA, AB, AC, etc.)
-  const getSeatLabel = (seatNum) => {
-    const rowLabel = row.row_label || 'A';
-    // Convert number to letter: 1->A, 2->B, etc.
-    const letter = String.fromCharCode(64 + seatNum); // 65 is 'A'
-    return `${rowLabel}${letter}`;
-  };
-
   // Render individual seat
   const renderSeat = (seatNum, x, y, seatSize) => {
-    const seatId = `${row.section_name || row.section}-${row.row_label}-${seatNum}`;
-    const seatLabel = getSeatLabel(seatNum);
+    const seatId = buildSeatId(row, seatNum);
+    const seatLabel = buildSeatLabel(row, seatNum);
+    const displayLabel = seatLabel.length > 4 ? seatLabel.slice(0, 4) : seatLabel;
     const classes = getSeatClasses(seatId);
     const style = { 
       left: x, 
@@ -98,14 +97,14 @@ export default function TableComponent({
           disabled={getSeatStatus(seatId).isReserved}
           title={seatLabel}
         >
-          <span className="text-[8px] font-bold">{seatLabel}</span>
+          <span className="text-[9px] font-bold" style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)' }}>{displayLabel}</span>
         </button>
       );
     }
     
     return (
       <div key={seatId} className={classes} style={style} title={seatLabel}>
-        <span className="text-[8px] font-bold">{seatLabel}</span>
+        <span className="text-[9px] font-bold" style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)' }}>{displayLabel}</span>
       </div>
     );
   };
@@ -135,7 +134,7 @@ export default function TableComponent({
   };
 
   // TABLE-2: Two seats opposite each other
-  if (shape === 'table-2') {
+  if (normalizedShape === 'table-2') {
     const seatSize = Math.floor(size * 0.32);
     const gap = Math.floor(size * 0.05);
     return (
@@ -148,7 +147,7 @@ export default function TableComponent({
   }
 
   // TABLE-4: Two on each side (rectangular)
-  if (shape === 'table-4') {
+  if (normalizedShape === 'table-4') {
     const seatSize = Math.floor(size * 0.28);
     const gap = Math.floor(size * 0.05);
     const topY = gap + seatSize / 2;
@@ -168,7 +167,7 @@ export default function TableComponent({
   }
 
   // TABLE-6: Three on each side (rectangular) - DEFAULT
-  if (shape === 'table-6' || shape === 'table6') {
+  if (normalizedShape === 'table-6' || normalizedShape === 'table6') {
     const seatSize = Math.min(28, Math.floor(size * 0.28));
     const gap = Math.max(4, Math.floor(size * 0.04));
     const topY = Math.max(seatSize / 2 + gap, Math.floor(size * 0.18));
@@ -185,24 +184,27 @@ export default function TableComponent({
   }
 
   // TABLE-8: Four on each side
-  if (shape === 'table-8') {
+  if (normalizedShape === 'table-8') {
+    const isLegacyRect = shape === 'table-8-rect';
     const seatSize = Math.floor(size * 0.22);
     const gap = Math.floor(size * 0.03);
+    const widthFactor = isLegacyRect ? 1.35 : 1.2;
+    const tableWidth = size * widthFactor;
+    const startX = (tableWidth - (4 * seatSize) - (3 * gap)) / 2 + seatSize / 2;
     const topY = gap + seatSize / 2;
     const bottomY = size - topY;
-    const startX = (size - (4 * seatSize) - (3 * gap)) / 2 + seatSize / 2;
 
     return (
-      <div style={{ width: size * 1.2, height: size, position: 'relative' }}>
-        {renderTableCenter(size * 0.8, size * 0.35, 'Table')}
-        {[0, 1, 2, 3].map(i => renderSeat(i + 1, startX + i * (seatSize + gap), topY, seatSize))}
-        {[0, 1, 2, 3].map(i => renderSeat(i + 5, startX + i * (seatSize + gap), bottomY, seatSize))}
+      <div style={{ width: tableWidth, height: size, position: 'relative' }}>
+        {renderTableCenter(tableWidth * 0.6, size * 0.35, 'Table')}
+        {[0, 1, 2, 3].map((i) => renderSeat(i + 1, startX + i * (seatSize + gap), topY, seatSize))}
+        {[0, 1, 2, 3].map((i) => renderSeat(i + 5, startX + i * (seatSize + gap), bottomY, seatSize))}
       </div>
     );
   }
 
-  if (shape === 'chair') {
-    const seatSize = Math.max(26, Math.floor(size * 0.5));
+  if (normalizedShape === 'chair') {
+    const seatSize = Math.max(28, Math.floor(size * 0.55));
     return (
       <div style={{ width: size, height: size, position: 'relative' }}>
         {renderSeat(1, size / 2, size / 2, seatSize)}
@@ -211,7 +213,7 @@ export default function TableComponent({
   }
 
   // ROUND-6: Six seats in circle
-  if (shape === 'round-6') {
+  if (normalizedShape === 'round-6') {
     const center = size / 2;
     const seatSize = Math.floor(size * 0.28);
     const radius = size * 0.38;
@@ -231,7 +233,7 @@ export default function TableComponent({
   }
 
   // ROUND-8: Eight seats in circle
-  if (shape === 'round-8') {
+  if (normalizedShape === 'round-8') {
     const center = size / 2;
     const seatSize = Math.floor(size * 0.24);
     const radius = size * 0.4;
@@ -251,7 +253,7 @@ export default function TableComponent({
   }
 
   // BAR-6: Six seats in a row (bar seating)
-  if (shape === 'bar-6') {
+  if (normalizedShape === 'bar-6') {
     const seatSize = Math.floor(size * 0.28);
     const gap = Math.floor(size * 0.04);
     const startX = (size * 2 - (6 * seatSize) - (5 * gap)) / 2 + seatSize / 2;
@@ -282,7 +284,7 @@ export default function TableComponent({
   }
 
   // BOOTH-4: Four seats, two facing two (booth style)
-  if (shape === 'booth-4') {
+  if (normalizedShape === 'booth-4') {
     const seatSize = Math.floor(size * 0.28);
     const gap = Math.floor(size * 0.08);
     const topY = gap + seatSize / 2;
@@ -302,8 +304,8 @@ export default function TableComponent({
   }
 
   // STANDING-10: Standing room section (visualized as grouped people icons)
-  if (shape.startsWith('standing-')) {
-    const count = parseInt(shape.split('-')[1]) || 10;
+  if (String(normalizedShape).startsWith('standing-')) {
+    const count = parseInt(normalizedShape.split('-')[1], 10) || 10;
     const cols = Math.ceil(Math.sqrt(count));
     const rows = Math.ceil(count / cols);
     const iconSize = Math.floor(size / Math.max(cols, rows) * 0.7);

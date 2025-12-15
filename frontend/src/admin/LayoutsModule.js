@@ -3,6 +3,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Plus, Edit, Trash2, Star, Eye, Copy, Save, X, ZoomIn, ZoomOut, RotateCcw, Move, Shapes } from 'lucide-react';
 import { API_BASE } from '../App';
 import TableComponent from '../components/TableComponent';
+import SeatingChart from '../components/SeatingChart';
+import { buildSeatLabel, normalizeSeatLabels, resolveRowHeaderLabels } from '../utils/seatLabelUtils';
 
 const isDevBuild = process.env.NODE_ENV !== 'production';
 
@@ -27,6 +29,15 @@ const tableShapes = [
   { value: 'standing-20', label: 'Standing (20)', seats: 20 }
 ];
 
+const TABLE_SHAPE_ALIASES = {
+  'table-8-rect': 'table-8',
+};
+
+const normalizeTableShapeValue = (shape) => {
+  if (!shape) return shape;
+  return TABLE_SHAPE_ALIASES[shape] || shape;
+};
+
 const canvasPresets = [
   { key: 'standard', label: 'Standard (120′ × 80′)', width: 1200, height: 800 },
   { key: 'wide', label: 'Wide Room (150′ × 90′)', width: 1500, height: 900 },
@@ -35,6 +46,7 @@ const canvasPresets = [
 
 const quickObjects = [
   { key: 'rect-6', label: 'Rect Table (6)', element_type: 'table', table_shape: 'table-6', total_seats: 6, seat_type: 'general' },
+  { key: 'rect-8', label: 'Rect Table (8)', element_type: 'table', table_shape: 'table-8', total_seats: 8, seat_type: 'general' },
   { key: 'round-8', label: 'Round Table (8)', element_type: 'table', table_shape: 'round-8', total_seats: 8, seat_type: 'general' },
   { key: 'chair', label: 'Single Chair', element_type: 'chair', table_shape: 'chair', total_seats: 1, seat_type: 'general' },
   { key: 'dance-floor', label: 'Dance Floor', element_type: 'area', width: 320, height: 220, color: '#f97316' },
@@ -139,7 +151,9 @@ export default function LayoutsModule() {
           element_type: r.element_type || (r.table_shape || r.total_seats ? 'table' : 'marker'),
           width: r.width || r.marker_width || r.size || (r.element_type === 'chair' ? 60 : 160),
           height: r.height || r.marker_height || r.size || 120,
-          label: r.label || r.marker_label || r.section_name || ''
+          label: r.label || r.marker_label || r.section_name || '',
+          seat_labels: normalizeSeatLabels(r.seat_labels || r.seatLabels || null),
+          table_shape: normalizeTableShapeValue(r.table_shape || null)
         }))
       : [];
     setLayoutRows(rows);
@@ -284,7 +298,8 @@ export default function LayoutsModule() {
       total_seats: shape ? shape.seats : rowForm.total_seats,
       pos_x: rowForm.pos_x,
       pos_y: rowForm.pos_y,
-      rotation: rowForm.rotation
+      rotation: rowForm.rotation,
+      seat_labels: {}
     };
     setLayoutRows([...layoutRows, newRow]);
     setSelectedRowId(newRow.id);
@@ -308,7 +323,7 @@ export default function LayoutsModule() {
       section_name: template.element_type === 'table' ? template.label : template.label,
       row_label: template.element_type === 'table' ? `Row ${layoutRows.length + 1}` : '',
       seat_type: template.seat_type || 'general',
-      table_shape: template.table_shape || null,
+      table_shape: normalizeTableShapeValue(template.table_shape || null),
       total_seats: typeof template.total_seats === 'number' ? template.total_seats : 0,
       pos_x: 50,
       pos_y: 50,
@@ -316,7 +331,8 @@ export default function LayoutsModule() {
       label: template.label,
       color: template.color || '#4b5563',
       width: template.width || 140,
-      height: template.height || 120
+      height: template.height || 120,
+      seat_labels: template.element_type === 'table' ? {} : undefined
     };
     setLayoutRows([...layoutRows, newRow]);
     setSelectedRowId(newRow.id);
@@ -334,6 +350,20 @@ export default function LayoutsModule() {
     setLayoutRows(prev => prev.map(row => (
       row.id === rowId ? { ...row, ...updates } : row
     )));
+  };
+
+  const updateSeatLabel = (rowId, seatNumber, value) => {
+    setLayoutRows((prev) => prev.map((row) => {
+      if (row.id !== rowId) return row;
+      const labels = { ...(row.seat_labels || {}) };
+      const key = String(seatNumber);
+      if (!value || !value.trim()) {
+        delete labels[key];
+      } else {
+        labels[key] = value;
+      }
+      return { ...row, seat_labels: labels };
+    }));
   };
 
   const handleRowDragStart = (e, row) => {
@@ -816,70 +846,16 @@ export default function LayoutsModule() {
 
             <div className="bg-gray-100 dark:bg-gray-900 rounded-lg p-6">
               <h4 className="font-semibold mb-4">Layout Preview:</h4>
-              {Array.isArray(showPreview.layout_data) && showPreview.layout_data.length > 0 ? (
-                <div className="relative bg-gray-50 dark:bg-gray-800 rounded-lg p-8 min-h-[400px] border-2 border-dashed border-gray-300 dark:border-gray-600">
-                  {/* Stage indicator */}
-                  <div className="absolute top-2 left-1/2 transform -translate-x-1/2 bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 px-6 py-2 rounded-lg font-semibold text-sm shadow-md">
-                    STAGE
-                  </div>
-                  
-                  {/* Render all tables/rows */}
-                  <div className="mt-16 space-y-6">
-                    {showPreview.layout_data.map((row, idx) => {
-                      const type = row.element_type || 'table';
-                      if (type !== 'table' && type !== 'chair') {
-                        return (
-                          <div
-                            key={`preview-${idx}`}
-                            className="absolute rounded-lg"
-                            style={{
-                              left: row.pos_x ? `${row.pos_x}%` : 'auto',
-                              top: row.pos_y ? `${row.pos_y}%` : 'auto',
-                              transform: 'translate(-50%, -50%)',
-                              width: row.width || 160,
-                              height: row.height || 120,
-                              backgroundColor: row.color || '#4b5563',
-                              opacity: 0.8
-                            }}
-                          >
-                            <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white text-center px-2">
-                              {row.label || row.section_name || 'Marker'}
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div 
-                          key={idx} 
-                          className="absolute"
-                          style={{
-                            left: row.pos_x ? `${row.pos_x}%` : 'auto',
-                            top: row.pos_y ? `${row.pos_y}%` : 'auto',
-                            transform: 'translate(-50%, -50%)'
-                          }}
-                        >
-                          <div className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400 text-center">
-                            {row.section_name || row.section} - Row {row.row_label}
-                          </div>
-                          <div style={{ transform: row.rotation ? `rotate(${row.rotation}deg)` : 'none' }}>
-                            <TableComponent
-                              row={row}
-                              tableShape={row.table_shape || (type === 'chair' ? 'chair' : 'table-6')}
-                              selectedSeats={[]}
-                              pendingSeats={[]}
-                              onToggleSeat={() => {}}
-                              interactive={false}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-gray-500 dark:text-gray-400">No rows configured yet.</p>
-              )}
+              <SeatingChart
+                seatingConfig={Array.isArray(showPreview.layout_data) ? showPreview.layout_data : []}
+                interactive={false}
+                autoFetch={false}
+                showLegend={false}
+                showHeader={false}
+                stagePosition={showPreview.stage_position || null}
+                stageSize={showPreview.stage_size || null}
+                canvasSettings={showPreview.canvas_settings || null}
+              />
             </div>
 
             <div className="mt-6 flex justify-end">
@@ -1053,6 +1029,11 @@ export default function LayoutsModule() {
                     transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
                   }}
                 >
+                  <div
+                    className="absolute inset-0 rounded-[40px] border border-purple-500/30 pointer-events-none"
+                    style={{ boxShadow: 'inset 0 0 50px rgba(0,0,0,0.6)' }}
+                    aria-hidden="true"
+                  />
                   {/* Stage Ghost Preview */}
                   {stageGhostPosition && draggingStage && (
                     <div
@@ -1118,8 +1099,16 @@ export default function LayoutsModule() {
                         opacity: 0.5
                       }}
                     >
-                      <div className="mb-1 text-xs font-medium text-purple-600 dark:text-purple-400 text-center">
-                        {draggingRow.section_name} - {draggingRow.row_label}
+                      <div className="mb-1 text-xs font-medium text-purple-600 dark:text-purple-400 text-center flex flex-col gap-0.5">
+                        {(() => {
+                          const ghostLabels = resolveRowHeaderLabels(draggingRow);
+                          return (
+                            <>
+                              {ghostLabels.sectionLabel && <span>{ghostLabels.sectionLabel}</span>}
+                              {ghostLabels.rowLabel && <span className="font-semibold text-purple-700 dark:text-purple-100">{ghostLabels.rowLabel}</span>}
+                            </>
+                          );
+                        })()}
                       </div>
                       <div 
                         className="border-4 border-dashed border-purple-500 rounded-lg bg-purple-200 dark:bg-purple-900/30"
@@ -1144,12 +1133,12 @@ export default function LayoutsModule() {
                     const baseStyle = {
                       left: `${row.pos_x}%`,
                       top: `${row.pos_y}%`,
-                      transform: 'translate(-50%, -50%)',
                     };
 
                     if (type !== 'table' && type !== 'chair') {
                       const markerWidth = row.width || 160;
                       const markerHeight = row.height || 120;
+                      const rotation = row.rotation || 0;
                       return (
                         <div
                           key={row.id}
@@ -1157,7 +1146,7 @@ export default function LayoutsModule() {
                           onDragStart={(e) => handleRowDragStart(e, row)}
                           onClick={() => setSelectedRowId(row.id)}
                           className={`absolute cursor-move ${isSelected ? 'ring-2 ring-purple-400' : 'hover:ring-2 hover:ring-purple-500'} rounded-lg`}
-                          style={baseStyle}
+                          style={{ ...baseStyle, transform: `translate(-50%, -50%) rotate(${rotation}deg)` }}
                         >
                           <div
                             className="rounded-lg shadow-lg flex items-center justify-center text-xs font-semibold text-gray-900 dark:text-white"
@@ -1170,15 +1159,27 @@ export default function LayoutsModule() {
                             }}
                           >
                             <span>{row.label || row.section_name || 'Marker'}</span>
-                            {type === 'area' && (
-                              <div
-                                onMouseDown={(e) => handleMarkerResizeStart(e, row.id)}
-                                className="absolute -bottom-2 -right-2 w-4 h-4 bg-white dark:bg-gray-900 border border-gray-400 rounded-full cursor-se-resize"
-                                title="Resize"
-                              />
-                            )}
+                            <div
+                              onMouseDown={(e) => handleMarkerResizeStart(e, row.id)}
+                              className="absolute -bottom-2 -right-2 w-4 h-4 bg-white dark:bg-gray-900 border border-gray-400 rounded-full cursor-se-resize"
+                              title="Resize"
+                            />
                           </div>
                           <div className="mt-1 flex justify-center gap-1">
+                            <button
+                              onClick={() => handleRotateRow(row.id, -15)}
+                              className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
+                              title="Rotate -15°"
+                            >
+                              ↶
+                            </button>
+                            <button
+                              onClick={() => handleRotateRow(row.id, 15)}
+                              className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
+                              title="Rotate +15°"
+                            >
+                              ↷
+                            </button>
                             <button
                               onClick={() => handleDeleteRow(row.id)}
                               className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
@@ -1190,6 +1191,9 @@ export default function LayoutsModule() {
                       );
                     }
 
+                    const isChairRow = type === 'chair';
+                    const containerWidth = row.width || (isChairRow ? 60 : 120);
+                    const containerHeight = row.height || (isChairRow ? 60 : 120);
                     return (
                       <div
                         key={row.id}
@@ -1197,11 +1201,34 @@ export default function LayoutsModule() {
                         onDragStart={(e) => handleRowDragStart(e, row)}
                         onClick={() => setSelectedRowId(row.id)}
                         className={`absolute cursor-move rounded ${isSelected ? 'ring-2 ring-purple-400' : 'hover:ring-2 hover:ring-purple-500'}`}
-                        style={{ ...baseStyle, padding: '40px 20px', minWidth: '120px', minHeight: '120px' }}
+                        style={{
+                          ...baseStyle,
+                          transform: 'translate(-50%, -50%)',
+                          padding: isChairRow ? '16px 10px' : '40px 20px',
+                          minWidth: `${containerWidth}px`,
+                          minHeight: `${containerHeight}px`,
+                        }}
                       >
-                        <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-xs font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap z-20">
-                          {row.section_name} - {row.row_label}
-                        </div>
+                        {(() => {
+                          const headerLabels = resolveRowHeaderLabels(row);
+                          if (!headerLabels.sectionLabel && !headerLabels.rowLabel) {
+                            return null;
+                          }
+                          return (
+                            <div className="absolute -top-6 left-1/2 flex flex-col items-center gap-0.5 -translate-x-1/2 text-center text-white pointer-events-none z-20">
+                              {headerLabels.sectionLabel && (
+                                <span className="text-[10px] tracking-[0.2em] text-gray-200 bg-black/30 px-2 py-0.5 rounded-full">
+                                  {headerLabels.sectionLabel.toUpperCase()}
+                                </span>
+                              )}
+                              {headerLabels.rowLabel && (
+                                <span className="text-xs font-semibold bg-black/70 px-2 py-0.5 rounded-full shadow">
+                                  {headerLabels.rowLabel}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                         <div className="flex items-center justify-center" style={{ minHeight: '60px' }}>
                           <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
                             <TableComponent
@@ -1379,6 +1406,38 @@ export default function LayoutsModule() {
                                   className="w-full px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded"
                                 />
                               </div>
+                              {row.total_seats ? (
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <label className="block text-xs">Seat Labels</label>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateRow(row.id, { seat_labels: {} })}
+                                      className="text-[11px] text-purple-400 hover:text-purple-200"
+                                    >
+                                      Reset
+                                    </button>
+                                  </div>
+                                  <div className="max-h-40 overflow-y-auto border border-gray-700 rounded-lg p-2 space-y-2 bg-gray-900">
+                                    {Array.from({ length: row.total_seats }, (_, idx) => {
+                                      const seatNumber = idx + 1;
+                                      const labels = row.seat_labels || {};
+                                      const current = labels[seatNumber] || labels[String(seatNumber)] || '';
+                                      return (
+                                        <div key={`${row.id}-seat-${seatNumber}`} className="flex items-center gap-2">
+                                          <span className="w-16 text-xs text-gray-400">Seat {seatNumber}</span>
+                                          <input
+                                            value={current}
+                                            placeholder={buildSeatLabel(row, seatNumber)}
+                                            onChange={(e) => updateSeatLabel(row.id, seatNumber, e.target.value)}
+                                            className="flex-1 px-2 py-1 bg-gray-800 text-white border border-gray-700 rounded text-xs"
+                                          />
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ) : null}
                             </>
                           )}
                           {type !== 'table' && (

@@ -69,10 +69,31 @@ const DEFAULT_CONTENT = {
     instagram: 'https://www.instagram.com/midwaymusichall',
     twitter: 'https://twitter.com/midwaymusichall',
   },
+  review: {
+    google_review_url: '',
+  },
 };
 
 let cachedContent = null;
 let pendingRequest = null;
+
+const fetchSiteContent = () => {
+  if (!pendingRequest) {
+    pendingRequest = fetch(`${API_BASE}/site-content`)
+      .then((res) => res.json())
+      .then((data) => (data && data.success && data.content ? data.content : DEFAULT_CONTENT))
+      .catch(() => DEFAULT_CONTENT)
+      .finally(() => {
+        pendingRequest = null;
+      });
+  }
+  return pendingRequest;
+};
+
+export const invalidateSiteContentCache = () => {
+  cachedContent = null;
+  pendingRequest = null;
+};
 
 export default function useSiteContent() {
   const [content, setContent] = useState(cachedContent || DEFAULT_CONTENT);
@@ -80,21 +101,7 @@ export default function useSiteContent() {
 
   useEffect(() => {
     let cancelled = false;
-    if (cachedContent) {
-      return () => {
-        cancelled = true;
-      };
-    }
-    if (!pendingRequest) {
-      pendingRequest = fetch(`${API_BASE}/site-content`)
-        .then((res) => res.json())
-        .then((data) => (data && data.success && data.content ? data.content : DEFAULT_CONTENT))
-        .catch(() => DEFAULT_CONTENT)
-        .finally(() => {
-          pendingRequest = null;
-        });
-    }
-    pendingRequest.then((data) => {
+    fetchSiteContent().then((data) => {
       if (cancelled) return;
       cachedContent = data || DEFAULT_CONTENT;
       setContent(cachedContent);

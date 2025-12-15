@@ -4,6 +4,7 @@ import TableComponent, { isSeatReserved } from './TableComponent';
 import { API_BASE } from '../App';
 import { seatingLegendSwatches, seatingStatusLabels } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
+import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/seatLabelUtils';
 
 export default function EventSeatingModal({ event, onClose }) {
   const [seatingConfig, setSeatingConfig] = useState([]);
@@ -38,12 +39,10 @@ export default function EventSeatingModal({ event, onClose }) {
   useFocusTrap(dialogRef, { onClose: handleModalClose, enabled: true, initialFocusRef: closeButtonRef });
 
   const activeRows = useMemo(
-    () => seatingConfig.filter(r => {
-      const type = r.element_type || 'table';
-      return r.is_active !== false && type !== 'marker' && type !== 'area';
-    }),
+    () => seatingConfig.filter((row) => row.is_active !== false && isSeatRow(row)),
     [seatingConfig]
   );
+  const seatLabelMap = useMemo(() => buildSeatLookupMap(activeRows), [activeRows]);
   const canvasWidth = canvasSettings?.width || 1200;
   const canvasHeight = canvasSettings?.height || 800;
 
@@ -291,9 +290,9 @@ export default function EventSeatingModal({ event, onClose }) {
                 <div>
                   <label className="block text-white mb-2 font-medium">Selected Seats ({selectedSeats.length})</label>
                   <div className="flex flex-wrap gap-2 p-4 bg-gray-800 rounded-lg border border-gray-700 min-h-[60px]">
-                    {selectedSeats.map(s => (
-                      <div key={s} className="px-3 py-1 bg-purple-600 text-white rounded-full text-sm font-medium">
-                        {s}
+                    {selectedSeats.map((seatId) => (
+                      <div key={seatId} className="px-3 py-1 bg-purple-600 text-white rounded-full text-sm font-medium">
+                        {describeSeatSelection(seatId, seatLabelMap[seatId])}
                       </div>
                     ))}
                   </div>
@@ -440,7 +439,7 @@ export default function EventSeatingModal({ event, onClose }) {
                 <div className="mt-2 flex flex-wrap gap-2">
                   {selectedSeats.slice(0, 6).map((seat) => (
                     <span key={seat} className="px-3 py-1 bg-purple-600/80 text-white rounded-full text-sm font-medium">
-                      {seat}
+                      {describeSeatSelection(seat, seatLabelMap[seat])}
                     </span>
                   ))}
                   {selectedSeats.length > 6 && (

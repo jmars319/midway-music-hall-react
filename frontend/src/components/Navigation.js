@@ -118,13 +118,13 @@ export default function Navigation() {
             <button onClick={() => handleNavClick('recurring')} className="text-gray-300 hover:text-purple-400 transition font-medium">Recurring</button>
             <button onClick={() => handleNavClick('lessons')} className="text-gray-300 hover:text-purple-400 transition font-medium">Lessons</button>
             <button onClick={() => handleNavClick('beach-series')} className="text-gray-300 hover:text-purple-400 transition font-medium">Beach Series</button>
+            <button onClick={() => handleNavClick('suggest')} className="text-gray-300 hover:text-purple-400 transition font-medium">Suggest Artist</button>
             <a href="/thegatheringplace" className="text-gray-300 hover:text-purple-400 transition font-medium">
               The Gathering Place
             </a>
             <a href="/archive" className="text-gray-300 hover:text-purple-400 transition font-medium">
               Archive
             </a>
-            <button onClick={() => handleNavClick('suggest')} className="text-gray-300 hover:text-purple-400 transition font-medium">Suggest Artist</button>
           </div>
 
           {/* Mobile menu button */}
@@ -148,14 +148,14 @@ export default function Navigation() {
                 <button onClick={() => handleNavClick('recurring')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Recurring</button>
                 <button onClick={() => handleNavClick('lessons')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Lessons</button>
                 <button onClick={() => handleNavClick('beach-series')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Beach Series</button>
+                <button onClick={() => handleNavClick('about')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">About</button>
+                <button onClick={() => handleNavClick('suggest')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Suggest Artist</button>
                 <a href="/thegatheringplace" className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium" onClick={() => setMobileOpen(false)}>
                   The Gathering Place
                 </a>
                 <a href="/archive" className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium" onClick={() => setMobileOpen(false)}>
                   Archive
                 </a>
-                <button onClick={() => handleNavClick('about')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">About</button>
-                <button onClick={() => handleNavClick('suggest')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Suggest Artist</button>
               </div>
             </div>
           )}

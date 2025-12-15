@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, Edit } from 'lucide-react';
 import TableComponent from '../components/TableComponent';
 import { API_BASE } from '../App';
+import { resolveRowHeaderLabels } from '../utils/seatLabelUtils';
 
 const seatTypes = ['general', 'premium', 'vip', 'accessible'];
 const tableShapes = [
@@ -17,6 +18,15 @@ const tableShapes = [
   { value: 'standing-10', label: 'Standing (10)', seats: 10 },
   { value: 'standing-20', label: 'Standing (20)', seats: 20 }
 ];
+
+const TABLE_SHAPE_ALIASES = {
+  'table-8-rect': 'table-8',
+};
+
+const normalizeTableShapeValue = (shape) => {
+  if (!shape) return shape;
+  return TABLE_SHAPE_ALIASES[shape] || shape;
+};
 
 export default function SeatingModule(){
   const [seating, setSeating] = useState([]);
@@ -50,11 +60,11 @@ export default function SeatingModule(){
 
   // when seating changes, initialize layout rows for editor
   useEffect(() => {
-    setLayoutRows(seating.map(r => ({ ...r })));
+    setLayoutRows(seating.map(r => ({ ...r, table_shape: normalizeTableShapeValue(r.table_shape || null) })));
   }, [seating]);
 
   const openLayout = () => {
-    setLayoutRows(seating.map(r => ({ ...r })));
+    setLayoutRows(seating.map(r => ({ ...r, table_shape: normalizeTableShapeValue(r.table_shape || null) })));
     // load stage settings then show; also fetch server-side history
     fetchStageSettings().then(async ()=>{
       try{
@@ -178,7 +188,17 @@ export default function SeatingModule(){
 
   const openEdit = (row) => {
     setEditing(row);
-    setFormData({ section_name: row.section_name || row.section, row_letter: row.row_label || row.row_letter, total_seats: row.total_seats, seat_type: row.seat_type, table_shape: row.table_shape || 'table-6', is_active: !!row.is_active, pos_x: row.pos_x, pos_y: row.pos_y, rotation: row.rotation || 0 });
+    setFormData({
+      section_name: row.section_name || row.section,
+      row_letter: row.row_label || row.row_letter,
+      total_seats: row.total_seats,
+      seat_type: row.seat_type,
+      table_shape: normalizeTableShapeValue(row.table_shape || 'table-6'),
+      is_active: !!row.is_active,
+      pos_x: row.pos_x,
+      pos_y: row.pos_y,
+      rotation: row.rotation || 0
+    });
     setShowForm(true);
   };
 
@@ -638,7 +658,26 @@ function LayoutDraggable({ row, style, containerRef, onUpdate, gridEnabled, grid
       style={style}
       className={`flex flex-col items-center gap-1 px-2 py-1 ${hover ? 'ring-2 ring-purple-400' : ''} bg-purple-700/80 text-white rounded shadow-lg select-none transition-all`}
     >
-      <div className="text-xs font-semibold">{row.section_name || row.section} {row.row_label || row.row_letter}</div>
+      {(() => {
+        const headerLabels = resolveRowHeaderLabels(row);
+        if (!headerLabels.sectionLabel && !headerLabels.rowLabel) {
+          return <div className="text-xs font-semibold text-white/80">{row.section_name || row.section} {row.row_label || row.row_letter}</div>;
+        }
+        return (
+          <div className="flex flex-col items-center gap-0.5 text-white pointer-events-none">
+            {headerLabels.sectionLabel && (
+              <span className="text-[10px] tracking-[0.2em] bg-black/30 px-2 py-0.5 rounded-full w-full text-center">
+                {headerLabels.sectionLabel.toUpperCase()}
+              </span>
+            )}
+            {headerLabels.rowLabel && (
+              <span className="text-xs font-semibold bg-black/60 rounded-full px-2 py-0.5 shadow w-full text-center">
+                {headerLabels.rowLabel}
+              </span>
+            )}
+          </div>
+        );
+      })()}
       <div className="flex items-center gap-2">
         {(row.table_shape || row.seat_type === 'table-6') ? (
           <div className="flex items-center gap-2">

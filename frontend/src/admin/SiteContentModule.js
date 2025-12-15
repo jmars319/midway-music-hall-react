@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { API_BASE } from '../App';
+import { invalidateSiteContentCache } from '../hooks/useSiteContent';
 
 const emptyContact = () => ({
   name: '',
@@ -49,6 +50,7 @@ export default function SiteContentModule() {
     facebook_url: '',
     instagram_url: '',
     twitter_url: '',
+    google_review_url: '',
   });
   const [contacts, setContacts] = useState([emptyContact()]);
   const [lessons, setLessons] = useState([emptyLesson()]);
@@ -77,6 +79,7 @@ export default function SiteContentModule() {
           facebook_url: settings.facebook_url || '',
           instagram_url: settings.instagram_url || '',
           twitter_url: settings.twitter_url || '',
+          google_review_url: settings.google_review_url || '',
         }));
         const parsedContacts = parseJsonSetting(settings.site_contacts_json, []);
         setContacts(parsedContacts.length ? parsedContacts : [emptyContact()]);
@@ -168,6 +171,7 @@ export default function SiteContentModule() {
       const data = await res.json();
       if (data?.success) {
         setStatus('Site content saved successfully.');
+        invalidateSiteContentCache();
         loadSettings();
       } else {
         setError(data?.message || 'Failed to save site content.');
@@ -361,6 +365,17 @@ export default function SiteContentModule() {
                   className="w-full px-4 py-2 bg-gray-700 text-white rounded"
                   placeholder="https://twitter.com/username"
                 />
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-sm text-gray-300 mb-1">Google review link</label>
+                <input
+                  name="google_review_url"
+                  value={form.google_review_url}
+                  onChange={handleFieldChange}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="https://search.google.com/local/writereview?placeid=..."
+                />
+                <p className="text-xs text-gray-400 mt-1">Guests see this link beneath the map and in the footer when provided.</p>
               </div>
             </div>
           </section>

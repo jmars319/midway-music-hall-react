@@ -4,6 +4,7 @@ import { API_BASE } from '../App';
 import TableComponent from '../components/TableComponent';
 import { seatingLegendSwatches, seatingStatusLabels } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
+import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/seatLabelUtils';
 
 const OPEN_STATUSES = ['new', 'contacted', 'waiting'];
 const FINAL_STATUSES = ['confirmed', 'declined', 'closed', 'spam'];
@@ -125,6 +126,39 @@ const textToSeatList = (text) => {
     .filter(Boolean);
 };
 
+const parseSeatSnapshot = (snapshot) => {
+  if (!snapshot) return [];
+  let raw = snapshot;
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw);
+    } catch (err) {
+      return [];
+    }
+  }
+  if (Array.isArray(raw)) {
+    return raw;
+  }
+  if (raw && typeof raw === 'object' && Array.isArray(raw.layout_data)) {
+    return raw.layout_data;
+  }
+  return [];
+};
+
+const buildDisplaySeatList = (request) => {
+  const seats = parseSeats(request.selected_seats || []);
+  if (!seats.length) return [];
+  if (Array.isArray(request.seat_display_labels) && request.seat_display_labels.length) {
+    return request.seat_display_labels;
+  }
+  const snapshotRows = parseSeatSnapshot(request.seat_map_snapshot);
+  if (!snapshotRows.length) {
+    return seats;
+  }
+  const lookup = buildSeatLookupMap(snapshotRows.filter(isSeatRow));
+  return seats.map((seatId) => describeSeatSelection(seatId, lookup[seatId]));
+};
+
 export default function SeatRequestsModule() {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -136,6 +170,10 @@ export default function SeatRequestsModule() {
   const [editForm, setEditForm] = useState(null);
   const [savingDetail, setSavingDetail] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
+  const displaySeatsForSelected = useMemo(
+    () => (selectedRequest ? buildDisplaySeatList(selectedRequest) : []),
+    [selectedRequest]
+  );
 
   useEffect(() => {
     fetchEvents();
@@ -547,7 +585,7 @@ export default function SeatRequestsModule() {
           </thead>
           <tbody>
             {data.map((req) => {
-              const seats = parseSeats(req.selected_seats || '[]');
+              const displaySeats = buildDisplaySeatList(req);
               const status = normalizeStatus(req.status);
               const badge = STATUS_BADGES[status] || 'bg-gray-500/15 text-gray-200 border border-gray-500/30';
               const expiredHold = isHoldExpired(req.hold_expires_at) && isOpenStatus(status);
@@ -581,14 +619,14 @@ export default function SeatRequestsModule() {
                   )}
                   <td className="px-4 py-3 align-top">
                     <div className="flex flex-wrap gap-1">
-                      {seats.slice(0, 4).map((seat) => (
+                      {displaySeats.slice(0, 4).map((seat) => (
                         <span key={seat} className="px-2 py-1 bg-purple-600/50 text-purple-100 rounded text-xs">{seat}</span>
                       ))}
-                      {seats.length > 4 && (
-                        <span className="px-2 py-1 bg-gray-600 text-white rounded text-xs">+{seats.length - 4}</span>
+                      {displaySeats.length > 4 && (
+                        <span className="px-2 py-1 bg-gray-600 text-white rounded text-xs">+{displaySeats.length - 4}</span>
                       )}
                     </div>
-                    {seats.length === 0 && (
+                    {displaySeats.length === 0 && (
                       <div className="text-xs text-gray-400">No seats listed</div>
                     )}
                   </td>
@@ -906,6 +944,13 @@ export default function SeatRequestsModule() {
               </div>
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Selected seats</label>
+                {displaySeatsForSelected.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {displaySeatsForSelected.map((seat) => (
+                      <span key={seat} className="px-2 py-1 bg-purple-600/40 text-purple-100 rounded text-xs">{seat}</span>
+                    ))}
+                  </div>
+                )}
                 {isFinalStatus(editForm.status) ? (
                   <div className="px-3 py-2 bg-gray-800 text-gray-200 rounded text-sm whitespace-pre-wrap">
                     {editForm.selectedSeatsText || 'Seats locked after confirmation'}

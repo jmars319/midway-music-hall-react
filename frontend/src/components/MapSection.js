@@ -5,6 +5,8 @@ import useSiteContent from '../hooks/useSiteContent';
 export default function MapSection() {
   const siteContent = useSiteContent();
   const map = siteContent.map || {};
+  const reviewUrl = (siteContent.review && siteContent.review.google_review_url) || '';
+  const hasReviewLink = Boolean(reviewUrl && reviewUrl.trim());
   return (
     <section className="py-12 bg-gray-900 border-t border-b border-gray-800" id="map">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -33,6 +35,20 @@ export default function MapSection() {
             referrerPolicy="no-referrer-when-downgrade"
           />
         </div>
+
+        {hasReviewLink && (
+          <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between bg-gray-800/70 border border-purple-500/20 rounded-2xl p-5 shadow">
+            <p className="text-sm text-gray-200">Have you visited us recently? Leave a Google review and let others know about your experience.</p>
+            <a
+              href={reviewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-full bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold px-5 py-2 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300"
+            >
+              Leave a Google Review
+            </a>
+          </div>
+        )}
       </div>
     </section>
   );

@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { Send, X, AlertCircle } from 'lucide-react';
 import TableComponent from './TableComponent';
 import { API_BASE } from '../App';
+import { buildSeatLookupMap, describeSeatSelection, isSeatRow, seatIdsForRow, resolveRowHeaderLabels } from '../utils/seatLabelUtils';
 
 const DEFAULT_STAGE_POSITION = { x: 50, y: 8 };
 const DEFAULT_STAGE_SIZE = { width: 200, height: 80 };
@@ -196,13 +197,13 @@ export default function SeatingChart({
   }, [eventId, events]);
 
   const activeRows = useMemo(
-    () =>
-      (layoutRows || []).filter((row) => {
-        const type = row.element_type || 'table';
-        return row && row.is_active !== false && type !== 'marker' && type !== 'area';
-      }),
+    () => (layoutRows || []).filter((row) => row && row.is_active !== false && isSeatRow(row)),
     [layoutRows]
   );
+
+  const seatLabelMap = useMemo(() => buildSeatLookupMap(activeRows), [activeRows]);
+  const reservedSeatSet = useMemo(() => new Set(reservedSeatIds || []), [reservedSeatIds]);
+  const pendingSeatSet = useMemo(() => new Set(pendingSeatIds || []), [pendingSeatIds]);
 
   const hasPositions = activeRows.some(
     (row) =>
@@ -328,6 +329,13 @@ export default function SeatingChart({
           }}
         >
           <div
+            className="absolute inset-0 rounded-[32px] border border-gray-700/60 pointer-events-none"
+            style={{
+              boxShadow: 'inset 0 0 35px rgba(0,0,0,0.55)',
+            }}
+            aria-hidden="true"
+          />
+          <div
             className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
             style={{
               left: `${stagePosition.x}%`,
@@ -350,17 +358,19 @@ export default function SeatingChart({
               return null;
             }
 
-            const reservedForRow = reservedSeatIds.filter((seatId) =>
-              seatId.startsWith(`${row.section_name || row.section}-${row.row_label}-`)
-            );
-            const pendingForRow = pendingSeatIds.filter((seatId) =>
-              seatId.startsWith(`${row.section_name || row.section}-${row.row_label}-`)
-            );
-
             const rowKey = row.id || `${row.section_name}-${row.row_label}`;
             const rotation = row.rotation || 0;
-            const width = row.width || 140;
-            const height = row.height || 120;
+            const elementType = (row.element_type || 'table').toLowerCase();
+            const baseWidth = row.width || (elementType === 'chair' ? 56 : 140);
+            const baseHeight = row.height || (elementType === 'chair' ? 56 : 120);
+            const minDimension = elementType === 'chair' ? 48 : 100;
+            const width = Math.max(baseWidth, minDimension);
+            const height = Math.max(baseHeight, minDimension);
+            const seatIds = seatIdsForRow(row);
+            const reservedForRow = seatIds.filter((seatId) => reservedSeatSet.has(seatId));
+            const pendingForRow = seatIds.filter((seatId) => pendingSeatSet.has(seatId));
+            const labels = resolveRowHeaderLabels(row);
+            const paddingValue = elementType === 'chair' ? '8px 6px' : '14px 10px';
 
             return (
               <div
@@ -372,15 +382,26 @@ export default function SeatingChart({
                   transform: 'translate(-50%, -50%)',
                   minWidth: `${width}px`,
                   minHeight: `${height}px`,
-                  padding: '10px',
+                  padding: paddingValue,
                 }}
               >
-                <div className="absolute -top-5 left-1/2 transform -translate-x-1/2 text-xs font-semibold text-gray-200 whitespace-nowrap">
-                  {(row.section_name || row.section || 'Section').toUpperCase()} {row.row_label || ''}
-                </div>
-                    <div className="flex items-center justify-center" style={{ minHeight: `${height - 20}px` }}>
-                      <div style={{ transform: `rotate(${rotation}deg)` }}>
-                        <TableComponent
+                {(labels.sectionLabel || labels.rowLabel) && (
+                  <div className="absolute -top-6 left-1/2 flex flex-col items-center gap-0.5 -translate-x-1/2 text-center text-white pointer-events-none">
+                    {labels.sectionLabel && (
+                      <span className="text-[10px] tracking-[0.2em] text-gray-300 bg-black/30 px-2 py-0.5 rounded-full">
+                        {labels.sectionLabel.toUpperCase()}
+                      </span>
+                    )}
+                    {labels.rowLabel && (
+                      <span className="text-xs font-semibold bg-black/70 px-2 py-0.5 rounded-full shadow">
+                        {labels.rowLabel}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center justify-center" style={{ minHeight: `${height - 20}px` }}>
+                  <div style={{ transform: `rotate(${rotation}deg)` }}>
+                    <TableComponent
                           row={row}
                           tableShape={row.table_shape || row.seat_type || 'table-6'}
                           selectedSeats={selectedSeats}
@@ -538,7 +559,7 @@ export default function SeatingChart({
                 <div className="flex flex-wrap gap-2">
                   {selectedSeats.map((seatId) => (
                     <div key={seatId} className="px-3 py-1 bg-gray-700 text-white rounded">
-                      {seatId}
+                      {describeSeatSelection(seatId, seatLabelMap[seatId])}
                     </div>
                   ))}
                 </div>
