@@ -55,8 +55,9 @@ Zip the contents of `frontend/build/` (not the folder itself) for upload, or use
 
 1. GoDaddy → Hosting → **cPanel Admin** → **File Manager**.
 2. Navigate to `public_html/` and create/enter `midwaymusichall.net/`.
-3. Upload everything inside `frontend/build/` into `public_html/midwaymusichall.net/` (overwrite on updates).
-4. Upload the root `.htaccess` into the same folder (show hidden files).
+3. (Recommended) Select all existing files in `midwaymusichall.net/`, click **Compress**, download the ZIP as a rollback backup.
+4. Zip everything inside `frontend/build/` (contents only). Upload that ZIP into `public_html/midwaymusichall.net/`, select it, and click **Extract**. This keeps hashed filenames intact and mirrors prior successful deployments. Delete the ZIP after extraction.
+5. Upload the root `.htaccess` into the same folder (show hidden files).
 5. Upload the repo `php-backend/` folder, rename it to `api/` after uploading.
 6. Set permissions:
    - Directories: 755 (apply recursively).
