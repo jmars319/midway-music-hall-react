@@ -619,6 +619,115 @@ function decode_settings_json(array $settings, string $key, $default = [])
     return is_array($decoded) ? $decoded : $default;
 }
 
+function normalize_upload_relative_path(string $fileUrl): ?string
+{
+    if (!is_string($fileUrl) || trim($fileUrl) === '') {
+        return null;
+    }
+    if (!str_starts_with($fileUrl, '/uploads/')) {
+        return null;
+    }
+    $relative = ltrim(substr($fileUrl, strlen('/uploads/')), '/');
+    return $relative !== '' ? $relative : null;
+}
+
+function derive_variant_paths_from_disk(string $fileUrl): array
+{
+    $relative = normalize_upload_relative_path($fileUrl);
+    if (!$relative) {
+        return [
+            'original' => $fileUrl,
+            'optimized' => null,
+            'webp' => null,
+        ];
+    }
+
+    $baseDir = rtrim(UPLOADS_DIR, '/');
+    $baseName = pathinfo($relative, PATHINFO_FILENAME);
+    $extension = pathinfo($relative, PATHINFO_EXTENSION);
+    $optimizedUrl = null;
+    $webpUrl = null;
+
+    if ($baseName && $extension) {
+        $optimizedRelative = 'optimized/' . $baseName . '-optimized.' . $extension;
+        $optimizedPath = $baseDir . '/' . $optimizedRelative;
+        if (is_file($optimizedPath)) {
+            $optimizedUrl = '/uploads/' . $optimizedRelative;
+        }
+
+        $webpRelative = 'webp/' . $baseName . '.webp';
+        $webpPath = $baseDir . '/' . $webpRelative;
+        if (is_file($webpPath)) {
+            $webpUrl = '/uploads/' . $webpRelative;
+        }
+    }
+
+    return [
+        'original' => $fileUrl,
+        'optimized' => $optimizedUrl,
+        'webp' => $webpUrl,
+    ];
+}
+
+function build_image_variants(array $fileUrls): array
+{
+    $variants = [];
+    if (empty($fileUrls)) {
+        return $variants;
+    }
+
+    $normalized = [];
+    foreach ($fileUrls as $url) {
+        if (!is_string($url) || trim($url) === '') {
+            continue;
+        }
+        $normalized[] = $url;
+    }
+
+    if (empty($normalized)) {
+        return $variants;
+    }
+
+    $unique = array_values(array_unique($normalized));
+    $placeholders = implode(',', array_fill(0, count($unique), '?'));
+    $map = [];
+    try {
+        $stmt = Database::run("SELECT file_url, optimized_path, webp_path FROM media WHERE file_url IN ({$placeholders})", $unique);
+        while ($row = $stmt->fetch()) {
+            $url = $row['file_url'] ?? null;
+            if ($url) {
+                $map[$url] = [
+                    'optimized' => $row['optimized_path'] ?: null,
+                    'webp' => $row['webp_path'] ?: null,
+                ];
+            }
+        }
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('build_image_variants lookup failed: ' . $e->getMessage());
+        }
+    }
+
+    foreach ($normalized as $url) {
+        $fromDb = $map[$url] ?? [];
+        $optimized = $fromDb['optimized'] ?? null;
+        $webp = $fromDb['webp'] ?? null;
+        if (!$optimized || !$webp) {
+            $derived = derive_variant_paths_from_disk($url);
+            $optimized = $optimized ?: $derived['optimized'];
+            $webp = $webp ?: $derived['webp'];
+        }
+        $variants[] = [
+            'file_url' => $url,
+            'original' => $url,
+            'optimized' => $optimized,
+            'webp' => $webp,
+        ];
+    }
+
+    return $variants;
+}
+
 function log_admin_session_state(string $message): void
 {
     if (!APP_DEBUG) {
@@ -653,7 +762,51 @@ function sanitize_admin_user(array $row): array
         'username' => $username ?? null,
         'email' => $email ?? null,
         'display_name' => $display,
+        'created_at' => $row['created_at'] ?? $row['created'] ?? $row['updated_at'] ?? null,
+        'updated_at' => $row['updated_at'] ?? null,
     ];
+}
+
+function admin_column_cache_key(string $column): string
+{
+    return '_admins_column_' . strtolower($column);
+}
+
+function set_admin_column_flag(string $column, bool $value): void
+{
+    $GLOBALS[admin_column_cache_key($column)] = $value;
+}
+
+function admin_table_has_column(string $column): bool
+{
+    $key = admin_column_cache_key($column);
+    if (array_key_exists($key, $GLOBALS)) {
+        return (bool) $GLOBALS[$key];
+    }
+    try {
+        $stmt = Database::run("SHOW COLUMNS FROM admins LIKE ?", [$column]);
+        $exists = (bool) $stmt->fetch();
+    } catch (Throwable $e) {
+        $exists = false;
+    }
+    $GLOBALS[$key] = $exists;
+    return $exists;
+}
+
+function ensure_admins_column_exists(string $column, string $alterSql): void
+{
+    if (admin_table_has_column($column)) {
+        return;
+    }
+    try {
+        Database::run($alterSql);
+        set_admin_column_flag($column, true);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log("Failed to ensure admins.{$column} column: " . $e->getMessage());
+        }
+        set_admin_column_flag($column, false);
+    }
 }
 
 function start_admin_session(array $user): array
@@ -1748,11 +1901,16 @@ function ensure_admins_table_exists(): void
                 username VARCHAR(100) UNIQUE NOT NULL,
                 password_hash VARCHAR(255) NOT NULL,
                 email VARCHAR(255),
+                display_name VARCHAR(191) DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
     }
+
+    ensure_admins_column_exists('display_name', "ALTER TABLE admins ADD COLUMN display_name VARCHAR(191) DEFAULT NULL AFTER email");
+    ensure_admins_column_exists('created_at', "ALTER TABLE admins ADD COLUMN created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP AFTER display_name");
+    ensure_admins_column_exists('updated_at', "ALTER TABLE admins ADD COLUMN updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at");
 }
 
 // Routes
@@ -1769,7 +1927,21 @@ $router->add('POST', '/api/upload-image', function (Request $request) {
         return Response::error($result['error'] ?? 'Upload failed', 400);
     }
     $fileUrl = '/uploads/' . $result['filename'];
-    Response::success(['url' => $fileUrl, 'filename' => $result['filename']]);
+    $variantInfo = derive_variant_paths_from_disk($fileUrl);
+    if ($result['optimized_path'] ?? null) {
+        $variantInfo['optimized'] = $result['optimized_path'];
+    }
+    if ($result['webp_path'] ?? null) {
+        $variantInfo['webp'] = $result['webp_path'];
+    }
+    Response::success([
+        'url' => $fileUrl,
+        'filename' => $result['filename'],
+        'width' => $result['width'],
+        'height' => $result['height'],
+        'optimized_url' => $variantInfo['optimized'],
+        'webp_url' => $variantInfo['webp'],
+    ]);
 });
 
 $router->add('POST', '/api/login', function (Request $request) {
@@ -1855,7 +2027,12 @@ $router->add('POST', '/api/admin/change-password', function (Request $request) {
             if (!password_verify($currentPassword, $row['password_hash'] ?? '')) {
                 return Response::error('Invalid credentials', 401);
             }
-            Database::run('UPDATE admins SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [$newHash, $row['id']]);
+            $updateSql = 'UPDATE admins SET password_hash = ?';
+            if (admin_table_has_column('updated_at')) {
+                $updateSql .= ', updated_at = CURRENT_TIMESTAMP';
+            }
+            $updateSql .= ' WHERE id = ?';
+            Database::run($updateSql, [$newHash, $row['id']]);
             $updatedStmt = Database::run('SELECT * FROM admins WHERE id = ? LIMIT 1', [$row['id']]);
             $updatedRow = $updatedStmt->fetch() ?: $row;
             $sessionData = sanitize_admin_user($updatedRow);
@@ -1867,10 +2044,11 @@ $router->add('POST', '/api/admin/change-password', function (Request $request) {
             if ($currentPassword !== 'admin123') {
                 return Response::error('Invalid credentials', 401);
             }
-            Database::run(
-                'INSERT INTO admins (username, email, password_hash) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), email = COALESCE(NULLIF(email, \'\'), VALUES(email)), updated_at = CURRENT_TIMESTAMP',
-                [$sanitizedUsername, $sanitizedEmail, $newHash]
-            );
+            $upsertSql = 'INSERT INTO admins (username, email, password_hash) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), email = COALESCE(NULLIF(email, \'\'), VALUES(email))';
+            if (admin_table_has_column('updated_at')) {
+                $upsertSql .= ', updated_at = CURRENT_TIMESTAMP';
+            }
+            Database::run($upsertSql, [$sanitizedUsername, $sanitizedEmail, $newHash]);
             $stmt = Database::run('SELECT * FROM admins WHERE username = ? LIMIT 1', [$sanitizedUsername]);
             $createdRow = $stmt->fetch();
             $sessionData = sanitize_admin_user($createdRow ?: ['username' => $sanitizedUsername, 'email' => $sanitizedEmail]);
@@ -1886,6 +2064,128 @@ $router->add('POST', '/api/admin/change-password', function (Request $request) {
             $message .= ' ' . $error->getMessage();
         }
         return Response::error($message, 500);
+    }
+});
+
+$router->add('GET', '/api/admin/users', function () {
+    try {
+        $session = current_admin_session();
+        if (!$session || empty($session['user'])) {
+            return Response::error('Unauthorized', 401);
+        }
+        ensure_admins_table_exists();
+        $select = [
+            'id',
+            'username',
+            'email',
+        ];
+        $select[] = admin_table_has_column('display_name') ? 'display_name' : 'NULL AS display_name';
+        if (admin_table_has_column('created_at')) {
+            $select[] = 'created_at';
+        } elseif (admin_table_has_column('updated_at')) {
+            $select[] = 'updated_at AS created_at';
+        } else {
+            $select[] = 'NULL AS created_at';
+        }
+        $select[] = admin_table_has_column('updated_at') ? 'updated_at' : 'NULL AS updated_at';
+        $orderBy = admin_table_has_column('created_at')
+            ? 'created_at'
+            : (admin_table_has_column('updated_at') ? 'updated_at' : 'id');
+        $sql = 'SELECT ' . implode(', ', $select) . " FROM admins ORDER BY {$orderBy} DESC";
+        $stmt = Database::run($sql);
+        $users = [];
+        while ($row = $stmt->fetch()) {
+            $users[] = sanitize_admin_user($row);
+        }
+        Response::success(['users' => $users]);
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('GET /api/admin/users error: ' . $error->getMessage());
+        }
+        Response::error('Unable to load admin users.', 500);
+    }
+});
+
+$router->add('POST', '/api/admin/users', function (Request $request) {
+    try {
+        $session = current_admin_session();
+        if (!$session || empty($session['user'])) {
+            return Response::error('Unauthorized', 401);
+        }
+        $payload = read_json_body($request);
+        $username = trim((string) ($payload['username'] ?? ''));
+        $email = trim((string) ($payload['email'] ?? ''));
+        $displayName = trim((string) ($payload['display_name'] ?? $payload['name'] ?? ''));
+        $password = (string) ($payload['password'] ?? '');
+
+        if ($username === '' || $password === '') {
+            return Response::error('Username and password are required.', 400);
+        }
+        if (strlen($password) < 10) {
+            return Response::error('Password must be at least 10 characters long.', 400);
+        }
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return Response::error('Invalid email address.', 400);
+        }
+
+        ensure_admins_table_exists();
+        $existing = Database::run('SELECT id FROM admins WHERE username = ? LIMIT 1', [$username])->fetch();
+        if ($existing) {
+            return Response::error('An admin with that username already exists.', 409);
+        }
+        if ($email !== '') {
+            $existingEmail = Database::run('SELECT id FROM admins WHERE email = ? LIMIT 1', [$email])->fetch();
+            if ($existingEmail) {
+                return Response::error('An admin with that email already exists.', 409);
+            }
+        }
+
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+        $finalDisplayName = $displayName !== '' ? $displayName : $username;
+        $hasDisplayName = admin_table_has_column('display_name');
+        if ($hasDisplayName) {
+            Database::run(
+                'INSERT INTO admins (username, password_hash, email, display_name) VALUES (?, ?, ?, ?)',
+                [$username, $hash, $email !== '' ? $email : null, $finalDisplayName]
+            );
+        } else {
+            Database::run(
+                'INSERT INTO admins (username, password_hash, email) VALUES (?, ?, ?)',
+                [$username, $hash, $email !== '' ? $email : null]
+            );
+        }
+        $id = (int) Database::connection()->lastInsertId();
+        $selectColumns = ['id', 'username', 'email'];
+        $selectColumns[] = $hasDisplayName ? 'display_name' : 'NULL AS display_name';
+        if (admin_table_has_column('created_at')) {
+            $selectColumns[] = 'created_at';
+        } elseif (admin_table_has_column('updated_at')) {
+            $selectColumns[] = 'updated_at AS created_at';
+        } else {
+            $selectColumns[] = 'NULL AS created_at';
+        }
+        $selectColumns[] = admin_table_has_column('updated_at') ? 'updated_at' : 'NULL AS updated_at';
+        $row = Database::run(
+            'SELECT ' . implode(', ', $selectColumns) . ' FROM admins WHERE id = ? LIMIT 1',
+            [$id]
+        )->fetch();
+        if ($row && !array_key_exists('display_name', $row)) {
+            $row['display_name'] = $finalDisplayName;
+        }
+
+        Response::success([
+            'user' => sanitize_admin_user($row ?: [
+                'id' => $id,
+                'username' => $username,
+                'email' => $email,
+                'display_name' => $finalDisplayName,
+            ]),
+        ]);
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('POST /api/admin/users error: ' . $error->getMessage());
+        }
+        Response::error('Unable to create admin user.', 500);
     }
 });
 
@@ -3483,9 +3783,13 @@ $router->add('GET', '/api/dashboard-stats', function () {
             "SELECT COUNT(*) FROM events WHERE {$visibilityFilter} AND start_datetime >= NOW() AND start_datetime < DATE_ADD(NOW(), INTERVAL 2 MONTH)"
         )->fetchColumn();
 
-        $pendingRequests = (int) $pdo->query(
-            "SELECT COUNT(*) FROM seat_requests WHERE status = 'pending'"
-        )->fetchColumn();
+        $pendingStatuses = ['pending','hold','new','contacted','waiting'];
+        $placeholders = implode(',', array_fill(0, count($pendingStatuses), '?'));
+        $stmt = $pdo->prepare(
+            "SELECT COUNT(*) FROM seat_requests WHERE status IS NULL OR LOWER(status) IN ({$placeholders})"
+        );
+        $stmt->execute($pendingStatuses);
+        $pendingRequests = (int) $stmt->fetchColumn();
 
         try {
             $pendingSuggestions = (int) $pdo->query(
@@ -3643,6 +3947,10 @@ $router->add('DELETE', '/api/media/:id', function ($request, $params) {
 $router->add('GET', '/api/settings', function () {
     try {
         $settings = fetch_business_settings();
+        $heroImages = decode_settings_json($settings, 'hero_images', []);
+        $tgpHeroImages = decode_settings_json($settings, 'tgp_hero_images', []);
+        $settings['hero_images_variants'] = build_image_variants($heroImages);
+        $settings['tgp_hero_images_variants'] = build_image_variants($tgpHeroImages);
         Response::success(['settings' => $settings]);
     } catch (Throwable $error) {
         if (APP_DEBUG) {

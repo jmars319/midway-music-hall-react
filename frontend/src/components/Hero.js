@@ -8,6 +8,7 @@ const HERO_VARIANTS = {
     titleKey: 'hero_title',
     subtitleKey: 'hero_subtitle',
     imagesKey: 'hero_images',
+    variantsKey: 'hero_images_variants',
     slideshowKey: 'hero_slideshow_enabled',
     intervalKey: 'hero_slideshow_interval',
     defaults: {
@@ -46,6 +47,7 @@ const HERO_VARIANTS = {
     titleKey: 'tgp_hero_title',
     subtitleKey: 'tgp_hero_subtitle',
     imagesKey: 'tgp_hero_images',
+    variantsKey: 'tgp_hero_images_variants',
     slideshowKey: 'tgp_hero_slideshow_enabled',
     intervalKey: 'tgp_hero_slideshow_interval',
     defaults: {
@@ -82,6 +84,75 @@ const HERO_VARIANTS = {
   },
 };
 
+const prefixServerUrl = (url) => {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//')) {
+    return url;
+  }
+  if (SERVER_BASE && url.startsWith('/')) {
+    return `${SERVER_BASE}${url}`;
+  }
+  return url;
+};
+
+const guessMimeTypeFromUrl = (url) => {
+  if (!url || typeof url !== 'string') return null;
+  const normalized = url.split('?')[0] || '';
+  const ext = normalized.split('.').pop();
+  if (!ext) return null;
+  const lower = ext.toLowerCase();
+  if (['jpg', 'jpeg', 'jpe'].includes(lower)) return 'image/jpeg';
+  if (lower === 'png') return 'image/png';
+  if (['gif'].includes(lower)) return 'image/gif';
+  if (lower === 'webp') return 'image/webp';
+  if (lower === 'avif') return 'image/avif';
+  return null;
+};
+
+const normalizeVariantEntries = (entries) => {
+  if (!entries) return [];
+  const parsed = typeof entries === 'string' ? (() => {
+    try {
+      const val = JSON.parse(entries);
+      return Array.isArray(val) ? val : [];
+    } catch (err) {
+      return [];
+    }
+  })() : entries;
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .map((entry) => {
+      if (!entry) return null;
+      if (typeof entry === 'string') {
+        return {
+          original: entry,
+          optimized: null,
+          webp: null,
+        };
+      }
+      const original = entry.original || entry.file_url || entry.url || entry.fileUrl;
+      if (!original) return null;
+      return {
+        original,
+        optimized: entry.optimized || entry.optimized_url || entry.optimizedUrl || null,
+        webp: entry.webp || entry.webp_url || entry.webpUrl || null,
+      };
+    })
+    .filter(Boolean);
+};
+
+const resolveHeroImagesFromSettings = (settings, config) => {
+  if (!settings) return [];
+  const variantCandidates = config.variantsKey ? normalizeVariantEntries(settings[config.variantsKey]) : [];
+  if (variantCandidates.length > 0) {
+    return variantCandidates;
+  }
+  const fallbackList = normalizeVariantEntries(settings[config.imagesKey]);
+  return fallbackList.length > 0 ? fallbackList : [];
+};
+
+const shouldPrioritizeImage = (variant, index) => variant === 'main' && index === 0;
+
 export default function Hero({ variant = 'main', ctaTarget }) {
   const config = HERO_VARIANTS[variant] || HERO_VARIANTS.main;
   const [heroTitle, setHeroTitle] = useState(config.defaults.title);
@@ -109,16 +180,7 @@ export default function Hero({ variant = 'main', ctaTarget }) {
         } else {
           setHeroSubtitle(config.defaults.subtitle);
         }
-        if (settings[config.imagesKey]) {
-          try {
-            const parsed = JSON.parse(settings[config.imagesKey]);
-            setHeroImages(Array.isArray(parsed) ? parsed : []);
-          } catch (err) {
-            setHeroImages([]);
-          }
-        } else {
-          setHeroImages([]);
-        }
+        setHeroImages(resolveHeroImagesFromSettings(settings, config));
         if (settings[config.slideshowKey] === 'true') {
           setSlideshowEnabled(true);
         } else {
@@ -146,6 +208,10 @@ export default function Hero({ variant = 'main', ctaTarget }) {
     return undefined;
   }, [slideshowEnabled, heroImages.length, slideshowInterval]);
 
+  useEffect(() => {
+    setCurrentImageIndex(0);
+  }, [heroImages.length]);
+
   const handleScroll = (targetId) => {
     if (!targetId) return;
     const el = document.getElementById(targetId);
@@ -160,16 +226,46 @@ export default function Hero({ variant = 'main', ctaTarget }) {
   return (
     <section className={`bg-gradient-to-br ${config.theme.gradient} text-white relative overflow-hidden`}>
       {heroImages.length > 0 && (
-        <div className="absolute inset-0 z-0">
-          {heroImages.map((image, index) => (
-            <div
-              key={`${image}-${index}`}
-              className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ${
-                index === currentImageIndex ? 'opacity-100' : 'opacity-0'
-              }`}
-              style={{ backgroundImage: `url(${SERVER_BASE}${image})` }}
-            />
-          ))}
+        <div className="absolute inset-0 z-0" aria-hidden="true">
+          {heroImages.map((image, index) => {
+            const fallbackSrc = prefixServerUrl(image.optimized || image.original || image.webp);
+            const fetchPriority = shouldPrioritizeImage(variant, index) ? 'high' : undefined;
+            const imgProps = fetchPriority ? { fetchpriority: fetchPriority } : {};
+            return (
+              <div
+                key={`${image.original || 'image'}-${index}`}
+                className={`absolute inset-0 transition-opacity duration-1000 ${index === currentImageIndex ? 'opacity-100' : 'opacity-0'}`}
+              >
+                <picture className="block w-full h-full">
+                  {image.webp && (
+                    <source
+                      type="image/webp"
+                      srcSet={prefixServerUrl(image.webp)}
+                    />
+                  )}
+                  {image.optimized && (
+                    <source
+                      type={guessMimeTypeFromUrl(image.optimized) || undefined}
+                      srcSet={prefixServerUrl(image.optimized)}
+                    />
+                  )}
+                  <img
+                    src={fallbackSrc}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    {...imgProps}
+                    onError={(event) => {
+                      if (!image.original) return;
+                      if (!event.target.dataset.fallbackApplied) {
+                        event.target.dataset.fallbackApplied = 'true';
+                        event.target.src = prefixServerUrl(image.original);
+                      }
+                    }}
+                  />
+                </picture>
+              </div>
+            );
+          })}
           <div
             className="absolute inset-0 pointer-events-none"
             style={{

@@ -11,6 +11,7 @@ import {
   SuggestionsModule,
   MediaManager,
   SettingsModule,
+  AdminUsersModule,
 } from './index';
 import { API_BASE, SERVER_BASE } from '../App';
 import ResponsiveImage from '../components/ResponsiveImage';
@@ -26,6 +27,7 @@ const MENU = [
   { key: 'suggestions', label: 'Suggestions', comp: SuggestionsModule },
   { key: 'media', label: 'Media', comp: MediaManager },
   { key: 'settings', label: 'Settings', comp: SettingsModule },
+  { key: 'admin-users', label: 'Admin Users', comp: AdminUsersModule },
 ];
 
 export default function AdminPanel({ user = null, onLogout = () => {}, onBackToSite = () => {} }){
