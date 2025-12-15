@@ -300,7 +300,8 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                 type="button"
                 onClick={() => setCurrentPage(1)}
                 disabled={currentPage === 1}
-                className="rounded border border-gray-700 px-3 py-1 text-gray-300 hover:text-white disabled:opacity-40"
+                className="inline-flex h-11 w-11 items-center justify-center rounded border border-gray-700 text-gray-300 hover:text-white disabled:opacity-40"
+                aria-label="Go to first page"
               >
                 <ChevronsLeft className="h-4 w-4" />
               </button>
@@ -308,7 +309,8 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                 type="button"
                 onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
                 disabled={currentPage === 1}
-                className="rounded border border-gray-700 px-3 py-1 text-gray-300 hover:text-white disabled:opacity-40"
+                className="inline-flex h-11 w-11 items-center justify-center rounded border border-gray-700 text-gray-300 hover:text-white disabled:opacity-40"
+                aria-label="Go to previous page"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -319,7 +321,8 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                 type="button"
                 onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
                 disabled={currentPage === totalPages}
-                className="rounded border border-gray-700 px-3 py-1 text-gray-300 hover:text-white disabled:opacity-40"
+                className="inline-flex h-11 w-11 items-center justify-center rounded border border-gray-700 text-gray-300 hover:text-white disabled:opacity-40"
+                aria-label="Go to next page"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -327,7 +330,8 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                 type="button"
                 onClick={() => setCurrentPage(totalPages)}
                 disabled={currentPage === totalPages}
-                className="rounded border border-gray-700 px-3 py-1 text-gray-300 hover:text-white disabled:opacity-40"
+                className="inline-flex h-11 w-11 items-center justify-center rounded border border-gray-700 text-gray-300 hover:text-white disabled:opacity-40"
+                aria-label="Go to last page"
               >
                 <ChevronsRight className="h-4 w-4" />
               </button>

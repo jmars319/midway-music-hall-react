@@ -87,7 +87,7 @@ export default function Navigation() {
   /* eslint-enable react-hooks/exhaustive-deps */
 
   return (
-    <nav className="sticky top-0 z-50 bg-black border-b border-purple-500/30 shadow-lg">
+    <nav className="sticky top-0 z-50 bg-black border-b border-purple-500/30 shadow-lg" aria-label="Primary site navigation">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-24">
           <div className="flex items-center space-x-3">
@@ -132,7 +132,10 @@ export default function Navigation() {
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
               aria-label="Toggle menu"
-              className="p-2 rounded-md text-gray-300 hover:text-white hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              aria-expanded={mobileOpen}
+              aria-controls="mobile-nav-menu"
+              type="button"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md text-gray-300 hover:text-white hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
             >
               {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
             </button>
@@ -142,7 +145,7 @@ export default function Navigation() {
 
       {/* Mobile dropdown */}
           {mobileOpen && (
-            <div className="md:hidden bg-black border-t border-purple-500/30">
+            <div className="md:hidden bg-black border-t border-purple-500/30" id="mobile-nav-menu">
               <div className="px-4 pt-4 pb-6 space-y-3">
                 <button onClick={() => handleNavClick('schedule')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Schedule</button>
                 <button onClick={() => handleNavClick('recurring')} className="block w-full text-left text-gray-300 hover:text-purple-400 py-2 font-medium">Recurring</button>

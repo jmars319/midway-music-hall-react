@@ -72,7 +72,7 @@ export default function Footer({ onAdminClick, onNavigate }){
                   )}
                 </p>
               )}
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-300">
                 Voicemail is monitored daily. Leave your name, party size, and event date for the quickest callback.
               </p>
             </div>
@@ -81,13 +81,31 @@ export default function Footer({ onAdminClick, onNavigate }){
           <div>
             <h4 className="text-white font-bold mb-3">Follow Us</h4>
             <div className="flex items-center gap-3">
-              <a href={social.facebook || 'https://www.facebook.com/midwaymusichall'} target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
+              <a
+                href={social.facebook || 'https://www.facebook.com/midwaymusichall'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-11 w-11 items-center justify-center bg-gray-800 rounded-full hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                aria-label="Midway Music Hall on Facebook (opens in new tab)"
+              >
                 <Facebook className="h-5 w-5" />
               </a>
-              <a href={social.instagram || 'https://www.instagram.com/midwaymusichall'} target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
+              <a
+                href={social.instagram || 'https://www.instagram.com/midwaymusichall'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-11 w-11 items-center justify-center bg-gray-800 rounded-full hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                aria-label="Midway Music Hall on Instagram (opens in new tab)"
+              >
                 <Instagram className="h-5 w-5" />
               </a>
-              <a href={social.twitter || 'https://twitter.com/midwaymusichall'} target="_blank" rel="noreferrer" className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-gray-700">
+              <a
+                href={social.twitter || 'https://twitter.com/midwaymusichall'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-11 w-11 items-center justify-center bg-gray-800 rounded-full hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                aria-label="Midway Music Hall on Twitter (opens in new tab)"
+              >
                 <Twitter className="h-5 w-5" />
               </a>
             </div>
@@ -107,7 +125,7 @@ export default function Footer({ onAdminClick, onNavigate }){
                 Admin Login
               </button>
             )}
-            <a href="https://www.jamarq.digital" target="_blank" rel="noreferrer" className="hover:text-purple-300 transition">
+            <a href="https://www.jamarq.digital" target="_blank" rel="noopener noreferrer" className="hover:text-purple-300 transition">
               Powered by JAMARQ
             </a>
           </div>

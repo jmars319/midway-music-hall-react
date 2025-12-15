@@ -89,20 +89,34 @@ export default function ArtistSuggestion() {
             <Music className="h-6 w-6 text-purple-400" />
             <div className="text-sm text-gray-300">Submission type</div>
             <div className="ml-auto flex gap-2">
-              <button onClick={() => setSubmissionType('self')} className={`px-3 py-1 rounded ${submissionType === 'self' ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-300'}`}>I am the artist</button>
-              <button onClick={() => setSubmissionType('fan')} className={`px-3 py-1 rounded ${submissionType === 'fan' ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-300'}`}>Recommend an artist</button>
+              <button
+                type="button"
+                onClick={() => setSubmissionType('self')}
+                aria-pressed={submissionType === 'self'}
+                className={`px-3 py-1 rounded ${submissionType === 'self' ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-300'}`}
+              >
+                I am the artist
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubmissionType('fan')}
+                aria-pressed={submissionType === 'fan'}
+                className={`px-3 py-1 rounded ${submissionType === 'fan' ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-300'}`}
+              >
+                Recommend an artist
+              </button>
             </div>
           </div>
 
           {success && (
-            <div className="p-3 mb-4 bg-green-500/20 border border-green-500 text-green-300 rounded flex items-center gap-3">
+            <div className="p-3 mb-4 bg-green-500/20 border border-green-500 text-green-300 rounded flex items-center gap-3" role="status" aria-live="polite">
               <CheckCircle className="h-5 w-5" />
               <div>Thanks! Your suggestion was submitted.</div>
             </div>
           )}
 
           {error && (
-            <div className="p-3 mb-4 bg-red-500/10 border border-red-500 text-red-300 rounded">{error}</div>
+            <div className="p-3 mb-4 bg-red-500/10 border border-red-500 text-red-300 rounded" role="alert" aria-live="assertive">{error}</div>
           )}
 
           <form onSubmit={handleSubmit}>

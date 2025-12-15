@@ -299,8 +299,20 @@ export default function SeatingModule(){
                         <td className="px-3 py-2">{r.seat_type}</td>
                         <td className="px-3 py-2 text-right">
                           <div className="inline-flex gap-2">
-                            <button onClick={() => openEdit(r)} className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded"><Edit className="h-4 w-4" /></button>
-                            <button onClick={() => handleDelete(r.id)} className="p-2 bg-red-600 hover:bg-red-700 text-white rounded"><Trash2 className="h-4 w-4" /></button>
+                            <button
+                              onClick={() => openEdit(r)}
+                              className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+                              aria-label={`Edit ${r.section_name || r.section} ${r.row_label}`}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(r.id)}
+                              className="p-2 bg-red-600 hover:bg-red-700 text-white rounded"
+                              aria-label={`Delete ${r.section_name || r.section} ${r.row_label}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -700,15 +712,45 @@ function LayoutDraggable({ row, style, containerRef, onUpdate, gridEnabled, grid
               }}
             />
             <div className={`${hover ? 'inline-flex' : 'hidden'} flex-col gap-1`}> 
-              <button type="button" onClick={() => rotate(-45)} title="Rotate -45°" className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded">⟲</button>
-              <button type="button" onClick={() => rotate(45)} title="Rotate +45°" className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded">⟳</button>
+              <button
+                type="button"
+                onClick={() => rotate(-45)}
+                title="Rotate -45°"
+                aria-label="Rotate item counterclockwise"
+                className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded"
+              >
+                ⟲
+              </button>
+              <button
+                type="button"
+                onClick={() => rotate(45)}
+                title="Rotate +45°"
+                aria-label="Rotate item clockwise"
+                className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded"
+              >
+                ⟳
+              </button>
             </div>
           </div>
         ) : (
           <>
             <div className="w-8 h-6 bg-gray-800 rounded flex items-center justify-center text-xs">{row.total_seats}</div>
-            <button type="button" onClick={() => rotate(-45)} className="px-1 py-0.5 bg-gray-600 rounded">⟲</button>
-            <button type="button" onClick={() => rotate(45)} className="px-1 py-0.5 bg-gray-600 rounded">⟳</button>
+            <button
+              type="button"
+              onClick={() => rotate(-45)}
+              className="px-1 py-0.5 bg-gray-600 rounded"
+              aria-label="Rotate selection counterclockwise"
+            >
+              ⟲
+            </button>
+            <button
+              type="button"
+              onClick={() => rotate(45)}
+              className="px-1 py-0.5 bg-gray-600 rounded"
+              aria-label="Rotate selection clockwise"
+            >
+              ⟳
+            </button>
           </>
         )}
       </div>

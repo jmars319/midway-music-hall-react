@@ -225,11 +225,13 @@ export default function MediaManager() {
                   className="w-full h-48 object-cover rounded border border-gray-600"
                 />
                 <button
+                  type="button"
                   onClick={() => {
                     setSelectedFile(null);
                     setPreviewUrl(null);
                   }}
-                  className="absolute top-2 right-2 p-1 bg-red-600 hover:bg-red-700 rounded-full"
+                  aria-label="Remove selected preview"
+                  className="absolute top-2 right-2 inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-300"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -300,9 +302,10 @@ export default function MediaManager() {
                   </button>
                   <button
                     onClick={() => handleDelete(item.id)}
-                    className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded"
+                    aria-label={`Delete ${item.original_name}`}
+                    className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded bg-red-600 hover:bg-red-700 text-white"
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -318,8 +321,10 @@ export default function MediaManager() {
             <div className="flex justify-between items-center p-6 border-b border-gray-700">
               <h3 className="text-xl font-bold">Edit Image</h3>
               <button
+                type="button"
                 onClick={() => setEditingMedia(null)}
-                className="p-2 hover:bg-gray-700 rounded-lg"
+                aria-label="Close image editor"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400"
               >
                 <X className="h-5 w-5" />
               </button>

@@ -96,6 +96,7 @@ export default function TableComponent({
           style={style}
           disabled={getSeatStatus(seatId).isReserved}
           title={seatLabel}
+          aria-label={seatLabel}
         >
           <span className="text-[9px] font-bold" style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)' }}>{displayLabel}</span>
         </button>

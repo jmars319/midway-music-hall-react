@@ -208,8 +208,9 @@ export default function EventSeatingModal({ event, onClose }) {
           <button 
             ref={closeButtonRef}
             onClick={handleCancel}
-            className="text-gray-400 hover:text-white transition p-2 hover:bg-gray-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-400"
+            className="text-gray-400 hover:text-white transition rounded-full hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-400 inline-flex h-12 w-12 items-center justify-center"
             aria-label="Close seating selection"
+            type="button"
           >
             <X className="h-7 w-7" />
           </button>
@@ -221,7 +222,7 @@ export default function EventSeatingModal({ event, onClose }) {
             <div className="animate-spin h-16 w-16 border-4 border-purple-500 border-t-transparent rounded-full"></div>
           </div>
         ) : errorMessage && !showContactForm ? (
-          <div className="flex-1 flex items-center justify-center p-6">
+          <div className="flex-1 flex items-center justify-center p-6" role="alert" aria-live="assertive">
             <div className="text-center">
               <AlertCircle className="h-16 w-16 text-red-400 mx-auto mb-4" />
               <p className="text-xl text-red-400">{errorMessage}</p>

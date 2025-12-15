@@ -173,7 +173,12 @@ export default function RequestsModule(){
                             <button onClick={() => act(req.id, 'deny')} className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded flex items-center gap-2">Deny</button>
                           </>
                         )}
-                        <button onClick={() => deleteRequest(req.id)} className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded flex items-center gap-2" title="Delete request">
+                        <button
+                          type="button"
+                          onClick={() => deleteRequest(req.id)}
+                          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center bg-gray-600 hover:bg-gray-700 text-white rounded focus:outline-none focus:ring-2 focus:ring-purple-400"
+                          aria-label="Delete seat request"
+                        >
                           <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
