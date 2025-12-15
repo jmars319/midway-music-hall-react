@@ -272,6 +272,21 @@ useEffect(() => {
 - Seat requests still use existing approval flow
 - No breaking changes to existing seating system
 
+## Layout Versioning & Event Refresh
+
+- Saving an event with a `layout_id` immediately snapshots the template into `seating_layout_versions` and stores that `layout_version_id` on the event.
+- Seat requests, previews, and public seat pickers always read from that frozen version so guest communications stay consistent even if the template changes later.
+- Editing a layout template does **not** update events that already captured a version — staff must edit each event (or reassign the layout) to pull in the new seating.
+
+### Staff-Friendly Recommendation
+
+- Keep the current snapshot-by-default behavior so existing seat requests never silently shift.
+- Add an explicit **“Refresh layout from template”** control inside the event editor:
+  1. Confirm with staff that pending holds will keep their prior snapshot.
+  2. Snapshot the latest template for the selected `layout_id` and update the event’s `layout_version_id`.
+  3. Reload the seating preview so changes are visible immediately.
+- This opt-in refresh keeps control in staff hands and avoids large global changes while still making it easy to adopt template tweaks.
+
 ---
 
 **Created:** November 30, 2025  
