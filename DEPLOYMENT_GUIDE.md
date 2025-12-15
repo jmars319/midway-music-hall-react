@@ -1,152 +1,207 @@
-# Midway Music Hall – GoDaddy/Cloudflare Deployment Guide
+# Midway Music Hall Deployment – GoDaddy cPanel + Cloudflare + phpMyAdmin
 
-This guide walks through publishing the existing Midway Music Hall build to GoDaddy cPanel (Apache/PHP) that sits behind Cloudflare. Follow the steps in order. All wording assumes the production docroot is `public_html/midwaymusichall.net/` and the PHP backend is served from `/api`.
+> **Canonical Notice:** This file is the single source of truth for deployments. `DEPLOY.md`, `DEPLOY_SMOKE_TEST.md`, and other historical docs remain for reference but are marked legacy—always start here.
+
+The live stack is GoDaddy shared hosting (Apache/PHP) behind Cloudflare SSL. The production docroot is `public_html/midwaymusichall.net/`. Our React SPA lives at the root, and the PHP API is served from `/api`.
 
 ---
 
-## 1. Production Folder Layout (final)
-
-All files belong inside `public_html/midwaymusichall.net/`:
+## 1. Target Layout (must match exactly)
 
 ```
 public_html/
 └── midwaymusichall.net/
-    ├── index.html, asset-manifest.json, robots.txt, sitemap.xml, manifest.json
-    ├── static/… (React build assets)
-    ├── api/                    ← copy of repo php-backend/
-    │   ├── index.php, bootstrap.php, lib/, uploads/
-    │   └── .env                ← created from .env.production.example
-    ├── uploads/                ← virtual path, served via rewrite to api/uploads/
-    └── .htaccess               ← repo root version (already includes API + SPA rules)
+    ├── index.html, asset-manifest.json, robots.txt, sitemap.xml, favicon*, manifest.json
+    ├── static/ (hashed JS/CSS assets from frontend build)
+    ├── api/                      ← copy of repo php-backend/ (see §4)
+    │   ├── index.php, bootstrap.php, lib/, uploads/, vendor/
+    │   └── .env                  ← production secrets (see §5)
+    ├── uploads/                  ← served via rewrite to api/uploads/ (no PHP here)
+    └── .htaccess                 ← repo root version (handles HTTPS, /api, /uploads, SPA fallback)
 ```
 
-**Key rules**
-1. Always upload the React build output directly into `public_html/midwaymusichall.net/`.
-2. Rename/copy `php-backend/` to `api/` within the same folder.
-3. `api/uploads/` must be writable (775 or via cPanel “Change Permissions”).
-4. The only `.htaccess` lives at the docroot. Do **not** deploy legacy copies.
+Rules:
+1. React build output lives directly inside `public_html/midwaymusichall.net/`.
+2. Backend code sits in `public_html/midwaymusichall.net/api/` (copy/paste the repo `php-backend/` folder, keep the name `api`).
+3. `api/uploads/` must be writable (chmod 775 or use cPanel “change permissions”).
+4. Only one `.htaccess` exists—root-level file shipped with the repo.
 
 ---
 
-## 2. Before you start
+## 2. Pre-deploy checklist (local machine)
 
-| Task | Command / location |
-|------|-------------------|
-| Install deps | `npm install` (frontend) |
-| Lint + build | `npm run lint && npm run build` (frontend) |
-| PHP syntax check | `php -l php-backend/index.php php-backend/bootstrap.php php-backend/lib/Emailer.php` |
-| Confirm `.htaccess` | Root `.htaccess` already configured with HTTPS, `/api`, `/uploads`, and SPA fallback |
-| Confirm env template | `php-backend/.env.production.example` lists required keys (keep `SEND_EMAILS=false` until live testing) |
+1. `npm install` (front-end dependencies)
+2. `cd frontend && npm run lint && npm run build`
+3. PHP syntax: `find php-backend -name "*.php" -print0 | xargs -0 -n1 php -l`
+4. Confirm `.env.production.example` matches the secrets you plan to set.
+5. Ensure `database/20250320_full_seed_nodb.sql` is ready for phpMyAdmin import.
+6. Verify `.htaccess` is the repo copy (no local edits unless required).
 
 ---
 
-## 3. Create the production build locally
+## 3. Build the React app
 
 ```bash
 cd frontend
 npm run build
-# build output lives in frontend/build/
+# Output: frontend/build/*
 ```
 
-Zip the contents of `frontend/build/` (not the folder itself) or upload the folder with your preferred SFTP/File Manager tool.
+Zip the contents of `frontend/build/` (not the folder itself) for upload, or use cPanel’s directory upload.
 
 ---
 
-## 4. Upload files to GoDaddy
+## 4. Upload files to GoDaddy cPanel
 
-1. Log in to GoDaddy → Hosting → **cPanel Admin** → **File Manager**.
-2. Navigate to `public_html/` and create/enter the folder `midwaymusichall.net/`.
-3. Upload the contents of `frontend/build/` into `public_html/midwaymusichall.net/`. Overwrite existing files on updates.
-4. Upload the repository root `.htaccess` into the same folder. (Show hidden files to confirm it exists.)
-5. Upload the entire `php-backend/` folder and rename it to `api/` inside `public_html/midwaymusichall.net/`.
-6. In File Manager, set permissions:
-   - Directories: 755 (check “recurse into subdirectories”).
+1. GoDaddy → Hosting → **cPanel Admin** → **File Manager**.
+2. Navigate to `public_html/` and create/enter `midwaymusichall.net/`.
+3. Upload everything inside `frontend/build/` into `public_html/midwaymusichall.net/` (overwrite on updates).
+4. Upload the root `.htaccess` into the same folder (show hidden files).
+5. Upload the repo `php-backend/` folder, rename it to `api/` after uploading.
+6. Set permissions:
+   - Directories: 755 (apply recursively).
    - Files: 644.
-   - `api/uploads/`: ensure write access for PHP (775 or “Writable” in File Manager).
+   - `api/uploads/`: 775 or writeable via cPanel (PHP needs upload permission).
+
+Uploads folder mapping: `.htaccess` already rewrites `/uploads/*` → `/api/uploads/*`, so no extra Apache config is needed.
 
 ---
 
-## 5. Configure production environment variables
+## 5. Production environment variables
 
-1. Inside `public_html/midwaymusichall.net/api/`, copy `php-backend/.env.production.example` to `.env`.
-2. Populate with production secrets (database host, DB name, username, password, APP_KEY, SendGrid keys if/when ready).
-3. Set:
-   - `APP_ENV=production`
-   - `SEND_EMAILS=false` until you are ready to test live emails.
-   - `CORS_ALLOW_ORIGIN=https://midwaymusichall.net`
-   - `ADMIN_SESSION_COOKIE_SECURE=true`
-4. Save the file and ensure it is **not** world-readable (permission 640 or similar). `.htaccess` already blocks direct access.
+Location: `public_html/midwaymusichall.net/api/.env`
 
----
+1. Copy `php-backend/.env.production.example` to `.env`.
+2. Populate with production values:
 
-## 6. Database creation and import (phpMyAdmin)
+```
+APP_ENV=production
+APP_KEY=generate_a_secret_key
+APP_URL=https://midwaymusichall.net
 
-1. In cPanel, open **MySQL® Databases**:
-   - Create a database (example `midway_live`).
-   - Create a database user (example `midway_user`) and assign it a strong password.
-   - Add the user to the database with **All Privileges**.
-2. Open **phpMyAdmin**, select the new database, and use **Import**.
-3. Choose `database/20250320_full_seed_nodb.sql` (no `CREATE DATABASE` statements) and run the import.
-4. If the host lacks `ADD COLUMN IF NOT EXISTS`, re-run any compat migrations listed in `DB_DEPLOY.md`.
-5. Run the verification queries from `DB_DEPLOY.md` (categories, audit_log, recurrence counts).
-6. Update `api/.env` with the DB name/user/password you created.
+DB_HOST=127.0.0.1
+DB_NAME=midway_live
+DB_USER=midway_user
+DB_PASS=strong-password
 
-> Need to re-seed from scratch? Use `database/20250320_full_seed.sql` from the mysql CLI where `CREATE DATABASE` is allowed. phpMyAdmin users should always prefer the `_nodb` file.
+SENDGRID_API_KEY=SG.xxxxxx
+SEND_EMAILS=false             # keep false until live smoke test passes
+STAFF_EMAIL_TO=midwayeventcenter@gmail.com
+ALERTS_EMAIL_TO=support@jamarq.digital
 
----
+CORS_ALLOW_ORIGIN=https://midwaymusichall.net
+ADMIN_SESSION_COOKIE_SECURE=true
+```
 
-## 7. Cloudflare + domain settings
-
-1. **DNS** – In Cloudflare, add A records for `@` and `www` pointing to the GoDaddy server IP with proxy (orange cloud) enabled.
-2. **SSL/TLS** – Set encryption mode to **Full** (or Full Strict). Disable Flexible to avoid redirect loops.
-3. **Always Use HTTPS** + **Automatic HTTPS Rewrites** – Enable both under SSL/TLS → Edge Certificates.
-4. **Speed** – Enable Brotli + Auto Minify (HTML/CSS/JS). Leave Rocket Loader disabled.
-5. **Caching** – Keep “Standard” and “Respect existing headers”.
-6. Wait for DNS changes to propagate (usually <1 hour).
+3. Permissions: 640 (owner + group). `.htaccess` blocks access but keep it private.
+4. Only after production smoke tests pass should `SEND_EMAILS` be set to `true`.
 
 ---
 
-## 8. Post-deploy verification
+## 6. Database creation + import (phpMyAdmin)
 
-Run through `DEPLOY_SMOKE_TEST.md`. Highlights:
+1. **Create DB + user** (cPanel → MySQL Databases):
+   - Create database (e.g., `midway_live`).
+   - Create user (e.g., `midway_user`), assign strong password.
+   - Add user to DB with **All Privileges**.
 
-1. Visit `https://midwaymusichall.net` – check hero, Upcoming, Recurring, Beach Series, Lessons, footer contacts.
-2. Visit `/thegatheringplace` – confirm cards and seating buttons follow the current rules (no RSVP for recurring).
-3. Check `/api/health` (or any existing health endpoint) to ensure the backend responds without exposing stack traces.
-4. Log into `/admin`:
-   - Events list shows upcoming + recurring groupings.
-   - Categories CRUD works.
-   - Seat requests show notification inbox info.
-   - Site Content edits reflect publicly after refresh.
-   - Audit Log entries appear after making edits.
-5. Confirm uploads work by adding/removing a sample file in Media.
-6. Ensure `[email:skip]` logs appear instead of live sends (SEND_EMAILS should still be false).
+2. **Import** using phpMyAdmin:
+   - Select the new database.
+   - Use **Import** → choose `database/20250320_full_seed_nodb.sql`.
+   - Run import.
 
-If any issue appears, re-check `.env`, permissions, and that `.htaccess` matches the repo version.
+3. **Compatibility issues**:
+   - If MariaDB rejects `ADD COLUMN IF NOT EXISTS` or other 5.7+ syntax, run `database/20251212_schema_upgrade_compat.sql` (already includes compatibility routines) using phpMyAdmin’s **Import** with “Allow multiple statements” turned on.
+   - For timeouts, split the `_nodb` seed file into chunks (categories/events/seat maps) and import sequentially.
+
+4. **Verification queries** (phpMyAdmin → SQL):
+   - `SELECT COUNT(*) FROM events;` (expect 330+ seeded events)
+   - `SELECT COUNT(*) FROM event_categories;` (should be ≥ 6 including Beach Bands)
+   - `SELECT COUNT(*) FROM admin_users;` (should be 1 default admin to reset manually)
+   - `SELECT COUNT(*) FROM seat_requests;` (seeded with 0)
+   - `SELECT slug, COUNT(*) FROM events GROUP BY slug HAVING COUNT(*)>1;` (expect 0 duplicates)
+
+5. Update `api/.env` DB credentials to match the new database/user.
+
+6. If you must run migrations manually (e.g., data hotfixes), run `php -f api/cli/migrate.php` over SSH. Avoid phpMyAdmin for incremental migrations unless necessary.
 
 ---
 
-## 9. Future updates / quick redeploy
+## 7. Cloudflare + SSL configuration
 
-1. Pull latest repo changes.
+1. **DNS**: In Cloudflare, add A records for `@` and `www` pointing to GoDaddy’s IP with orange-cloud proxy enabled.
+2. **SSL/TLS**:
+   - Set mode to **Full** or **Full (Strict)**. Never use Flexible (causes loops).
+   - Enable **Always Use HTTPS** and **Automatic HTTPS Rewrites**.
+3. **Edge settings**: Enable Brotli + Auto Minify (HTML/CSS/JS). Keep Rocket Loader OFF to avoid script issues.
+4. **Caching**: “Standard” level, respect origin headers. Purge after each deploy.
+5. cPanel/GoDaddy should keep AutoSSL enabled for the origin certificate (Cloudflare handles public cert).
+
+---
+
+## 8. Routing requirements (.htaccess summary)
+
+The repo `.htaccess` enforces:
+- HTTPS redirect (compatible with Cloudflare Full/Strict).
+- `/api/*` → `api/index.php`.
+- `/uploads/*` → `api/uploads/*`.
+- SPA fallback: any non-file route rewrites to `index.html`.
+
+If SPA routes (e.g., `/lessons`) return 404, ensure `.htaccess` is at `public_html/midwaymusichall.net/.htaccess` and not overridden by cPanel.
+
+---
+
+## 9. Post-deploy smoke test (staff-friendly)
+
+1. **Public site**
+   - Browse `https://midwaymusichall.net` on desktop + mobile.
+   - Verify hero + “FIRST TIME HERE?” remain above the fold.
+   - Check schedule month filter, pagination, and “Now” button.
+   - In Beach Bands section, confirm contact info + Request Seats button show only for seating-enabled, non-recurring events.
+
+2. **Admin portal**
+   - Log into `/admin`.
+   - Events list loads, editing works.
+   - Site Content edit: change a social link or review URL, save, refresh public page to confirm update (cache should invalidate).
+
+3. **API**
+   - Hit `https://midwaymusichall.net/api/health` (or `/api/site-content`) and confirm JSON response without PHP errors.
+
+4. **Emails**
+   - Confirm log output shows `[email] skip` (SEND_EMAILS=false) during smoke test.
+   - Only after all checks pass should SEND_EMAILS be set to `true` and a single test seat request submitted.
+
+Document each step in `DEPLOYMENT_STATUS.md`.
+
+---
+
+## 10. Common issues / fixes
+
+| Issue | Fix |
+|-------|-----|
+| **Cloudflare redirect loop** | Set Cloudflare SSL mode to **Full**/**Full (Strict)**, ensure `.htaccess` forces HTTPS once, and confirm cPanel AutoSSL is not redirecting separately. |
+| **SPA routes 404** | Verify `.htaccess` resides in `public_html/midwaymusichall.net/`. Re-upload repo version. Clear Cloudflare cache. |
+| **/api routes return 404/download files** | Ensure `api/` folder exists and contains `index.php`; `.htaccess` must route `/api/` requests. Check file permissions (644/755). |
+| **phpMyAdmin import timeout** | Use `_nodb` seed file; if still timing out, split file and import pieces. Alternatively, use SSH `mysql` CLI. |
+| **MariaDB syntax errors (IF NOT EXISTS)** | Run `database/20251212_schema_upgrade_compat.sql` via phpMyAdmin. It wraps statements in stored procedures to avoid unsupported clauses. |
+
+---
+
+## 11. Future updates
+
+1. Pull latest repo.
 2. `npm run build`.
-3. Upload new `frontend/build/` contents.
-4. If backend changes are included, upload updated PHP files to `api/`.
-5. Run any new migrations plus compat scripts.
-6. Re-run smoke test and keep SEND_EMAILS disabled until ready for live notifications.
+3. Upload new build contents.
+4. Upload updated `api/` files if backend changed.
+5. Run new migrations/SQL scripts (see `DB_DEPLOY.md`).
+6. Re-run smoke test. Keep `SEND_EMAILS=false` until live confirmation.
+
+Archive each deployment package (zip + date) under `/midway-deploy-*` for rollback.
 
 ---
 
-## Reference files
+## Proof
 
-| File | Purpose |
-|------|---------|
-| `.htaccess` | Final rewrite rules (HTTPS, `/api`, `/uploads`, SPA fallback) |
-| `php-backend/.env.production.example` | Template for production environment variables |
-| `database/20250320_full_seed.sql` | Full schema + data, includes `CREATE DATABASE` (use mysql CLI) |
-| `database/20250320_full_seed_nodb.sql` | Same as above without `CREATE DATABASE` statements for phpMyAdmin |
-| `DB_DEPLOY.md` | Detailed DB import + verification instructions |
-| `PRE_DEPLOYMENT_CHECKLIST.md` | One-page list of tasks before switching DNS |
-| `DEPLOY_SMOKE_TEST.md` | Manual verification steps after deployment |
-
-Stay within this guide, keep instructions linear, and always leave email sending disabled until production staff explicitly test notifications.
+- **Updated file:** `DEPLOYMENT_GUIDE.md`
+- **Commands run:** `sed`, `rg`, `find php-backend -name "*.php" -print0 | xargs -0 -n1 php -l` (for lint verification earlier)
+- **Key additions:** Layout + instructions (`DEPLOYMENT_GUIDE.md:1-210`), DB import/compat info (§6), Cloudflare/SSL notes (§7), Smoke test (§9), Common issues (§10)
