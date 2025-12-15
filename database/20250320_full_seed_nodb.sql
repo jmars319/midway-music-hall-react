@@ -32,7 +32,7 @@ CREATE TABLE `admin_users` (
   `last_login` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `email` (`email`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -60,7 +60,7 @@ CREATE TABLE `admins` (
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `username` (`username`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -97,7 +97,7 @@ CREATE TABLE `artist_suggestions` (
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_suggestions_status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -154,7 +154,7 @@ CREATE TABLE `business_settings` (
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `setting_key` (`setting_key`)
-) ENGINE=InnoDB AUTO_INCREMENT=166 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=166 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -200,7 +200,7 @@ CREATE TABLE `event_categories` (
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_event_categories_slug` (`slug`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -232,7 +232,7 @@ CREATE TABLE `event_recurrence_exceptions` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_recurrence_exception` (`recurrence_id`,`exception_date`),
   CONSTRAINT `fk_recurrence_exception` FOREIGN KEY (`recurrence_id`) REFERENCES `event_recurrence_rules` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -271,7 +271,7 @@ CREATE TABLE `event_recurrence_rules` (
   `updated_by` varchar(191) DEFAULT NULL,
   `change_note` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -359,7 +359,7 @@ CREATE TABLE `events` (
   CONSTRAINT `fk_events_layout_version` FOREIGN KEY (`layout_version_id`) REFERENCES `seating_layout_versions` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_events_poster_media` FOREIGN KEY (`poster_image_id`) REFERENCES `media` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_events_series_master` FOREIGN KEY (`series_master_id`) REFERENCES `events` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=335 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=335 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -400,7 +400,7 @@ CREATE TABLE `events_backup_1761127051762` (
   PRIMARY KEY (`id`),
   KEY `idx_events_date` (`event_date`),
   KEY `idx_events_status` (`status`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -441,7 +441,7 @@ CREATE TABLE `events_backup_2025-10-22_0953` (
   PRIMARY KEY (`id`),
   KEY `idx_events_date` (`event_date`),
   KEY `idx_events_status` (`status`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -482,7 +482,7 @@ CREATE TABLE `events_backup_2025-10-22_0954` (
   PRIMARY KEY (`id`),
   KEY `idx_events_date` (`event_date`),
   KEY `idx_events_status` (`status`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -523,7 +523,7 @@ CREATE TABLE `events_backup_2025-10-22_0957` (
   PRIMARY KEY (`id`),
   KEY `idx_events_date` (`event_date`),
   KEY `idx_events_status` (`status`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -564,7 +564,7 @@ CREATE TABLE `events_backup_20251212` (
   KEY `idx_events_status` (`status`),
   KEY `idx_events_start_datetime` (`start_datetime`),
   KEY `fk_events_layout` (`layout_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -589,7 +589,7 @@ CREATE TABLE `layout_history` (
   `snapshot` json NOT NULL,
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=100 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=100 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -633,7 +633,7 @@ CREATE TABLE `media` (
   PRIMARY KEY (`id`),
   KEY `idx_media_category` (`category`),
   KEY `idx_media_created` (`created_at` DESC)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -683,7 +683,7 @@ CREATE TABLE `seat_requests` (
   CONSTRAINT `fk_seat_requests_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_seat_requests_layout_version` FOREIGN KEY (`layout_version_id`) REFERENCES `seating_layout_versions` (`id`) ON DELETE SET NULL,
   CONSTRAINT `seat_requests_ibfk_1` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -730,7 +730,7 @@ CREATE TABLE `seat_requests_backup_20251212` (
   KEY `idx_seat_requests_event` (`event_id`),
   KEY `idx_seat_requests_hold` (`hold_expires_at`),
   KEY `fk_seat_requests_layout_version` (`layout_version_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -774,7 +774,7 @@ CREATE TABLE `seating` (
   KEY `idx_seating_event` (`event_id`),
   CONSTRAINT `fk_seating_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_seating_layout` FOREIGN KEY (`layout_id`) REFERENCES `seating_layouts` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -804,7 +804,7 @@ CREATE TABLE `seating_config` (
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `unique_row` (`section_name`,`row_letter`)
-) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -839,7 +839,7 @@ CREATE TABLE `seating_layout_versions` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_layout_version` (`layout_id`,`version_number`),
   CONSTRAINT `fk_layout_versions_layout` FOREIGN KEY (`layout_id`) REFERENCES `seating_layouts` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -872,7 +872,7 @@ CREATE TABLE `seating_layouts` (
   `canvas_settings` json DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_is_default` (`is_default`)
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -898,7 +898,7 @@ CREATE TABLE `stage_settings` (
   `value` text,
   PRIMARY KEY (`id`),
   UNIQUE KEY `key_name` (`key_name`)
-) ENGINE=InnoDB AUTO_INCREMENT=95 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=95 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -928,7 +928,7 @@ CREATE TABLE `suggestions` (
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -951,178 +951,13 @@ UNLOCK TABLES;
 /*!50001 SET @saved_col_connection     = @@collation_connection */;
 /*!50001 SET character_set_client      = utf8mb4 */;
 /*!50001 SET character_set_results     = utf8mb4 */;
-/*!50001 SET collation_connection      = utf8mb4_0900_ai_ci */;
+/*!50001 SET collation_connection      = utf8mb4_unicode_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
-/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50013 SQL SECURITY INVOKER */
 /*!50001 VIEW `dashboard_stats` AS select (select count(0) from `events` where (`events`.`status` = 'upcoming')) AS `upcoming_events`,(select count(0) from `seat_requests` where (`seat_requests`.`status` = 'pending')) AS `pending_requests`,(select count(0) from `artist_suggestions` where (`artist_suggestions`.`status` = 'pending')) AS `pending_suggestions`,(select count(0) from `events` where ((`events`.`event_date` >= curdate()) and (`events`.`event_date` <= (curdate() + interval 30 day)))) AS `events_this_month` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
 /*!50001 SET collation_connection      = @saved_col_connection */;
-
---
--- Schema upgrades applied (2025-12-12)
---
-
-ALTER TABLE media
-  ADD COLUMN IF NOT EXISTS width INT DEFAULT NULL AFTER file_size,
-  ADD COLUMN IF NOT EXISTS height INT DEFAULT NULL AFTER width,
-  ADD COLUMN IF NOT EXISTS checksum CHAR(64) DEFAULT NULL AFTER height,
-  ADD COLUMN IF NOT EXISTS optimized_path VARCHAR(500) DEFAULT NULL AFTER caption,
-  ADD COLUMN IF NOT EXISTS webp_path VARCHAR(500) DEFAULT NULL AFTER optimized_path,
-  ADD COLUMN IF NOT EXISTS optimization_status ENUM('pending','processing','complete','skipped','failed') DEFAULT 'pending' AFTER webp_path,
-  ADD COLUMN IF NOT EXISTS processing_notes TEXT AFTER optimization_status;
-
-ALTER TABLE seating_layouts
-  ADD COLUMN IF NOT EXISTS stage_position JSON DEFAULT NULL,
-  ADD COLUMN IF NOT EXISTS stage_size JSON DEFAULT NULL;
-
-CREATE TABLE IF NOT EXISTS seating_layout_versions (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  layout_id INT NOT NULL,
-  version_number INT NOT NULL DEFAULT 1,
-  version_label VARCHAR(100) DEFAULT NULL,
-  layout_data JSON NOT NULL,
-  stage_position JSON DEFAULT NULL,
-  stage_size JSON DEFAULT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  created_by VARCHAR(191) DEFAULT NULL,
-  change_note VARCHAR(255) DEFAULT NULL,
-  CONSTRAINT fk_layout_versions_layout FOREIGN KEY (layout_id) REFERENCES seating_layouts(id) ON DELETE CASCADE,
-  UNIQUE KEY uniq_layout_version (layout_id, version_number)
-);
-
-ALTER TABLE events
-  ADD COLUMN IF NOT EXISTS artist_name VARCHAR(255) NOT NULL DEFAULT '' AFTER id,
-  ADD COLUMN IF NOT EXISTS title VARCHAR(255) DEFAULT NULL AFTER artist_name,
-  ADD COLUMN IF NOT EXISTS slug VARCHAR(255) DEFAULT NULL AFTER title,
-  ADD COLUMN IF NOT EXISTS description TEXT AFTER slug,
-  ADD COLUMN IF NOT EXISTS notes TEXT AFTER description,
-  ADD COLUMN IF NOT EXISTS genre VARCHAR(100) DEFAULT NULL AFTER notes,
-  ADD COLUMN IF NOT EXISTS category_tags JSON DEFAULT NULL AFTER genre,
-  ADD COLUMN IF NOT EXISTS image_url VARCHAR(500) DEFAULT NULL AFTER category_tags,
-  ADD COLUMN IF NOT EXISTS hero_image_id INT DEFAULT NULL AFTER image_url,
-  ADD COLUMN IF NOT EXISTS poster_image_id INT DEFAULT NULL AFTER hero_image_id,
-  ADD COLUMN IF NOT EXISTS ticket_price DECIMAL(10,2) DEFAULT NULL AFTER poster_image_id,
-  ADD COLUMN IF NOT EXISTS door_price DECIMAL(10,2) DEFAULT NULL AFTER ticket_price,
-  ADD COLUMN IF NOT EXISTS min_ticket_price DECIMAL(10,2) DEFAULT NULL AFTER door_price,
-  ADD COLUMN IF NOT EXISTS max_ticket_price DECIMAL(10,2) DEFAULT NULL AFTER min_ticket_price,
-  ADD COLUMN IF NOT EXISTS ticket_type ENUM('general_admission','reserved_seating','hybrid') DEFAULT 'general_admission' AFTER max_ticket_price,
-  ADD COLUMN IF NOT EXISTS seating_enabled TINYINT(1) DEFAULT 0 AFTER ticket_type,
-  ADD COLUMN IF NOT EXISTS venue_code ENUM('MMH','TGP') DEFAULT 'MMH' AFTER seating_enabled,
-  ADD COLUMN IF NOT EXISTS venue_section VARCHAR(100) DEFAULT NULL AFTER venue_code,
-  ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) DEFAULT 'America/New_York' AFTER venue_section,
-  ADD COLUMN IF NOT EXISTS start_datetime DATETIME AFTER timezone,
-  ADD COLUMN IF NOT EXISTS end_datetime DATETIME AFTER start_datetime,
-  ADD COLUMN IF NOT EXISTS door_time DATETIME DEFAULT NULL AFTER end_datetime,
-  ADD COLUMN IF NOT EXISTS event_date DATE DEFAULT NULL AFTER door_time,
-  ADD COLUMN IF NOT EXISTS event_time TIME DEFAULT NULL AFTER event_date,
-  ADD COLUMN IF NOT EXISTS age_restriction VARCHAR(50) DEFAULT 'All Ages' AFTER event_time,
-  ADD COLUMN IF NOT EXISTS status ENUM('draft','published','archived') DEFAULT 'draft' AFTER age_restriction,
-  ADD COLUMN IF NOT EXISTS visibility ENUM('public','private') DEFAULT 'public' AFTER status,
-  ADD COLUMN IF NOT EXISTS publish_at DATETIME DEFAULT NULL AFTER visibility,
-  ADD COLUMN IF NOT EXISTS layout_id INT DEFAULT NULL AFTER publish_at,
-  ADD COLUMN IF NOT EXISTS layout_version_id BIGINT DEFAULT NULL AFTER layout_id,
-  ADD COLUMN IF NOT EXISTS series_master_id INT DEFAULT NULL AFTER layout_version_id,
-  ADD COLUMN IF NOT EXISTS is_series_master TINYINT(1) DEFAULT 0 AFTER series_master_id,
-  ADD COLUMN IF NOT EXISTS ticket_url VARCHAR(500) DEFAULT NULL AFTER is_series_master,
-  ADD COLUMN IF NOT EXISTS contact_name VARCHAR(255) DEFAULT NULL AFTER ticket_url,
-  ADD COLUMN IF NOT EXISTS contact_phone_raw VARCHAR(50) DEFAULT NULL AFTER contact_name,
-  ADD COLUMN IF NOT EXISTS contact_phone_normalized VARCHAR(20) DEFAULT NULL AFTER contact_phone_raw,
-  ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255) DEFAULT NULL AFTER contact_phone_normalized,
-  ADD COLUMN IF NOT EXISTS change_note VARCHAR(255) DEFAULT NULL AFTER contact_email,
-  ADD COLUMN IF NOT EXISTS created_by VARCHAR(191) DEFAULT NULL AFTER change_note,
-  ADD COLUMN IF NOT EXISTS updated_by VARCHAR(191) DEFAULT NULL AFTER created_by,
-  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER updated_by,
-  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at,
-  ADD COLUMN IF NOT EXISTS deleted_at DATETIME DEFAULT NULL AFTER updated_at;
-
-ALTER TABLE events
-  ADD UNIQUE INDEX IF NOT EXISTS idx_events_slug (slug),
-  ADD INDEX IF NOT EXISTS idx_events_start (start_datetime),
-  ADD INDEX IF NOT EXISTS idx_events_status (status),
-  ADD INDEX IF NOT EXISTS idx_events_venue (venue_code);
-
-ALTER TABLE events
-  ADD CONSTRAINT IF NOT EXISTS fk_events_layout FOREIGN KEY (layout_id) REFERENCES seating_layouts(id) ON DELETE SET NULL,
-  ADD CONSTRAINT IF NOT EXISTS fk_events_layout_version FOREIGN KEY (layout_version_id) REFERENCES seating_layout_versions(id) ON DELETE SET NULL,
-  ADD CONSTRAINT IF NOT EXISTS fk_events_series_master FOREIGN KEY (series_master_id) REFERENCES events(id) ON DELETE SET NULL,
-  ADD CONSTRAINT IF NOT EXISTS fk_events_hero_media FOREIGN KEY (hero_image_id) REFERENCES media(id) ON DELETE SET NULL,
-  ADD CONSTRAINT IF NOT EXISTS fk_events_poster_media FOREIGN KEY (poster_image_id) REFERENCES media(id) ON DELETE SET NULL;
-
-CREATE TABLE IF NOT EXISTS event_recurrence_rules (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  event_id INT NOT NULL,
-  frequency ENUM('daily','weekly','monthly','yearly','custom') NOT NULL DEFAULT 'weekly',
-  interval INT NOT NULL DEFAULT 1,
-  byweekday VARCHAR(50) DEFAULT NULL,
-  bymonthday VARCHAR(50) DEFAULT NULL,
-  bysetpos VARCHAR(50) DEFAULT NULL,
-  starts_on DATE NOT NULL,
-  ends_on DATE DEFAULT NULL,
-  occurrence_count INT DEFAULT NULL,
-  timezone VARCHAR(64) DEFAULT 'America/New_York',
-  rule_payload JSON DEFAULT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by VARCHAR(191) DEFAULT NULL,
-  updated_by VARCHAR(191) DEFAULT NULL,
-  change_note VARCHAR(255) DEFAULT NULL,
-  CONSTRAINT fk_recurrence_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS event_recurrence_exceptions (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  recurrence_id BIGINT NOT NULL,
-  exception_date DATE NOT NULL,
-  exception_type ENUM('skip','override') DEFAULT 'skip',
-  override_payload JSON DEFAULT NULL,
-  notes TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  created_by VARCHAR(191) DEFAULT NULL,
-  UNIQUE KEY uniq_recurrence_exception (recurrence_id, exception_date),
-  CONSTRAINT fk_recurrence_exception FOREIGN KEY (recurrence_id) REFERENCES event_recurrence_rules(id) ON DELETE CASCADE
-);
-
-ALTER TABLE seating
-  ADD COLUMN IF NOT EXISTS layout_id INT DEFAULT NULL AFTER event_id,
-  ADD COLUMN IF NOT EXISTS table_shape VARCHAR(50) DEFAULT 'table-6' AFTER seat_type,
-  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER status,
-  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at;
-
-ALTER TABLE seating
-  ADD INDEX IF NOT EXISTS idx_seating_layout (layout_id),
-  ADD INDEX IF NOT EXISTS idx_seating_event (event_id);
-
-ALTER TABLE seating
-  ADD CONSTRAINT IF NOT EXISTS fk_seating_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE SET NULL,
-  ADD CONSTRAINT IF NOT EXISTS fk_seating_layout FOREIGN KEY (layout_id) REFERENCES seating_layouts(id) ON DELETE SET NULL;
-
-ALTER TABLE seat_requests
-  ADD COLUMN IF NOT EXISTS layout_version_id BIGINT DEFAULT NULL AFTER event_id,
-  ADD COLUMN IF NOT EXISTS seat_map_snapshot JSON DEFAULT NULL AFTER layout_version_id,
-  ADD COLUMN IF NOT EXISTS customer_phone_normalized VARCHAR(20) DEFAULT NULL AFTER customer_phone,
-  ADD COLUMN IF NOT EXISTS total_seats INT DEFAULT 0 AFTER selected_seats,
-  ADD COLUMN IF NOT EXISTS special_requests TEXT AFTER total_seats,
-  ADD COLUMN IF NOT EXISTS hold_expires_at DATETIME DEFAULT NULL AFTER status,
-  ADD COLUMN IF NOT EXISTS finalized_at DATETIME DEFAULT NULL AFTER hold_expires_at,
-  ADD COLUMN IF NOT EXISTS cutoff_override TINYINT(1) DEFAULT 0 AFTER finalized_at,
-  ADD COLUMN IF NOT EXISTS staff_notes TEXT AFTER cutoff_override,
-  ADD COLUMN IF NOT EXISTS change_note VARCHAR(255) DEFAULT NULL AFTER staff_notes,
-  ADD COLUMN IF NOT EXISTS created_by VARCHAR(191) DEFAULT NULL AFTER change_note,
-  ADD COLUMN IF NOT EXISTS updated_by VARCHAR(191) DEFAULT NULL AFTER created_by,
-  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER updated_by,
-  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at;
-
-ALTER TABLE seat_requests
-  MODIFY COLUMN status ENUM('hold','pending','approved','denied','finalized','cancelled') DEFAULT 'hold';
-
-ALTER TABLE seat_requests
-  ADD INDEX IF NOT EXISTS idx_seat_requests_event (event_id),
-  ADD INDEX IF NOT EXISTS idx_seat_requests_hold (hold_expires_at);
-
-ALTER TABLE seat_requests
-  ADD CONSTRAINT IF NOT EXISTS fk_seat_requests_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE SET NULL,
-  ADD CONSTRAINT IF NOT EXISTS fk_seat_requests_layout_version FOREIGN KEY (layout_version_id) REFERENCES seating_layout_versions(id) ON DELETE SET NULL;
 
 --
 -- Data adjustment (2025-12-15 Beach Bands timing)
