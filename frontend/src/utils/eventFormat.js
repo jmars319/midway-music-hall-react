@@ -10,6 +10,13 @@ const timeFormatter = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit',
 });
 
+const formatPriceValue = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  if (Number.isNaN(num)) return value;
+  return `$${num % 1 === 0 ? num.toFixed(0) : num.toFixed(2)}`;
+};
+
 const DEFAULT_EVENT_TIME = '18:00:00';
 
 const extractTimeToken = (value = '') => {
@@ -98,6 +105,25 @@ export const formatDoorsLabel = (event = {}) => {
   const door = getEventDoorDate(event);
   if (!door) return null;
   return timeFormatter.format(door);
+};
+
+export const formatEventStartTime = (event = {}) => {
+  const start = getEventStartDate(event);
+  if (!start) return null;
+  return timeFormatter.format(start);
+};
+
+export const formatEventPriceDisplay = (event = {}) => {
+  const min = formatPriceValue(event.min_ticket_price);
+  const max = formatPriceValue(event.max_ticket_price);
+  if (min && max && min !== max) {
+    return `${min} – ${max}`;
+  }
+  return (
+    formatPriceValue(event.ticket_price) ||
+    formatPriceValue(event.door_price) ||
+    null
+  );
 };
 
 export const eventHasSeating = (event = {}) => {

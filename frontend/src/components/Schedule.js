@@ -4,26 +4,10 @@ import { Calendar, DollarSign, Users, Share2, CalendarPlus, DoorOpen, ChevronLef
 import EventSeatingModal from './EventSeatingModal';
 import ResponsiveImage from './ResponsiveImage';
 import { API_BASE } from '../apiConfig';
-import { formatEventDateTimeLabel, formatDoorsLabel, eventHasSeating, getEventStartDate, isRecurringEvent } from '../utils/eventFormat';
+import { formatEventDateTimeLabel, formatDoorsLabel, formatEventPriceDisplay, eventHasSeating, getEventStartDate, isRecurringEvent } from '../utils/eventFormat';
 import { getCategoryBadge } from '../utils/categoryLabels';
 
 const EVENTS_PER_PAGE = 6;
-
-const formatPriceValue = (value) => {
-  if (value === null || value === undefined || value === '') return null;
-  const num = Number(value);
-  if (Number.isNaN(num)) return value;
-  return `$${num % 1 === 0 ? num.toFixed(0) : num.toFixed(2)}`;
-};
-
-const formatPriceRange = (event = {}) => {
-  const min = formatPriceValue(event.min_ticket_price);
-  const max = formatPriceValue(event.max_ticket_price);
-  if (min && max && min !== max) {
-    return `${min} – ${max}`;
-  }
-  return formatPriceValue(event.ticket_price) || formatPriceValue(event.door_price) || null;
-};
 
 const formatMonthKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 const formatMonthLabel = (date) => date.toLocaleString('en-US', { month: 'short', year: 'numeric' });
@@ -235,10 +219,10 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                             Doors {formatDoorsLabel(event)}
                           </div>
                         )}
-                        {formatPriceRange(event) && (
+                        {formatEventPriceDisplay(event) && (
                           <div className="flex items-center">
                             <DollarSign className="h-4 w-4 mr-2 text-purple-300" />
-                            {formatPriceRange(event)}
+                            {formatEventPriceDisplay(event)}
                           </div>
                         )}
                         {event.age_restriction && (

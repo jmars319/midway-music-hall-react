@@ -88,6 +88,31 @@ const formatDoorTime = (event) => {
   }).format(date);
 };
 
+const deriveDoorTimeInput = (value) => {
+  if (!value) return '';
+  const raw = String(value).trim();
+  if (!raw) return '';
+  const timePortion = raw.includes('T') ? raw.split('T')[1] : raw.includes(' ') ? raw.split(' ')[1] : raw;
+  if (timePortion && timePortion.includes(':')) {
+    const [hour, minute] = timePortion.split(':');
+    if (hour !== undefined && minute !== undefined) {
+      return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+    }
+  }
+  const match = raw.match(/(\d{1,2}):(\d{2})/);
+  if (match) {
+    const hour = match[1].padStart(2, '0');
+    return `${hour}:${match[2]}`;
+  }
+  return '';
+};
+
+const combineDateAndTime = (date, time) => {
+  if (!date || !time) return null;
+  const safeTime = time.length === 5 ? `${time}:00` : time;
+  return `${date} ${safeTime}`;
+};
+
 const eventAllowsSeatRequests = (event = {}) => {
   if (!event) return false;
   if (Number(event.seating_enabled) === 1) return true;
@@ -138,6 +163,7 @@ const initialForm = {
   artist_name: '',
   event_date: '',
   event_time: '',
+  door_time: '',
   genre: '',
   description: '',
   image_url: '',
@@ -148,6 +174,7 @@ const initialForm = {
   layout_id: '',
   category_id: '',
   seat_request_email_override: '',
+  venue_code: 'MMH',
 };
 
 export default function EventsModule(){
@@ -1015,6 +1042,7 @@ export default function EventsModule(){
       artist_name: event.artist_name || '',
       event_date: event.event_date || '',
       event_time: event.event_time || '',
+      door_time: deriveDoorTimeInput(event.door_time),
       genre: event.genre || '',
       description: event.description || '',
       image_url: event.image_url || '',
@@ -1025,6 +1053,7 @@ export default function EventsModule(){
       layout_id: event.layout_id || '',
       category_id: event.category_id ? String(event.category_id) : '',
       seat_request_email_override: event.seat_request_email_override || '',
+      venue_code: event.venue_code || 'MMH',
     });
     setImageFile(null);
     setImagePreview(event.image_url ? getImageUrlSync(event.image_url) : null);
@@ -1098,6 +1127,14 @@ export default function EventsModule(){
       } else if (typeof payload.seating_enabled === 'undefined') {
         payload.seating_enabled = true;
       }
+      payload.venue_code = (payload.venue_code || 'MMH').toUpperCase();
+      const normalizedDoorTime = combineDateAndTime(payload.event_date, payload.door_time);
+      if (!normalizedDoorTime) {
+        setError('Doors open time requires both an event date and a time.');
+        setSubmitting(false);
+        return;
+      }
+      payload.door_time = normalizedDoorTime;
 
       const res = await fetch(url, {
         method,
@@ -1109,11 +1146,11 @@ export default function EventsModule(){
         setShowForm(false);
         fetchEvents();
       } else {
-        setError('Failed to save event');
+        setError(data?.message || 'Failed to save event');
       }
     } catch (err) {
       console.error('Save event error', err);
-      setError('Failed to save event');
+      setError(err instanceof Error ? err.message : 'Failed to save event');
     } finally {
       setSubmitting(false);
     }
@@ -1196,6 +1233,10 @@ export default function EventsModule(){
       alert('Please set a date and time before duplicating this event.');
       return;
     }
+    if (!event.door_time) {
+      alert('Please set a Doors Open time before duplicating this event.');
+      return;
+    }
     const payload = {
       artist_name: `${baseName} (Copy)`,
       title: event.title || '',
@@ -1204,7 +1245,7 @@ export default function EventsModule(){
       genre: event.genre || '',
       event_date: eventDate,
       event_time: eventTime,
-      door_time: event.door_time || '',
+      door_time: event.door_time,
       ticket_price: event.ticket_price || '',
       door_price: event.door_price || '',
       min_ticket_price: event.min_ticket_price || '',
@@ -1533,7 +1574,15 @@ export default function EventsModule(){
               <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-white">Close</button>
             </div>
 
-            {error && <div className="mb-4 p-3 bg-red-600/10 border border-red-600 text-red-400 rounded">{error}</div>}
+            {error && (
+              <div
+                className="mb-4 p-3 bg-red-600/10 border border-red-600 text-red-400 rounded"
+                role="alert"
+                aria-live="assertive"
+              >
+                {error}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -1571,6 +1620,22 @@ export default function EventsModule(){
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Event Time*</label>
                 <input type="time" name="event_time" value={formData.event_time} onChange={handleChange} required className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Doors Open Time*</label>
+                <input
+                  type="time"
+                  name="door_time"
+                  value={formData.door_time}
+                  onChange={handleChange}
+                  required
+                  aria-describedby="door-time-help"
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                />
+                <p id="door-time-help" className="text-xs text-gray-400 mt-1">
+                  This feeds the “Doors Open” line on the public schedule.
+                </p>
               </div>
 
               <div>
@@ -1613,6 +1678,21 @@ export default function EventsModule(){
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Venue Section</label>
                 <input name="venue_section" value={formData.venue_section} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Venue*</label>
+                <select
+                  name="venue_code"
+                  value={formData.venue_code}
+                  onChange={handleChange}
+                  required
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                >
+                  <option value="MMH">Midway Music Hall</option>
+                  <option value="TGP">The Gathering Place</option>
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Controls which public schedule and filtering bucket this show appears in.</p>
               </div>
 
               <div>

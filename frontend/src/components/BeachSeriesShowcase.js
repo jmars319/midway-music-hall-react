@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Waves, Calendar, Users, Phone, Mail } from 'lucide-react';
 import EventSeatingModal from './EventSeatingModal';
 import useSiteContent from '../hooks/useSiteContent';
-import { eventHasSeating, isRecurringEvent } from '../utils/eventFormat';
+import { eventHasSeating, formatDoorsLabel, formatEventPriceDisplay, formatEventStartTime, isRecurringEvent } from '../utils/eventFormat';
 import { formatPhoneHref, CONTACT_LINK_CLASSES } from '../utils/contactLinks';
 
 const resolveDateValue = (event = {}) => event.start_datetime || event.event_date || event.date || null;
@@ -94,26 +94,50 @@ export default function BeachSeriesShowcase({ events = [] }) {
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {sortedEvents.map((event) => (
-            <article key={event.id} className="bg-gray-950/80 rounded-2xl border border-cyan-500/30 p-5">
-              <p className="text-xs uppercase tracking-widest text-cyan-200 mb-2">Beach Music</p>
-              <h3 className="text-2xl font-semibold text-white">{event.artist_name || event.title}</h3>
-              <p className="text-gray-300 mt-1">{event.description || event.notes || 'Classic Carolina beach music vibes.'}</p>
-              <div className="flex items-center gap-2 text-gray-300 mt-4">
-                <Calendar className="h-4 w-4 text-cyan-200" aria-hidden="true" />
-                <span>{formatDate(resolveDateValue(event))} · {event.venue_code || 'MMH'}</span>
-              </div>
-              {eventHasSeating(event) && !isRecurringEvent(event) && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedEvent(event)}
-                  className="mt-5 inline-flex items-center gap-2 rounded-lg bg-cyan-600/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500"
-                >
-                  <Users className="h-4 w-4" aria-hidden="true" /> Request Seats
-                </button>
-              )}
-            </article>
-          ))}
+          {sortedEvents.map((event) => {
+            const doorLabel = formatDoorsLabel(event);
+            const priceLabel = formatEventPriceDisplay(event);
+            const startTimeLabel = formatEventStartTime(event);
+            return (
+              <article key={event.id} className="bg-gray-950/80 rounded-2xl border border-cyan-500/30 p-5">
+                <p className="text-xs uppercase tracking-widest text-cyan-200 mb-2">Beach Music</p>
+                <h3 className="text-2xl font-semibold text-white">{event.artist_name || event.title}</h3>
+                <p className="text-gray-300 mt-1">{event.description || event.notes || 'Classic Carolina beach music vibes.'}</p>
+                <div className="flex items-center gap-2 text-gray-300 mt-4">
+                  <Calendar className="h-4 w-4 text-cyan-200" aria-hidden="true" />
+                  <span>{formatDate(resolveDateValue(event))} · {event.venue_code || 'MMH'}</span>
+                </div>
+                {(priceLabel || doorLabel || startTimeLabel) && (
+                  <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold text-cyan-100">
+                    {priceLabel && (
+                      <span className="inline-flex items-center rounded-full bg-gray-800/70 px-3 py-1 border border-cyan-500/20">
+                        {priceLabel}
+                      </span>
+                    )}
+                    {doorLabel && (
+                      <span className="inline-flex items-center rounded-full bg-gray-800/70 px-3 py-1 border border-cyan-500/20">
+                        Doors {doorLabel}
+                      </span>
+                    )}
+                    {startTimeLabel && (
+                      <span className="inline-flex items-center rounded-full bg-gray-800/70 px-3 py-1 border border-cyan-500/20">
+                        Start {startTimeLabel}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {eventHasSeating(event) && !isRecurringEvent(event) && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEvent(event)}
+                    className="mt-5 inline-flex items-center gap-2 rounded-lg bg-cyan-600/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500"
+                  >
+                    <Users className="h-4 w-4" aria-hidden="true" /> Request Seats
+                  </button>
+                )}
+              </article>
+            );
+          })}
         </div>
       </div>
     </section>

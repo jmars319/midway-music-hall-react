@@ -19,7 +19,7 @@ export default function Footer({ onAdminClick, onNavigate }){
 
   const businessPhoneHref = formatPhoneHref(business.phone || '336-793-4218');
   const primaryPhoneHref = formatPhoneHref(primaryContact?.phone);
-  const quickLinkButtonClasses = 'text-sm text-gray-200 underline decoration-purple-400/60 decoration-2 underline-offset-4 text-left inline-flex items-center justify-start rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 px-2 py-2 min-h-[44px] hover:text-white transition';
+  const quickLinkButtonClasses = 'text-sm text-gray-200 underline decoration-purple-400/60 decoration-2 underline-offset-4 text-left inline-flex items-center justify-start rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 px-2 py-2 min-h-[44px] hover:text-white transition w-full';
 
   return (
     <footer className="bg-gray-900 border-t border-purple-500/15 text-gray-200 mt-12" aria-labelledby="footer-heading">
@@ -63,7 +63,7 @@ export default function Footer({ onAdminClick, onNavigate }){
 
           <div>
             <h3 className="text-white font-bold mb-3">Quick Links</h3>
-            <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-1 lg:grid-cols-2">
               <button type="button" onClick={() => scrollToSection('schedule')} className={quickLinkButtonClasses}>Schedule</button>
               <button type="button" onClick={() => scrollToSection('recurring-events')} className={quickLinkButtonClasses}>Recurring</button>
               <button type="button" onClick={() => scrollToSection('lessons')} className={quickLinkButtonClasses}>Lessons</button>

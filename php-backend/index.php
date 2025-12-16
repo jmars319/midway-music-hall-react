@@ -339,6 +339,19 @@ function normalize_layout_identifier($value): ?int
     return null;
 }
 
+function normalize_door_time_input($value): ?string
+{
+    if ($value === null || $value === '' || $value === false) {
+        return null;
+    }
+    try {
+        $dt = new DateTimeImmutable((string) $value);
+        return $dt->format('Y-m-d H:i:s');
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
 function event_time_candidate(string $alias = 'e'): string
 {
     return "NULLIF(TRIM(SUBSTRING_INDEX({$alias}.event_time, '-', 1)), '')";
@@ -2645,9 +2658,23 @@ $router->add('POST', '/api/events', function (Request $request) {
         if (!$startInput && !empty($payload['event_date']) && !empty($payload['event_time'])) {
             $startInput = $payload['event_date'] . ' ' . $payload['event_time'];
         }
-        $startDt = $startInput ? new DateTimeImmutable($startInput, new DateTimeZone($timezone)) : null;
+        if (!$startInput) {
+            return Response::error('event_date and event_time are required', 422);
+        }
+        try {
+            $startDt = new DateTimeImmutable($startInput, new DateTimeZone($timezone));
+        } catch (Throwable $e) {
+            return Response::error('Invalid event_date or event_time value', 422);
+        }
         $endInput = $payload['end_datetime'] ?? null;
-        $endDt = $endInput ? new DateTimeImmutable($endInput, new DateTimeZone($timezone)) : null;
+        $endDt = null;
+        if ($endInput) {
+            try {
+                $endDt = new DateTimeImmutable($endInput, new DateTimeZone($timezone));
+            } catch (Throwable $e) {
+                return Response::error('Invalid end_datetime value', 422);
+            }
+        }
         $slugBase = slugify_string($payload['slug'] ?? ($title . ($startDt ? '-' . $startDt->format('Ymd') : '')));
         $slug = ensure_unique_slug($pdo, $slugBase);
         $venueCode = strtoupper(trim((string)($payload['venue_code'] ?? 'MMH')));
@@ -2704,7 +2731,10 @@ $router->add('POST', '/api/events', function (Request $request) {
         $contactPhoneNormalized = normalize_phone_number($contactPhoneRaw);
         $startString = $startDt ? $startDt->format('Y-m-d H:i:s') : null;
         $endString = $endDt ? $endDt->format('Y-m-d H:i:s') : null;
-        $doorTime = $payload['door_time'] ?? null;
+        $doorTime = normalize_door_time_input($payload['door_time'] ?? null);
+        if ($doorTime === null) {
+            return Response::error('door_time is required and must include a valid date and time.', 422);
+        }
         $publishAt = $payload['publish_at'] ?? ($status === 'published' && $startString ? $startString : null);
         $stmt = $pdo->prepare('INSERT INTO events (artist_name, title, slug, description, notes, genre, category_tags, category_id, image_url, hero_image_id, poster_image_id, ticket_price, door_price, min_ticket_price, max_ticket_price, ticket_type, seating_enabled, venue_code, venue_section, timezone, start_datetime, end_datetime, door_time, event_date, event_time, age_restriction, status, visibility, publish_at, layout_id, layout_version_id, ticket_url, contact_name, contact_phone_raw, contact_phone_normalized, contact_email, seat_request_email_override, change_note, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
@@ -2789,9 +2819,24 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         if (!$startInput && !empty($payload['event_date']) && !empty($payload['event_time'])) {
             $startInput = $payload['event_date'] . ' ' . $payload['event_time'];
         }
-        $startDt = $startInput ? new DateTimeImmutable($startInput, new DateTimeZone($timezone)) : ($existing['start_datetime'] ? new DateTimeImmutable($existing['start_datetime'], new DateTimeZone($timezone)) : null);
+        try {
+            $startDt = $startInput
+                ? new DateTimeImmutable($startInput, new DateTimeZone($timezone))
+                : ($existing['start_datetime'] ? new DateTimeImmutable($existing['start_datetime'], new DateTimeZone($timezone)) : null);
+        } catch (Throwable $e) {
+            return Response::error('Invalid event_date or event_time value', 422);
+        }
+        if (!$startDt) {
+            return Response::error('event_date and event_time are required', 422);
+        }
         $endInput = $payload['end_datetime'] ?? null;
-        $endDt = $endInput ? new DateTimeImmutable($endInput, new DateTimeZone($timezone)) : ($existing['end_datetime'] ? new DateTimeImmutable($existing['end_datetime'], new DateTimeZone($timezone)) : null);
+        try {
+            $endDt = $endInput
+                ? new DateTimeImmutable($endInput, new DateTimeZone($timezone))
+                : ($existing['end_datetime'] ? new DateTimeImmutable($existing['end_datetime'], new DateTimeZone($timezone)) : null);
+        } catch (Throwable $e) {
+            return Response::error('Invalid end_datetime value', 422);
+        }
         $slugInput = $payload['slug'] ?? $existing['slug'] ?? null;
         $slugBase = slugify_string($slugInput ?? ($title . ($startDt ? '-' . $startDt->format('Ymd') : '')));
         $slug = ensure_unique_slug($pdo, $slugBase, $eventId);
@@ -2852,6 +2897,12 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $endString = $endDt ? $endDt->format('Y-m-d H:i:s') : null;
         $publishAt = $payload['publish_at'] ?? $existing['publish_at'];
 
+        $doorTimeInput = array_key_exists('door_time', $payload) ? $payload['door_time'] : $existing['door_time'];
+        $doorTime = normalize_door_time_input($doorTimeInput);
+        if ($doorTime === null) {
+            return Response::error('door_time is required and must include a valid date and time.', 422);
+        }
+
         $stmt = $pdo->prepare('UPDATE events SET artist_name = ?, title = ?, slug = ?, description = ?, notes = ?, genre = ?, category_tags = ?, category_id = ?, image_url = ?, hero_image_id = ?, poster_image_id = ?, ticket_price = ?, door_price = ?, min_ticket_price = ?, max_ticket_price = ?, ticket_type = ?, seating_enabled = ?, venue_code = ?, venue_section = ?, timezone = ?, start_datetime = ?, end_datetime = ?, door_time = ?, event_date = ?, event_time = ?, age_restriction = ?, status = ?, visibility = ?, publish_at = ?, layout_id = ?, layout_version_id = ?, ticket_url = ?, contact_name = ?, contact_phone_raw = ?, contact_phone_normalized = ?, contact_email = ?, seat_request_email_override = ?, change_note = ?, updated_by = ? WHERE id = ?');
         $stmt->execute([
             $artist,
@@ -2876,7 +2927,7 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             $timezone,
             $startString,
             $endString,
-            $payload['door_time'] ?? $existing['door_time'],
+            $doorTime,
             $startDt ? $startDt->format('Y-m-d') : ($payload['event_date'] ?? $existing['event_date']),
             $startDt ? $startDt->format('H:i:s') : ($payload['event_time'] ?? $existing['event_time']),
             $payload['age_restriction'] ?? $existing['age_restriction'],
