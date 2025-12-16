@@ -147,6 +147,44 @@ export default function TableComponent({
     );
   }
 
+  // HIGH-TOP-2: Two seats sharing one side (wall-friendly)
+  if (normalizedShape === 'high-top-2') {
+    const seatSize = Math.floor(size * 0.3);
+    const gap = Math.floor(size * 0.08);
+    const seatY = size - gap - seatSize / 2;
+    const startX = (size - (2 * seatSize) - gap) / 2 + seatSize / 2;
+    const tableWidth = size * 0.65;
+    const tableHeight = Math.max(18, Math.floor(size * 0.22));
+    const tableTop = size * 0.28;
+
+    return (
+      <div style={{ width: size, height: size, position: 'relative' }}>
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: tableTop,
+            transform: 'translate(-50%, -50%)',
+            width: tableWidth,
+            height: tableHeight,
+            borderRadius: 9999,
+            background: '#4b5563',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            fontSize: 11,
+            fontWeight: 500,
+            textTransform: 'uppercase',
+          }}
+        >
+          High-Top
+        </div>
+        {[0, 1].map((i) => renderSeat(i + 1, startX + i * (seatSize + gap), seatY, seatSize))}
+      </div>
+    );
+  }
+
   // TABLE-4: Two on each side (rectangular)
   if (normalizedShape === 'table-4') {
     const seatSize = Math.floor(size * 0.28);

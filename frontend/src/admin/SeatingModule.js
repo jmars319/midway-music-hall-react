@@ -8,6 +8,7 @@ import { resolveRowHeaderLabels } from '../utils/seatLabelUtils';
 const seatTypes = ['general', 'premium', 'vip', 'accessible'];
 const tableShapes = [
   { value: 'table-2', label: '2-Top Table', seats: 2 },
+  { value: 'high-top-2', label: '2-Seat High-Top', seats: 2 },
   { value: 'table-4', label: '4-Top Table', seats: 4 },
   { value: 'table-6', label: '6-Top Table', seats: 6 },
   { value: 'table-8', label: '8-Top Table', seats: 8 },

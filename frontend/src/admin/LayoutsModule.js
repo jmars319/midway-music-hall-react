@@ -18,6 +18,7 @@ const initialForm = {
 const seatTypes = ['general', 'premium', 'vip', 'accessible'];
 const tableShapes = [
   { value: 'table-2', label: '2-Top Table', seats: 2 },
+  { value: 'high-top-2', label: '2-Seat High-Top', seats: 2 },
   { value: 'table-4', label: '4-Top Table', seats: 4 },
   { value: 'table-6', label: '6-Top Table', seats: 6 },
   { value: 'table-8', label: '8-Top Table', seats: 8 },
@@ -46,6 +47,7 @@ const canvasPresets = [
 
 const quickObjects = [
   { key: 'rect-6', label: 'Rect Table (6)', element_type: 'table', table_shape: 'table-6', total_seats: 6, seat_type: 'general' },
+  { key: 'high-top-2', label: 'High-Top Table (2)', element_type: 'table', table_shape: 'high-top-2', total_seats: 2, seat_type: 'general', width: 110, height: 90 },
   { key: 'rect-8', label: 'Rect Table (8)', element_type: 'table', table_shape: 'table-8', total_seats: 8, seat_type: 'general' },
   { key: 'round-8', label: 'Round Table (8)', element_type: 'table', table_shape: 'round-8', total_seats: 8, seat_type: 'general' },
   { key: 'chair', label: 'Single Chair', element_type: 'chair', table_shape: 'chair', total_seats: 1, seat_type: 'general' },
