@@ -373,12 +373,15 @@ function build_variant_payload_from_manifest(string $fileUrl, array $manifest): 
     }
     $fallbackOriginal = $original ?? $resolvedFileUrl ?? null;
 
+    $optimizedRepresentative = $optimizedVariants ? end($optimizedVariants) : null;
+    $webpRepresentative = $webpVariants ? end($webpVariants) : null;
+
     return [
         'file_url' => $resolvedFileUrl ?? $fileUrl,
         'original' => $original,
         'fallback_original' => $fallbackOriginal,
-        'optimized' => $optimizedVariants ? $optimizedVariants[0]['url'] : null,
-        'webp' => $webpVariants ? $webpVariants[0]['url'] : null,
+        'optimized' => $optimizedRepresentative['url'] ?? null,
+        'webp' => $webpRepresentative['url'] ?? null,
         'optimized_variants' => $optimizedVariants,
         'webp_variants' => $webpVariants,
         'optimized_srcset' => $optimizedSrcset,
