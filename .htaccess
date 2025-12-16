@@ -9,13 +9,13 @@
   RewriteCond %{HTTP:X-Forwarded-Proto} !https
   RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
+  # Public uploads (map /uploads/* to api/uploads/*)
+  RewriteRule ^uploads/(.*)$ api/uploads/$1 [L,NC,QSA]
+
   # Allow real files/folders (including api/index.php) to pass through as-is
   RewriteCond %{REQUEST_FILENAME} -f [OR]
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]
-
-  # Public uploads (map /uploads/* to api/uploads/*)
-  RewriteRule ^uploads/(.*)$ api/uploads/$1 [L]
 
   # API front controller
   RewriteRule ^api/?$ api/index.php [QSA,L]

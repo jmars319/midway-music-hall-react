@@ -104,6 +104,11 @@ const normalizeVariantEntries = (entries) => {
           original: entry,
           optimized: null,
           webp: null,
+          optimized_srcset: null,
+          webp_srcset: null,
+          fallback_original: entry,
+          intrinsic_width: null,
+          intrinsic_height: null,
         };
       }
       const original = entry.original || entry.file_url || entry.url || entry.fileUrl;
@@ -112,6 +117,13 @@ const normalizeVariantEntries = (entries) => {
         original,
         optimized: entry.optimized || entry.optimized_url || entry.optimizedUrl || null,
         webp: entry.webp || entry.webp_url || entry.webpUrl || null,
+        optimized_srcset: entry.optimized_srcset || entry.optimizedSrcset || null,
+        webp_srcset: entry.webp_srcset || entry.webpSrcset || null,
+        fallback_original: entry.fallback_original || entry.fallbackOriginal || original,
+        intrinsic_width: entry.intrinsic_width || entry.intrinsicWidth || null,
+        intrinsic_height: entry.intrinsic_height || entry.intrinsicHeight || null,
+        optimized_variants: entry.optimized_variants || entry.optimizedVariants || null,
+        webp_variants: entry.webp_variants || entry.webpVariants || null,
       };
     })
     .filter(Boolean);
@@ -211,7 +223,7 @@ export default function Hero({ variant = 'main', ctaTarget }) {
               <ResponsiveImage
                 image={image}
                 alt=""
-                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 100vw, 1280px"
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 100vw, 1920px"
                 className="w-full h-full object-cover"
                 pictureClassName="block w-full h-full"
                 priority={shouldPrioritizeImage(variant, index)}
