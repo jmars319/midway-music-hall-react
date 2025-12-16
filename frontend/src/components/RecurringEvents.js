@@ -21,25 +21,23 @@ const formatTime = (date) => {
 
 const pickBalancedColumns = (count, maxCols = 4) => {
   const safeCount = Math.max(0, count || 0);
-  const cap = Math.max(1, maxCols);
+  const cap = Math.max(1, Math.min(maxCols, safeCount || maxCols));
   if (safeCount === 0) {
     return 1;
   }
   let best = 1;
-  let bestEmpty = Infinity;
-  let bestRows = Infinity;
+  let bestScore = Infinity;
   for (let cols = cap; cols >= 1; cols -= 1) {
+    if (cols === 1 && safeCount > 1) {
+      continue;
+    }
     const rows = Math.ceil(safeCount / cols);
     const capacity = rows * cols;
     const empty = capacity - safeCount;
-    if (
-      empty < bestEmpty
-      || (empty === bestEmpty && rows < bestRows)
-      || (empty === bestEmpty && rows === bestRows && cols > best)
-    ) {
+    const score = (rows * 100) + empty;
+    if (score < bestScore || (score === bestScore && cols > best)) {
       best = cols;
-      bestEmpty = empty;
-      bestRows = rows;
+      bestScore = score;
     }
   }
   return best;
@@ -62,7 +60,7 @@ export default function RecurringEvents({ series = [] }) {
             <p className="text-sm uppercase tracking-widest text-purple-300">Recurring</p>
             <h2 className="text-3xl font-bold text-white mt-1">Weekly & Monthly Favorites</h2>
             <p className="text-gray-400 mt-2">
-              These community staples run on a predictable rhythm. Tap any card to preview the next dates.
+              These community staples run on a predictable rhythm with upcoming dates listed right on each card.
             </p>
           </div>
         </div>
