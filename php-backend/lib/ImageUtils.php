@@ -125,8 +125,8 @@ function process_image_variants(string $sourcePath, string $originalFilename, st
                 imagealphablending($webpResource, true);
                 imagesavealpha($webpResource, true);
             }
-            $webpQuality = defined('IMAGE_WEBP_QUALITY') ? (int) IMAGE_WEBP_QUALITY : 85;
-            $webpQuality = max(50, min(100, $webpQuality));
+            $webpQuality = defined('IMAGE_WEBP_QUALITY') ? (int) IMAGE_WEBP_QUALITY : 90;
+            $webpQuality = clamp_quality_value($webpQuality);
             if (@imagewebp($webpResource, $webpFullPath, $webpQuality)) {
                 $webpUrl = '/uploads/variants/webp/' . $webpFilename;
                 $webpVariants[] = [
@@ -471,6 +471,11 @@ function create_image_resource(string $path, ?int $type)
     }
 }
 
+function clamp_quality_value(int $value, int $min = 1, int $max = 100): int
+{
+    return max($min, min($max, $value));
+}
+
 function save_image_resource($resource, ?int $type, string $path): bool
 {
     switch ($type) {
@@ -478,8 +483,8 @@ function save_image_resource($resource, ?int $type, string $path): bool
             if (function_exists('imageinterlace')) {
                 imageinterlace($resource, true);
             }
-            $quality = defined('IMAGE_JPEG_QUALITY') ? (int) IMAGE_JPEG_QUALITY : 85;
-            $quality = max(60, min(95, $quality));
+            $quality = defined('IMAGE_JPEG_QUALITY') ? (int) IMAGE_JPEG_QUALITY : 88;
+            $quality = clamp_quality_value($quality);
             return @imagejpeg($resource, $path, $quality);
         case IMAGETYPE_PNG:
             $compression = defined('IMAGE_PNG_COMPRESSION') ? (int) IMAGE_PNG_COMPRESSION : 6;
@@ -488,8 +493,8 @@ function save_image_resource($resource, ?int $type, string $path): bool
         case IMAGETYPE_GIF:
             return @imagegif($resource, $path);
         case IMAGETYPE_WEBP:
-            $quality = defined('IMAGE_WEBP_QUALITY') ? (int) IMAGE_WEBP_QUALITY : 85;
-            $quality = max(50, min(100, $quality));
+            $quality = defined('IMAGE_WEBP_QUALITY') ? (int) IMAGE_WEBP_QUALITY : 90;
+            $quality = clamp_quality_value($quality);
             return function_exists('imagewebp') ? @imagewebp($resource, $path, $quality) : false;
         default:
             return false;

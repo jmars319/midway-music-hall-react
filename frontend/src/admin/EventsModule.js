@@ -190,6 +190,9 @@ export default function EventsModule(){
   const [imagePreview, setImagePreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageUploadProgress, setImageUploadProgress] = useState(0);
+  const [imageUploadProcessing, setImageUploadProcessing] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState({});
   const [filters, setFilters] = useState({
     status: 'all',
@@ -1077,11 +1080,46 @@ export default function EventsModule(){
     }
   };
 
-  const clearImage = () => {
-    setImageFile(null);
-    setImagePreview(null);
-    setFormData(prev => ({ ...prev, image_url: '' }));
+const clearImage = () => {
+  setImageFile(null);
+  setImagePreview(null);
+  setFormData(prev => ({ ...prev, image_url: '' }));
+};
+
+const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reject) => {
+  const formDataUpload = new FormData();
+  formDataUpload.append('image', file);
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `${API_BASE}/upload-image`);
+  xhr.upload.onprogress = (event) => {
+    if (event.lengthComputable) {
+      const percent = Math.round((event.loaded / event.total) * 100);
+      setImageUploadProgress(percent);
+    }
   };
+  xhr.upload.onload = () => {
+    setImageUploadProcessing(true);
+    setImageUploadProgress(100);
+  };
+  xhr.onerror = () => {
+    setImageUploadProcessing(false);
+    reject(new Error('Image upload failed'));
+  };
+  xhr.onload = () => {
+    setImageUploadProcessing(false);
+    if (xhr.status >= 200 && xhr.status < 300) {
+      try {
+        resolve(JSON.parse(xhr.responseText));
+      } catch (err) {
+        reject(err);
+      }
+    } else {
+      reject(new Error('Image upload failed'));
+    }
+  };
+  xhr.send(formDataUpload);
+}), []);
+
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1092,21 +1130,22 @@ export default function EventsModule(){
 
       // If a new image file is selected, upload it
       if (imageFile) {
-        const formDataUpload = new FormData();
-        formDataUpload.append('image', imageFile);
-        
         try {
-          const uploadRes = await fetch(`${API_BASE}/upload-image`, {
-            method: 'POST',
-            body: formDataUpload,
-          });
-          const uploadData = await uploadRes.json();
+          setImageUploading(true);
+          setImageUploadProcessing(false);
+          setImageUploadProgress(0);
+          const uploadData = await uploadImageWithProgress(imageFile);
           if (uploadData.success && uploadData.url) {
             finalImageUrl = uploadData.url;
+          } else {
+            throw new Error('Upload failed');
           }
         } catch (uploadErr) {
           console.error('Image upload error', uploadErr);
           setError('Image upload failed, but event will be saved without image');
+        } finally {
+          setImageUploading(false);
+          setImageUploadProcessing(false);
         }
       }
 
@@ -1777,6 +1816,37 @@ export default function EventsModule(){
                     />
                   </div>
                 </div>
+
+                  {(imageUploading || imageUploadProcessing) && (
+                    <div className="mt-3 space-y-2" aria-live="polite">
+                      {imageUploading && (
+                        <>
+                          <div className="flex justify-between text-xs text-gray-300">
+                            <span>Uploading image</span>
+                            <span>{imageUploadProgress}%</span>
+                          </div>
+                          <div
+                            className="w-full bg-gray-600 rounded-full h-2"
+                            role="progressbar"
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={imageUploadProgress}
+                          >
+                            <div
+                              className="bg-purple-500 h-2 rounded-full transition-all"
+                              style={{ width: `${imageUploadProgress}%` }}
+                            />
+                          </div>
+                        </>
+                      )}
+                      {imageUploadProcessing && (
+                        <div className="flex items-center gap-2 text-xs text-gray-200">
+                          <span className="inline-flex w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+                          <span>Processing images…</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
               </div>
 
               <div className="md:col-span-2">

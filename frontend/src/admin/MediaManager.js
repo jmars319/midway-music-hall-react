@@ -42,6 +42,8 @@ export default function MediaManager() {
   const [filteredMedia, setFilteredMedia] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [processingUpload, setProcessingUpload] = useState(false);
   const [activeCategory, setActiveCategory] = useState('all');
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadCategory, setUploadCategory] = useState('other');
@@ -85,20 +87,50 @@ export default function MediaManager() {
     }
   };
 
+  const sendMediaUpload = (formDataBody) => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/media`);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const percent = Math.round((event.loaded / event.total) * 100);
+        setUploadProgress(percent);
+      }
+    };
+    xhr.upload.onload = () => {
+      setProcessingUpload(true);
+      setUploadProgress(100);
+    };
+    xhr.onload = () => {
+      setProcessingUpload(false);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        reject(new Error('Upload failed'));
+      }
+    };
+    xhr.onerror = () => {
+      setProcessingUpload(false);
+      reject(new Error('Upload failed'));
+    };
+    xhr.send(formDataBody);
+  });
+
   const handleUpload = async () => {
     if (!selectedFile) return;
 
     setUploading(true);
+    setProcessingUpload(false);
+    setUploadProgress(0);
     const formData = new FormData();
     formData.append('file', selectedFile);
     formData.append('category', uploadCategory);
 
     try {
-      const res = await fetch(`${API_BASE}/media`, {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
+      const data = await sendMediaUpload(formData);
       if (data.success) {
         setSelectedFile(null);
         setPreviewUrl(null);
@@ -111,6 +143,8 @@ export default function MediaManager() {
       alert('Upload failed');
     } finally {
       setUploading(false);
+      setProcessingUpload(false);
+      setUploadProgress(0);
     }
   };
 
@@ -213,6 +247,35 @@ export default function MediaManager() {
             >
               {uploading ? 'Uploading...' : 'Upload'}
             </button>
+
+            {uploading && (
+              <div className="mt-4 space-y-2" aria-live="polite">
+                <div className="flex justify-between text-xs text-gray-300">
+                  <span>Upload progress</span>
+                  <span>{uploadProgress}%</span>
+                </div>
+                <div
+                  className="w-full bg-gray-600 rounded-full h-2"
+                  role="progressbar"
+                  aria-valuenow={uploadProgress}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div
+                    className="bg-purple-500 h-2 rounded-full transition-all"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+                {processingUpload ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-200">
+                    <span className="inline-flex w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+                    <span>Processing images…</span>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-300">Uploading…</p>
+                )}
+              </div>
+            )}
           </div>
 
           {previewUrl && (
