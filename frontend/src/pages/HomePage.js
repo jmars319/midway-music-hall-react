@@ -121,7 +121,7 @@ const lookupSeriesMetadata = (master) => {
   const override = SERIES_OVERRIDES.find((item) => item.match.test(master.title || master.artist_name || ''));
   const summary = override?.summary || master.description || master.notes || 'Recurring community series.';
   const scheduleLabel = override?.schedule || 'Recurring schedule';
-  return { summary, scheduleLabel };
+  return { summary, scheduleLabel, overrideKey: override?.key || null };
 };
 
 const getSeriesDisplayName = (event = {}) => event.series_label || event.title || event.artist_name || 'Recurring Series';
@@ -138,8 +138,28 @@ const buildRecurringSeries = (masters, occurrences, now) => {
     occMap.get(occ.series_master_id).push(occ);
   });
 
-  return masters.map((master) => {
-    const seriesOccurrences = (occMap.get(master.id) || []).filter((occ) => {
+  const usedKeys = new Set();
+  const registerKey = (baseKey, fallbackSuffix) => {
+    let key = baseKey || null;
+    if (key && !usedKeys.has(key)) {
+      usedKeys.add(key);
+      return key;
+    }
+    const suffix = fallbackSuffix ? `-${fallbackSuffix}` : `-${usedKeys.size + 1}`;
+    const sanitizedBase = baseKey || 'series';
+    key = `${sanitizedBase}${suffix}`;
+    let attempt = key;
+    let counter = 1;
+    while (usedKeys.has(attempt)) {
+      counter += 1;
+      attempt = `${key}-${counter}`;
+    }
+    usedKeys.add(attempt);
+    return attempt;
+  };
+
+  const buildPayload = (reference, masterId, occList = []) => {
+    const filtered = occList.filter((occ) => {
       const dt = getEventDateValue(occ);
       return dt && dt >= now;
     }).sort((a, b) => {
@@ -147,24 +167,55 @@ const buildRecurringSeries = (masters, occurrences, now) => {
       const bDate = getEventDateValue(b);
       return (aDate?.getTime() || 0) - (bDate?.getTime() || 0);
     });
-    const nextOccurrence = seriesOccurrences[0] || null;
+    const masterLike = reference || filtered[0];
+    if (!masterLike && !filtered.length) {
+      return null;
+    }
+    const nextOccurrence = filtered[0] || null;
+    if (!nextOccurrence && !filtered.length) {
+      return null;
+    }
     const happeningThisWeek = nextOccurrence ? sameWeek(getEventDateValue(nextOccurrence), now) : false;
-    const { summary, scheduleLabel } = lookupSeriesMetadata(master);
+    const { summary, scheduleLabel, overrideKey } = lookupSeriesMetadata(masterLike || {});
+    const displayNameSource = masterLike || {};
+    const fallbackBaseKey = normalizeSeriesKey(getSeriesDisplayName(displayNameSource));
+    const baseKey = overrideKey || fallbackBaseKey;
+    const key = registerKey(baseKey, masterId || reference?.id || filtered[0]?.id);
+    const sourceIds = [
+      reference?.id,
+      masterId && (!reference || reference.id !== masterId) ? masterId : null,
+      ...filtered.map((occ) => occ.id),
+    ].filter(Boolean);
 
     return {
-      key: normalizeSeriesKey(getSeriesDisplayName(master)),
-      master,
+      key,
+      master: reference || masterLike,
       nextOccurrence,
-      upcomingOccurrences: seriesOccurrences.slice(0, 6),
+      upcomingOccurrences: filtered.slice(0, 6),
       happeningThisWeek,
       summary,
       scheduleLabel,
-      sourceEventIds: [
-        master.id,
-        ...seriesOccurrences.map((occ) => occ.id),
-      ].filter(Boolean),
+      sourceEventIds: Array.from(new Set(sourceIds)),
     };
-  }).filter((item) => item.nextOccurrence || item.upcomingOccurrences.length);
+  };
+
+  const series = [];
+  masters.forEach((master) => {
+    const payload = buildPayload(master, master.id, occMap.get(master.id) || []);
+    if (payload) {
+      series.push(payload);
+    }
+    occMap.delete(master.id);
+  });
+
+  occMap.forEach((occList, masterId) => {
+    const payload = buildPayload(occList[0], masterId, occList);
+    if (payload) {
+      series.push(payload);
+    }
+  });
+
+  return series.filter((item) => item.nextOccurrence || item.upcomingOccurrences.length);
 };
 
 const buildManualRecurringSeries = (events, now, existingKeys = new Set()) => SERIES_OVERRIDES.map((override) => {
