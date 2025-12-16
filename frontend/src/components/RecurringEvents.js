@@ -41,18 +41,30 @@ export default function RecurringEvents({ series = [] }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {series.map((item) => {
-            const { master, nextOccurrence, upcomingOccurrences, happeningThisWeek, scheduleLabel, summary } = item;
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+          {series.map((item, idx) => {
+            const { master, nextOccurrence, upcomingOccurrences, happeningThisWeek, scheduleLabel, summary } = item || {};
+            const safeMaster = master || {};
+            const upcoming = Array.isArray(upcomingOccurrences) ? upcomingOccurrences : [];
+            const fallbackKey = [
+              item?.key,
+              safeMaster.id,
+              safeMaster.title || safeMaster.artist_name,
+              scheduleLabel,
+            ].filter(Boolean).join('|');
+            if (process.env.NODE_ENV !== 'production' && idx === 0) {
+              // eslint-disable-next-line no-console
+              console.debug('[RecurringEvents] render', series.length, 'items. first key=', fallbackKey || `recurring-${idx}`);
+            }
             return (
               <article
-                key={item.key || master.id || scheduleLabel}
+                key={fallbackKey || `recurring-${idx}`}
                 className="bg-gray-900 rounded-2xl border border-purple-500/30 p-5 flex flex-col space-y-4 h-full"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h3 className="text-2xl font-semibold text-white">{master.title || master.artist_name}</h3>
-                    <p className="text-gray-300 mt-1">{summary}</p>
+                    <h3 className="text-2xl font-semibold text-white">{safeMaster.title || safeMaster.artist_name || 'Recurring Event'}</h3>
+                    <p className="text-gray-300 mt-1">{summary || safeMaster.description || 'Regular gathering at Midway Music Hall.'}</p>
                   </div>
                   <RefreshCw className="h-6 w-6 text-purple-300 flex-shrink-0" />
                 </div>
@@ -62,10 +74,10 @@ export default function RecurringEvents({ series = [] }) {
                     <CalendarDays className="h-5 w-5 text-purple-300" />
                     <div>
                       <p className="text-sm uppercase tracking-wide text-purple-300">Typical schedule</p>
-                      <p className="text-white font-semibold">{scheduleLabel}</p>
+                      <p className="text-white font-semibold">{scheduleLabel || 'Recurring schedule TBA'}</p>
                     </div>
                   </div>
-                  {nextOccurrence ? (
+                  {nextOccurrence?.start_datetime ? (
                     <div className="flex items-center gap-3">
                       <Clock className="h-5 w-5 text-purple-300" />
                       <div>
@@ -89,18 +101,20 @@ export default function RecurringEvents({ series = [] }) {
                   )}
                 </div>
 
-                {upcomingOccurrences.length ? (
+                {upcoming.length ? (
                   <div>
                     <p className="text-sm uppercase tracking-widest text-purple-300 mb-2">Next dates</p>
                     <div className="divide-y divide-gray-800 border border-gray-800 rounded-xl overflow-hidden">
-                      {upcomingOccurrences.slice(0, 4).map((occ) => (
-                        <div key={occ.id} className="px-4 py-3 flex items-center justify-between bg-gray-900/70">
+                      {upcoming.slice(0, 4).map((occ, occIdx) => {
+                        const occKey = occ?.id || `${fallbackKey || 'recurring'}-occ-${occIdx}`;
+                        return (
+                        <div key={occKey} className="px-4 py-3 flex items-center justify-between bg-gray-900/70">
                           <div>
-                            <p className="text-white font-medium">{formatDateTime(occ.start_datetime)}</p>
-                            <p className="text-gray-400 text-sm">{formatTime(occ.start_datetime)} · {occ.venue_code || 'MMH'}</p>
+                            <p className="text-white font-medium">{formatDateTime(occ?.start_datetime)}</p>
+                            <p className="text-gray-400 text-sm">{formatTime(occ?.start_datetime)} · {occ?.venue_code || 'MMH'}</p>
                           </div>
                         </div>
-                      ))}
+                      );})}
                     </div>
                   </div>
                 ) : null}
