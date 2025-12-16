@@ -213,9 +213,9 @@ export default function Hero({ variant = 'main', ctaTarget }) {
   const textShadowStyle = { textShadow: '0 2px 6px rgba(0,0,0,0.45)' };
   return (
     <section className={`bg-gradient-to-br ${config.theme.gradient} text-white relative overflow-hidden`}>
-      {heroImages.length > 0 && (
-        <div className="absolute inset-0 z-0" aria-hidden="true">
-          {heroImages.map((image, index) => (
+      <div className="absolute inset-0 z-0" aria-hidden="true">
+        {heroImages.length > 0 ? (
+          heroImages.map((image, index) => (
             <div
               key={`${image.original || image.file_url || 'image'}-${index}`}
               className={`absolute inset-0 transition-opacity duration-1000 ${index === currentImageIndex ? 'opacity-100' : 'opacity-0'}`}
@@ -230,16 +230,18 @@ export default function Hero({ variant = 'main', ctaTarget }) {
                 fallbackAspectRatio="16 / 9"
               />
             </div>
-          ))}
-          <div
-            className="absolute inset-0 pointer-events-none"
-            style={{
-              background: config.theme.overlayGradient || 'linear-gradient(180deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.25) 100%)',
-              opacity: config.theme.overlayOpacity ?? 1,
-            }}
-          />
-        </div>
-      )}
+          ))
+        ) : (
+          <div className={`absolute inset-0 ${`bg-gradient-to-br ${config.theme.gradient}`} transition-opacity duration-700`} />
+        )}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: config.theme.overlayGradient || 'linear-gradient(180deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.25) 100%)',
+            opacity: config.theme.overlayOpacity ?? 1,
+          }}
+        />
+      </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 relative z-10">
         <div className="flex justify-center">

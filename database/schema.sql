@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS events (
   contact_phone_raw VARCHAR(50),
   contact_phone_normalized VARCHAR(20),
   contact_email VARCHAR(255),
+  contact_notes TEXT,
   seat_request_email_override VARCHAR(255) DEFAULT NULL,
   change_note VARCHAR(255),
   created_by VARCHAR(191),

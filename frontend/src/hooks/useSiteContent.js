@@ -77,6 +77,12 @@ const DEFAULT_CONTENT = {
     mark: null,
     default_event: null,
   },
+  settings: {
+    beach_price_label: '',
+    beach_price_note: '',
+  },
+  beach_price_label: '',
+  beach_price_note: '',
 };
 
 let cachedContent = null;
@@ -123,17 +129,38 @@ const clearStoredContent = () => {
   }
 };
 
+const normalizeSiteContent = (value) => {
+  const safe = value && typeof value === 'object' ? value : {};
+  const normalized = {
+    ...DEFAULT_CONTENT,
+    ...safe,
+    business: { ...DEFAULT_CONTENT.business, ...(safe.business || {}) },
+    map: { ...DEFAULT_CONTENT.map, ...(safe.map || {}) },
+    policies: { ...DEFAULT_CONTENT.policies, ...(safe.policies || {}) },
+    social: { ...DEFAULT_CONTENT.social, ...(safe.social || {}) },
+    review: { ...DEFAULT_CONTENT.review, ...(safe.review || {}) },
+    branding: { ...DEFAULT_CONTENT.branding, ...(safe.branding || {}) },
+    settings: { ...DEFAULT_CONTENT.settings, ...((safe.settings && typeof safe.settings === 'object') ? safe.settings : {}) },
+  };
+  normalized.contacts = Array.isArray(safe.contacts) ? safe.contacts : DEFAULT_CONTENT.contacts;
+  normalized.lessons = Array.isArray(safe.lessons) ? safe.lessons : DEFAULT_CONTENT.lessons;
+  normalized.box_office_note = safe.box_office_note || DEFAULT_CONTENT.box_office_note;
+  normalized.beach_price_label = normalized.settings.beach_price_label || safe.beach_price_label || '';
+  normalized.beach_price_note = normalized.settings.beach_price_note || safe.beach_price_note || '';
+  return normalized;
+};
+
 const stored = loadStoredContent();
 if (stored) {
-  cachedContent = stored;
-  primeBrandingCache(stored?.branding || null);
+  cachedContent = normalizeSiteContent(stored);
+  primeBrandingCache(cachedContent?.branding || null);
 }
 
 const fetchSiteContent = () => {
   if (!pendingRequest) {
     pendingRequest = fetch(`${API_BASE}/site-content`)
       .then((res) => res.json())
-      .then((data) => (data && data.success && data.content ? data.content : DEFAULT_CONTENT))
+      .then((data) => normalizeSiteContent(data && data.success && data.content ? data.content : DEFAULT_CONTENT))
       .catch(() => DEFAULT_CONTENT)
       .finally(() => {
         pendingRequest = null;
@@ -157,7 +184,7 @@ export default function useSiteContent() {
     let cancelled = false;
     fetchSiteContent().then((data) => {
       if (cancelled) return;
-      cachedContent = data || DEFAULT_CONTENT;
+      cachedContent = normalizeSiteContent(data || DEFAULT_CONTENT);
       primeBrandingCache(cachedContent?.branding || null);
       persistStoredContent(cachedContent);
       setContent(cachedContent);

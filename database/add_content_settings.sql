@@ -18,5 +18,7 @@ VALUES
   ('about_description', 'Midway Music Hall is an intimate live music venue in Winston-Salem, North Carolina. We focus on reliable sound, curated dance nights, and a welcoming community experience.\n\nJoin us for weekly shows, private rentals, and community gatherings that celebrate Carolina beach music, shag culture, and country roots.'),
   ('facebook_url', 'https://facebook.com/midwaymusichall'),
   ('instagram_url', 'https://instagram.com/midwaymusichal'),
-  ('twitter_url', 'https://twitter.com/midwaymusichal')
+  ('twitter_url', 'https://twitter.com/midwaymusichal'),
+  ('beach_price_label', ''),
+  ('beach_price_note', '')
 ON DUPLICATE KEY UPDATE setting_key=setting_key;

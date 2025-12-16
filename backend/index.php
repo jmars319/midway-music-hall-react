@@ -2752,7 +2752,7 @@ $router->add('POST', '/api/events', function (Request $request) {
             return Response::error('door_time is required and must include a valid date and time.', 422);
         }
         $publishAt = $payload['publish_at'] ?? ($status === 'published' && $startString ? $startString : null);
-        $stmt = $pdo->prepare('INSERT INTO events (artist_name, title, slug, description, notes, genre, category_tags, category_id, image_url, hero_image_id, poster_image_id, ticket_price, door_price, min_ticket_price, max_ticket_price, ticket_type, seating_enabled, venue_code, venue_section, timezone, start_datetime, end_datetime, door_time, event_date, event_time, age_restriction, status, visibility, publish_at, layout_id, layout_version_id, ticket_url, contact_name, contact_phone_raw, contact_phone_normalized, contact_email, seat_request_email_override, change_note, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt = $pdo->prepare('INSERT INTO events (artist_name, title, slug, description, notes, genre, category_tags, category_id, image_url, hero_image_id, poster_image_id, ticket_price, door_price, min_ticket_price, max_ticket_price, ticket_type, seating_enabled, venue_code, venue_section, timezone, start_datetime, end_datetime, door_time, event_date, event_time, age_restriction, status, visibility, publish_at, layout_id, layout_version_id, ticket_url, contact_name, contact_phone_raw, contact_phone_normalized, contact_email, contact_notes, seat_request_email_override, change_note, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $artist,
             $title,
@@ -2790,6 +2790,7 @@ $router->add('POST', '/api/events', function (Request $request) {
             $contactPhoneRaw,
             $contactPhoneNormalized,
             $payload['contact_email'] ?? null,
+            $payload['contact_notes'] ?? null,
             $seatRequestOverride,
             'created via API',
             'api',
@@ -2919,7 +2920,7 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             return Response::error('door_time is required and must include a valid date and time.', 422);
         }
 
-        $stmt = $pdo->prepare('UPDATE events SET artist_name = ?, title = ?, slug = ?, description = ?, notes = ?, genre = ?, category_tags = ?, category_id = ?, image_url = ?, hero_image_id = ?, poster_image_id = ?, ticket_price = ?, door_price = ?, min_ticket_price = ?, max_ticket_price = ?, ticket_type = ?, seating_enabled = ?, venue_code = ?, venue_section = ?, timezone = ?, start_datetime = ?, end_datetime = ?, door_time = ?, event_date = ?, event_time = ?, age_restriction = ?, status = ?, visibility = ?, publish_at = ?, layout_id = ?, layout_version_id = ?, ticket_url = ?, contact_name = ?, contact_phone_raw = ?, contact_phone_normalized = ?, contact_email = ?, seat_request_email_override = ?, change_note = ?, updated_by = ? WHERE id = ?');
+        $stmt = $pdo->prepare('UPDATE events SET artist_name = ?, title = ?, slug = ?, description = ?, notes = ?, genre = ?, category_tags = ?, category_id = ?, image_url = ?, hero_image_id = ?, poster_image_id = ?, ticket_price = ?, door_price = ?, min_ticket_price = ?, max_ticket_price = ?, ticket_type = ?, seating_enabled = ?, venue_code = ?, venue_section = ?, timezone = ?, start_datetime = ?, end_datetime = ?, door_time = ?, event_date = ?, event_time = ?, age_restriction = ?, status = ?, visibility = ?, publish_at = ?, layout_id = ?, layout_version_id = ?, ticket_url = ?, contact_name = ?, contact_phone_raw = ?, contact_phone_normalized = ?, contact_email = ?, contact_notes = ?, seat_request_email_override = ?, change_note = ?, updated_by = ? WHERE id = ?');
         $stmt->execute([
             $artist,
             $title,
@@ -2957,6 +2958,7 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             $contactPhoneRaw,
             $contactPhoneNormalized,
             $payload['contact_email'] ?? $existing['contact_email'],
+            $payload['contact_notes'] ?? $existing['contact_notes'],
             $seatRequestOverride,
             $payload['change_note'] ?? 'updated via API',
             'api',
@@ -4201,6 +4203,8 @@ $router->add('GET', '/api/site-content', function () {
             ),
             'default_event' => build_single_image_variant($settings['default_event_image'] ?? null),
         ];
+        $beachPriceLabel = trim((string)($settings['beach_price_label'] ?? ''));
+        $beachPriceNote = trim((string)($settings['beach_price_note'] ?? ''));
 
         Response::success([
             'content' => [
@@ -4213,6 +4217,12 @@ $router->add('GET', '/api/site-content', function () {
                 'social' => $social,
                 'review' => $review,
                 'branding' => $branding,
+                'beach_price_label' => $beachPriceLabel,
+                'beach_price_note' => $beachPriceNote,
+                'settings' => [
+                    'beach_price_label' => $beachPriceLabel,
+                    'beach_price_note' => $beachPriceNote,
+                ],
             ],
         ]);
     } catch (Throwable $error) {

@@ -152,6 +152,7 @@ CALL add_column_if_missing(@TARGET_DB, 'events', 'contact_name', 'contact_name V
 CALL add_column_if_missing(@TARGET_DB, 'events', 'contact_phone_raw', 'contact_phone_raw VARCHAR(50) DEFAULT NULL AFTER contact_name');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'contact_phone_normalized', 'contact_phone_normalized VARCHAR(20) DEFAULT NULL AFTER contact_phone_raw');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'contact_email', 'contact_email VARCHAR(255) DEFAULT NULL AFTER contact_phone_normalized');
+CALL add_column_if_missing(@TARGET_DB, 'events', 'contact_notes', 'contact_notes TEXT DEFAULT NULL AFTER contact_email');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'change_note', 'change_note VARCHAR(255) DEFAULT NULL AFTER contact_email');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'created_by', 'created_by VARCHAR(191) DEFAULT NULL AFTER change_note');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'updated_by', 'updated_by VARCHAR(191) DEFAULT NULL AFTER created_by');

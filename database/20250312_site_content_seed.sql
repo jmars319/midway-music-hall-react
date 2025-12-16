@@ -18,6 +18,8 @@ INSERT INTO business_settings (setting_key, setting_value) VALUES
 ('facebook_url', 'https://www.facebook.com/midwaymusichall'),
 ('instagram_url', 'https://www.instagram.com/midwaymusichall'),
 ('twitter_url', 'https://twitter.com/midwaymusichall'),
+('beach_price_label', ''),
+('beach_price_note', ''),
 ('site_contacts_json', '[
   {
     "name": "Donna Cheek",

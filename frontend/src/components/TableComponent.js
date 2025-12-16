@@ -40,10 +40,12 @@ export default function TableComponent({
   onToggleSeat, 
   interactive = true,
   tableShape,
-  reservedSeats = []
+  reservedSeats = [],
+  labelFormatter = null
 }) {
   const shape = tableShape || row.table_shape || row.seat_type || 'table-6';
   const normalizedShape = shapeAliases[shape] || shape;
+  const formatSeatLabel = (value) => (typeof labelFormatter === 'function' ? labelFormatter(value) : value);
   
   // Parse reserved seats from DB
   const reservedList = (() => {
@@ -75,7 +77,7 @@ export default function TableComponent({
   // Render individual seat
   const renderSeat = (seatNum, x, y, seatSize) => {
     const seatId = buildSeatId(row, seatNum);
-    const seatLabel = buildSeatLabel(row, seatNum);
+    const seatLabel = formatSeatLabel(buildSeatLabel(row, seatNum));
     const displayLabel = seatLabel.length > 4 ? seatLabel.slice(0, 4) : seatLabel;
     const classes = getSeatClasses(seatId);
     const style = { 

@@ -369,6 +369,36 @@ export default function SettingsModule(){
           </div>
 
           <div className="mt-6 pt-6 border-t border-gray-700">
+            <h3 className="text-lg font-bold mb-3">Beach Series Pricing</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              This overrides the Beach Bands pricing badge across the public site. Leave blank to fall back to each event&apos;s own price.
+            </p>
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Beach Price Label</label>
+                <input
+                  name="beach_price_label"
+                  value={settings.beach_price_label || ''}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="$15 advance / $20 door"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Beach Price Note (optional)</label>
+                <textarea
+                  name="beach_price_note"
+                  value={settings.beach_price_note || ''}
+                  onChange={handleChange}
+                  rows="2"
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="Includes reserved seating · Cash or card at the door"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-gray-700">
             <h3 className="text-lg font-bold mb-4">Site Images</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>

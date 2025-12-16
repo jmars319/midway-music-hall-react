@@ -175,6 +175,10 @@ const initialForm = {
   category_id: '',
   seat_request_email_override: '',
   venue_code: 'MMH',
+  contact_name: '',
+  contact_phone_raw: '',
+  contact_email: '',
+  contact_notes: '',
 };
 
 export default function EventsModule(){
@@ -1057,6 +1061,10 @@ export default function EventsModule(){
       category_id: event.category_id ? String(event.category_id) : '',
       seat_request_email_override: event.seat_request_email_override || '',
       venue_code: event.venue_code || 'MMH',
+      contact_name: event.contact_name || '',
+      contact_phone_raw: event.contact_phone_raw || event.contact_phone || event.contact_phone_normalized || '',
+      contact_email: event.contact_email || '',
+      contact_notes: event.contact_notes || '',
     });
     setImageFile(null);
     setImagePreview(event.image_url ? getImageUrlSync(event.image_url) : null);
@@ -1174,6 +1182,14 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
         return;
       }
       payload.door_time = normalizedDoorTime;
+      ['contact_name', 'contact_email', 'contact_phone_raw', 'contact_notes'].forEach((field) => {
+        if (typeof payload[field] === 'string') {
+          const trimmed = payload[field].trim();
+          payload[field] = trimmed.length ? trimmed : null;
+        } else if (!payload[field]) {
+          payload[field] = null;
+        }
+      });
 
       const res = await fetch(url, {
         method,
@@ -1298,6 +1314,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       contact_name: event.contact_name || '',
       contact_phone_raw: event.contact_phone_raw || event.contact_phone_normalized || '',
       contact_email: event.contact_email || '',
+      contact_notes: event.contact_notes || '',
       age_restriction: event.age_restriction || 'All Ages',
       visibility: event.visibility || 'public',
       image_url: event.image_url || '',
@@ -1762,6 +1779,63 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                     ? `Currently routed to ${editingSeatRouting.email} (${editingSeatRouting.label}).`
                     : 'Leave blank to use the Beach Bands inbox for beach shows or the main staff inbox for everything else.'}
                 </p>
+              </div>
+
+              <div className="md:col-span-2 rounded-2xl border border-gray-700 bg-gray-900/40 p-4 space-y-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-white">Event Contact</h3>
+                  <p className="text-sm text-gray-400">
+                    Displayed anywhere this event appears publicly (schedule, Beach Bands, seating requests).
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">Contact Name</label>
+                    <input
+                      name="contact_name"
+                      value={formData.contact_name}
+                      onChange={handleChange}
+                      className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                      placeholder="Donna Cheek"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">Contact Phone</label>
+                    <input
+                      type="tel"
+                      name="contact_phone_raw"
+                      value={formData.contact_phone_raw}
+                      onChange={handleChange}
+                      className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                      placeholder="336-793-4218"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      Used for seat confirmations and Beach Bands price inquiries.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">Contact Email</label>
+                    <input
+                      type="email"
+                      name="contact_email"
+                      value={formData.contact_email}
+                      onChange={handleChange}
+                      className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                      placeholder="events@midwaymusichall.net"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Contact Notes (optional)</label>
+                  <textarea
+                    name="contact_notes"
+                    value={formData.contact_notes}
+                    onChange={handleChange}
+                    rows="3"
+                    className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                    placeholder="Add call hours, text instructions, or seat request guidance."
+                  />
+                </div>
               </div>
 
               <div className="md:col-span-2">

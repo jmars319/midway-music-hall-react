@@ -191,7 +191,7 @@ function process_image_variants(string $sourcePath, string $originalFilename, st
 function determine_responsive_targets(int $intrinsicWidth): array
 {
     $targets = [];
-    $configured = defined('RESPONSIVE_IMAGE_WIDTHS') && is_array(RESPONSIVE_IMAGE_WIDTHS) ? RESPONSIVE_IMAGE_WIDTHS : [320, 480, 768, 1024, 1440, 1920];
+    $configured = defined('RESPONSIVE_IMAGE_WIDTHS') && is_array(RESPONSIVE_IMAGE_WIDTHS) ? RESPONSIVE_IMAGE_WIDTHS : [160, 240, 320, 480, 768, 1024, 1440, 1920];
     foreach ($configured as $candidate) {
         $candidate = (int) $candidate;
         if ($candidate > 0 && $candidate <= $intrinsicWidth) {

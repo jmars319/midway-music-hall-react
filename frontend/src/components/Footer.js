@@ -19,7 +19,7 @@ export default function Footer({ onAdminClick, onNavigate }){
 
   const businessPhoneHref = formatPhoneHref(business.phone || '336-793-4218');
   const primaryPhoneHref = formatPhoneHref(primaryContact?.phone);
-  const quickLinkButtonClasses = 'text-sm text-gray-200 underline decoration-purple-400/60 decoration-2 underline-offset-4 text-left inline-flex items-center justify-start rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 px-2 py-2 min-h-[44px] hover:text-white transition w-full';
+  const quickLinkButtonClasses = 'text-sm text-gray-200 underline decoration-purple-400/60 decoration-2 underline-offset-4 text-left inline-flex items-center justify-start rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 px-2 py-2 min-h-[40px] hover:text-white transition w-full';
 
   return (
     <footer className="bg-gray-900 border-t border-purple-500/15 text-gray-200 mt-12" aria-labelledby="footer-heading">

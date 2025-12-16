@@ -71,6 +71,7 @@ ALTER TABLE events
   ADD COLUMN IF NOT EXISTS contact_phone_raw VARCHAR(50) DEFAULT NULL AFTER contact_name,
   ADD COLUMN IF NOT EXISTS contact_phone_normalized VARCHAR(20) DEFAULT NULL AFTER contact_phone_raw,
   ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255) DEFAULT NULL AFTER contact_phone_normalized,
+  ADD COLUMN IF NOT EXISTS contact_notes TEXT DEFAULT NULL AFTER contact_email,
   ADD COLUMN IF NOT EXISTS change_note VARCHAR(255) DEFAULT NULL AFTER contact_email,
   ADD COLUMN IF NOT EXISTS created_by VARCHAR(191) DEFAULT NULL AFTER change_note,
   ADD COLUMN IF NOT EXISTS updated_by VARCHAR(191) DEFAULT NULL AFTER created_by,

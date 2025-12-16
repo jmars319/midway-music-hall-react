@@ -1,10 +1,18 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, Send, AlertCircle } from 'lucide-react';
+import { X, Send, AlertCircle, Phone, Mail } from 'lucide-react';
 import TableComponent, { isSeatReserved } from './TableComponent';
 import { API_BASE } from '../apiConfig';
 import { seatingLegendSwatches, seatingStatusLabels } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/seatLabelUtils';
+import { CONTACT_LINK_CLASSES, formatPhoneHref } from '../utils/contactLinks';
+
+const publicSeatLabel = (label = '') => {
+  const safe = String(label || '').trim();
+  if (!safe) return '';
+  const idx = safe.lastIndexOf(' - ');
+  return idx >= 0 ? safe.slice(idx + 3).trim() : safe;
+};
 
 export default function EventSeatingModal({ event, onClose }) {
   const [seatingConfig, setSeatingConfig] = useState([]);
@@ -36,6 +44,12 @@ export default function EventSeatingModal({ event, onClose }) {
     customerPhone: '',
     specialRequests: ''
   });
+  const contactName = (event.contact_name || '').trim();
+  const contactPhone = (event.contact_phone_raw || event.contact_phone || event.contact_phone_normalized || '').trim();
+  const contactEmail = (event.contact_email || '').trim();
+  const contactNotes = (event.contact_notes || '').trim();
+  const hasEventContact = Boolean(contactName || contactPhone || contactEmail || contactNotes);
+  const contactPhoneHref = formatPhoneHref(contactPhone);
 
   const handleModalClose = () => {
     // Close immediately when ESC is pressed; do not force confirmation
@@ -49,6 +63,7 @@ export default function EventSeatingModal({ event, onClose }) {
     [seatingConfig]
   );
   const seatLabelMap = useMemo(() => buildSeatLookupMap(activeRows), [activeRows]);
+  const seatLabelFor = (seatId) => publicSeatLabel(seatLabelMap[seatId] || seatId);
   const canvasWidth = canvasSettings?.width || 1200;
   const canvasHeight = canvasSettings?.height || 800;
 
@@ -222,6 +237,38 @@ export default function EventSeatingModal({ event, onClose }) {
           </button>
         </div>
 
+        {hasEventContact && (
+          <div className="px-6 py-4 border-b border-purple-500/20 bg-gray-950/40 space-y-2">
+            <p className="text-xs uppercase tracking-[0.4em] text-purple-200">Event Contact</p>
+            {contactName && <p className="text-lg font-semibold text-white">{contactName}</p>}
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              {contactPhone && (
+                <a
+                  href={contactPhoneHref || undefined}
+                  className={`${CONTACT_LINK_CLASSES} text-white bg-purple-600/20 border border-purple-500/40`}
+                  aria-label={`Call ${contactName || 'event contact'} at ${contactPhone}`}
+                >
+                  <Phone className="h-4 w-4" aria-hidden="true" />
+                  <span>{contactPhone}</span>
+                </a>
+              )}
+              {contactEmail && (
+                <a
+                  href={`mailto:${contactEmail}`}
+                  className={`${CONTACT_LINK_CLASSES} text-white bg-purple-600/20 border border-purple-500/40`}
+                  aria-label={`Email ${contactName || 'event contact'} at ${contactEmail}`}
+                >
+                  <Mail className="h-4 w-4" aria-hidden="true" />
+                  <span>{contactEmail}</span>
+                </a>
+              )}
+            </div>
+            {contactNotes && (
+              <p className="text-sm text-gray-300">{contactNotes}</p>
+            )}
+          </div>
+        )}
+
         {/* Content */}
         {loading ? (
           <div className="flex-1 flex items-center justify-center">
@@ -313,7 +360,7 @@ export default function EventSeatingModal({ event, onClose }) {
                   >
                     {selectedSeats.map((seatId) => (
                       <div key={seatId} className="px-3 py-1 bg-purple-600 text-white rounded-full text-sm font-medium" role="listitem">
-                        {describeSeatSelection(seatId, seatLabelMap[seatId])}
+                        {describeSeatSelection(seatId, seatLabelFor(seatId))}
                       </div>
                     ))}
                   </div>
@@ -429,6 +476,7 @@ export default function EventSeatingModal({ event, onClose }) {
                                 toggleSeat(seatId);
                               }}
                               interactive={true}
+                              labelFormatter={publicSeatLabel}
                             />
                           </div>
                         </div>
@@ -457,13 +505,13 @@ export default function EventSeatingModal({ event, onClose }) {
           <div className="p-6 border-t border-purple-500/20 bg-gray-900/50 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="flex-1">
               <div className="text-sm uppercase tracking-wide text-gray-400">Selected Seats</div>
-              {selectedSeats.length > 0 ? (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {selectedSeats.slice(0, 6).map((seat) => (
-                    <span key={seat} className="px-3 py-1 bg-purple-600/80 text-white rounded-full text-sm font-medium">
-                      {describeSeatSelection(seat, seatLabelMap[seat])}
-                    </span>
-                  ))}
+                  {selectedSeats.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selectedSeats.slice(0, 6).map((seat) => (
+                        <span key={seat} className="px-3 py-1 bg-purple-600/80 text-white rounded-full text-sm font-medium">
+                          {describeSeatSelection(seat, seatLabelFor(seat))}
+                        </span>
+                      ))}
                   {selectedSeats.length > 6 && (
                     <span className="text-gray-400 text-sm">+{selectedSeats.length - 6} more</span>
                   )}

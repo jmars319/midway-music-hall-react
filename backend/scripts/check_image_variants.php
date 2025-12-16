@@ -23,7 +23,7 @@ define('UPLOADS_RESPONSIVE_DIR', $absUploads . '/variants');
 define('UPLOADS_RESPONSIVE_OPTIMIZED_DIR', UPLOADS_RESPONSIVE_DIR . '/optimized');
 define('UPLOADS_RESPONSIVE_WEBP_DIR', UPLOADS_RESPONSIVE_DIR . '/webp');
 define('UPLOADS_MANIFEST_DIR', $absUploads . '/manifests');
-define('RESPONSIVE_IMAGE_WIDTHS', [320, 480, 768, 1024, 1440, 1920]);
+define('RESPONSIVE_IMAGE_WIDTHS', [160, 240, 320, 480, 768, 1024, 1440, 1920]);
 
 require __DIR__ . '/../lib/ImageUtils.php';
 

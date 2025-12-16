@@ -21,6 +21,8 @@ const formatDate = (value) => {
 export default function BeachSeriesShowcase({ events = [] }) {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const siteContent = useSiteContent();
+  const priceLabelSetting = (siteContent?.settings?.beach_price_label || siteContent?.beach_price_label || '').trim();
+  const priceNoteSetting = (siteContent?.settings?.beach_price_note || siteContent?.beach_price_note || '').trim();
 
   const sortedEvents = [...events].sort((a, b) => {
     const aTime = new Date(resolveDateValue(a) || 0).getTime();
@@ -63,6 +65,12 @@ export default function BeachSeriesShowcase({ events = [] }) {
           </div>
         </div>
 
+        {priceNoteSetting && (
+          <div className="mb-8 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-cyan-100 text-sm">
+            {priceNoteSetting}
+          </div>
+        )}
+
         {beachContact && (
           <div className="mb-8 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-6 shadow-lg">
             <p className="text-xs uppercase tracking-[0.2em] text-cyan-200 mb-2">Beach Bands Contact</p>
@@ -96,7 +104,7 @@ export default function BeachSeriesShowcase({ events = [] }) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {sortedEvents.map((event) => {
             const doorLabel = formatDoorsLabel(event);
-            const priceLabel = formatEventPriceDisplay(event);
+            const priceLabel = priceLabelSetting || formatEventPriceDisplay(event);
             const startTimeLabel = formatEventStartTime(event);
             return (
               <article key={event.id} className="bg-gray-950/80 rounded-2xl border border-cyan-500/30 p-5">
