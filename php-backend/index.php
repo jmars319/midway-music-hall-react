@@ -13,6 +13,8 @@ use function Midway\Backend\load_image_manifest;
 use function Midway\Backend\delete_image_with_variants;
 use function Midway\Backend\relative_upload_path;
 use function Midway\Backend\build_variant_payload_from_manifest;
+use function Midway\Backend\upload_asset_exists;
+use function Midway\Backend\normalize_existing_upload_url;
 
 $router = new Router();
 
@@ -708,7 +710,10 @@ function build_image_variants(array $fileUrls): array
         if (!is_string($url) || trim($url) === '') {
             continue;
         }
-        $normalized[] = $url;
+        $candidate = normalize_existing_upload_url($url);
+        if ($candidate) {
+            $normalized[] = $candidate;
+        }
     }
 
     if (empty($normalized)) {
@@ -768,19 +773,23 @@ function build_single_image_variant(?string $fileUrl): ?array
     if (!$fileUrl || trim($fileUrl) === '') {
         return null;
     }
-    $variants = build_image_variants([$fileUrl]);
+    $normalized = normalize_existing_upload_url($fileUrl);
+    if (!$normalized) {
+        return null;
+    }
+    $variants = build_image_variants([$normalized]);
     if (!empty($variants)) {
         return $variants[0];
     }
-    $derived = derive_variant_paths_from_disk($fileUrl);
+    $derived = derive_variant_paths_from_disk($normalized);
     return [
-        'file_url' => $fileUrl,
-        'original' => $derived['original'] ?? $fileUrl,
+        'file_url' => $normalized,
+        'original' => $derived['original'] ?? $normalized,
         'optimized' => $derived['optimized'] ?? null,
         'webp' => $derived['webp'] ?? null,
         'optimized_srcset' => $derived['optimized_srcset'] ?? null,
         'webp_srcset' => $derived['webp_srcset'] ?? null,
-        'fallback_original' => $derived['fallback_original'] ?? $fileUrl,
+        'fallback_original' => $derived['fallback_original'] ?? $normalized,
     ];
 }
 
@@ -1835,10 +1844,17 @@ function list_events(Request $request, ?string $scopeOverride = null): array
         }
         $imageLookup = [];
         $imageUrls = [];
-        foreach ($rows as $row) {
+        foreach ($rows as $index => $row) {
             $imageUrl = trim((string) ($row['image_url'] ?? ''));
-            if ($imageUrl !== '') {
-                $imageUrls[] = $imageUrl;
+            if ($imageUrl === '') {
+                continue;
+            }
+            $normalizedUrl = normalize_existing_upload_url($imageUrl);
+            if ($normalizedUrl) {
+                $rows[$index]['image_url'] = $normalizedUrl;
+                $imageUrls[] = $normalizedUrl;
+            } else {
+                $rows[$index]['image_url'] = null;
             }
         }
         if ($imageUrls) {

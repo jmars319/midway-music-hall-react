@@ -211,7 +211,7 @@ export default function Hero({ variant = 'main', ctaTarget }) {
               <ResponsiveImage
                 image={image}
                 alt=""
-                sizes="(max-width: 1024px) 100vw, 100vw"
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 100vw, 1280px"
                 className="w-full h-full object-cover"
                 pictureClassName="block w-full h-full"
                 priority={shouldPrioritizeImage(variant, index)}
@@ -257,7 +257,7 @@ export default function Hero({ variant = 'main', ctaTarget }) {
               <div className="flex items-center space-x-4">
                 <feature.icon className={`h-8 w-8 ${config.theme.icon}`} />
                 <div>
-                  <h3 className="text-lg font-semibold">{feature.title}</h3>
+                  <p className="text-lg font-semibold">{feature.title}</p>
                   <p className="text-sm text-gray-300">{feature.copy}</p>
                 </div>
               </div>

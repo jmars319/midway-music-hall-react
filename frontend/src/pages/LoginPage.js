@@ -11,7 +11,7 @@ export default function LoginPage({ onLogin, onBack }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const siteContent = useSiteContent();
-  const { logoUrl } = getBrandImages(siteContent);
+  const { logoVariant } = getBrandImages(siteContent);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -44,7 +44,7 @@ export default function LoginPage({ onLogin, onBack }) {
       <div className="max-w-md w-full bg-gray-800 rounded-xl p-6 border border-purple-500/20">
         <div className="flex justify-center mb-4">
           <ResponsiveImage
-            src={logoUrl}
+            image={logoVariant}
             alt="Midway Music Hall"
             width={160}
             height={64}

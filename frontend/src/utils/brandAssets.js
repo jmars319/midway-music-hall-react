@@ -3,7 +3,7 @@ import { buildImageVariant, prefixAssetUrl } from './imageVariants';
 const resolveVariantEntry = (value, fallback) => buildImageVariant(value, fallback);
 
 export const getBrandImages = (siteContent, fallbacks = {}) => {
-  const fallbackLogo = fallbacks.logo || '/logo.png';
+  const fallbackLogo = fallbacks.logo || '/android-chrome-192x192.png';
   const fallbackMark = fallbacks.mark || '/apple-touch-icon.png';
   const fallbackDefault = fallbacks.defaultEvent || '/android-chrome-192x192.png';
   const branding = siteContent?.branding || {};

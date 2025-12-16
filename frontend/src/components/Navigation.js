@@ -9,7 +9,7 @@ export default function Navigation() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [currentPath, setCurrentPath] = useState('/');
   const siteContent = useSiteContent();
-  const { logoUrl } = getBrandImages(siteContent);
+  const { logoVariant } = getBrandImages(siteContent);
   const SECTION_MAP = {
     home: 'home',
     schedule: 'schedule',
@@ -94,7 +94,7 @@ export default function Navigation() {
                 className="flex items-center text-white"
               >
                 <ResponsiveImage
-                  src={logoUrl}
+                  image={logoVariant}
                   alt=""
                   aria-hidden="true"
                   role="presentation"

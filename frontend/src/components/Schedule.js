@@ -168,7 +168,9 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
             </div>
           ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 min-h-[360px]">
-                {pagedEvents.map((event) => (
+                {pagedEvents.map((event) => {
+                  const readableTitle = event.artist_name || event.title || event.name || 'Untitled event';
+                  return (
                   <div
                     key={event.id || event.slug || event.title}
                     id={event.id ? `event-${event.id}` : undefined}
@@ -195,7 +197,7 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                     <div className="flex-1 space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <div>
-                          <h3 className="text-lg font-semibold">{event.artist_name || event.title || event.name || 'Untitled'}</h3>
+                          <h3 className="text-lg font-semibold">{readableTitle}</h3>
                           <p className="text-sm text-gray-400">{event.genre || event.venue_section || ''}</p>
                         </div>
                         {(() => {
@@ -245,6 +247,7 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                         <a
                           href={`${API_BASE}/events/${event.id}.ics`}
                           className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition"
+                          aria-label={`Add ${readableTitle} to calendar`}
                         >
                           <CalendarPlus className="h-4 w-4" /> Add to Calendar
                         </a>
@@ -281,8 +284,9 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                       </button>
                     )}
                   </div>
-                </div>
-                ))}
+                  </div>
+                  );
+                })}
               </div>
             )}
           </div>

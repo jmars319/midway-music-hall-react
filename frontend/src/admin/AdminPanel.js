@@ -36,7 +36,7 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
   const [active, setActive] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
   const siteContent = useSiteContent();
-  const { logoUrl, markUrl } = getBrandImages(siteContent);
+  const { logoVariant, markVariant } = getBrandImages(siteContent);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
@@ -113,7 +113,7 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
                       className="flex items-center space-x-2 bg-transparent border-0 p-0"
                     >
                       <ResponsiveImage
-                        src={logoUrl}
+                        image={logoVariant}
                         alt="Midway Music Hall"
                         width={collapsed ? 64 : 96}
                         height={collapsed ? 64 : 96}
@@ -173,7 +173,7 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
 
               <div className="flex items-center gap-3">
                 <ResponsiveImage
-                  src={markUrl}
+                  image={markVariant}
                   alt="Midway Music Hall"
                   width={48}
                   height={48}

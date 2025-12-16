@@ -116,7 +116,9 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
                 <section key={label}>
                   <h2 className="text-2xl font-semibold mb-4">{label}</h2>
                   <div className="space-y-4">
-                    {monthEvents.map((event) => (
+                    {monthEvents.map((event) => {
+                      const readableTitle = event.artist_name || event.title || 'Midway Music Hall Event';
+                      return (
                       <article
                         key={event.id || `${label}-${event.artist_name}`}
                         className="bg-gray-800 rounded-xl border border-purple-500/20 p-4 flex flex-col md:flex-row gap-4"
@@ -154,7 +156,7 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
                             })()}
                           </div>
                           <h3 className="text-xl font-semibold">
-                            {event.artist_name || event.title || 'Midway Music Hall Event'}
+                            {readableTitle}
                           </h3>
                           <p className="text-gray-300 text-sm">
                             {event.description || event.notes || 'Live performance at Midway Music Hall.'}
@@ -165,6 +167,7 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
                                 <a
                                   href={`${API_BASE}/events/${event.id}.ics`}
                                   className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded"
+                                  aria-label={`Add ${readableTitle} to calendar`}
                                 >
                                   <CalendarPlus className="h-4 w-4" /> Add to Calendar
                                 </a>
@@ -180,7 +183,8 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
                           </div>
                         </div>
                       </article>
-                    ))}
+                      );
+                    })}
                   </div>
                 </section>
               ))}

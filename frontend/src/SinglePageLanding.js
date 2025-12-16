@@ -25,7 +25,7 @@ function formatShortDate(d) {
 
 function SinglePageLanding() {
   const siteContent = useSiteContent();
-  const { logoUrl } = getBrandImages(siteContent);
+  const { logoVariant } = getBrandImages(siteContent);
 
   // derive map query from policies (Venue Address) or environment
   const venueAddress = (
@@ -101,7 +101,7 @@ function SinglePageLanding() {
       <header className="bg-gradient-to-br from-purple-900 via-gray-900 to-blue-900 text-white relative overflow-hidden py-16" role="banner">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <ResponsiveImage 
-            src={logoUrl} 
+            image={logoVariant} 
             alt="Midway Music Hall Logo" 
             width={320}
             height={192}

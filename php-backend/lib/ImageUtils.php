@@ -270,23 +270,115 @@ function relative_upload_path(string $fileUrl): ?string
     return null;
 }
 
+function asset_url_is_absolute(?string $url): bool
+{
+    if (!is_string($url)) {
+        return false;
+    }
+    $trimmed = trim($url);
+    if ($trimmed === '') {
+        return false;
+    }
+    return str_starts_with($trimmed, 'http://')
+        || str_starts_with($trimmed, 'https://')
+        || str_starts_with($trimmed, '//')
+        || str_starts_with($trimmed, 'data:');
+}
+
+function upload_asset_path_from_url(?string $url): ?string
+{
+    if (!is_string($url) || trim($url) === '') {
+        return null;
+    }
+    $relative = relative_upload_path($url);
+    if (!$relative) {
+        return null;
+    }
+    return rtrim(UPLOADS_DIR, '/') . '/' . $relative;
+}
+
+function upload_asset_exists(?string $url): bool
+{
+    if (!is_string($url)) {
+        return false;
+    }
+    $trimmed = trim($url);
+    if ($trimmed === '') {
+        return false;
+    }
+    if (asset_url_is_absolute($trimmed)) {
+        return true;
+    }
+    $path = upload_asset_path_from_url($trimmed);
+    if (!$path) {
+        return false;
+    }
+    return is_file($path);
+}
+
+function normalize_existing_upload_url(?string $url): ?string
+{
+    if (!is_string($url)) {
+        return null;
+    }
+    $trimmed = trim($url);
+    if ($trimmed === '') {
+        return null;
+    }
+    if (!upload_asset_exists($trimmed)) {
+        return null;
+    }
+    if (str_starts_with($trimmed, 'uploads/')) {
+        return '/' . ltrim($trimmed, '/');
+    }
+    return $trimmed;
+}
+
+function normalize_manifest_variants(array $variants): array
+{
+    $filtered = [];
+    foreach ($variants as $variant) {
+        if (!is_array($variant)) {
+            continue;
+        }
+        $url = normalize_existing_upload_url($variant['url'] ?? null);
+        if (!$url) {
+            continue;
+        }
+        $width = isset($variant['width']) ? (int) $variant['width'] : null;
+        $height = isset($variant['height']) ? (int) $variant['height'] : null;
+        $filtered[] = array_merge($variant, [
+            'url' => $url,
+            'width' => $width,
+            'height' => $height,
+        ]);
+    }
+    usort($filtered, function ($a, $b) {
+        return ($a['width'] ?? PHP_INT_MAX) <=> ($b['width'] ?? PHP_INT_MAX);
+    });
+    return $filtered;
+}
+
 function build_variant_payload_from_manifest(string $fileUrl, array $manifest): array
 {
-    $optimizedVariants = array_values(array_filter((array) ($manifest['variants']['optimized'] ?? []), function ($variant) {
-        return !empty($variant['url']) && (!isset($variant['path']) || !isset($variant['width']) || is_file($variant['path']) || str_starts_with($variant['url'], 'http'));
-    }));
-    $webpVariants = array_values(array_filter((array) ($manifest['variants']['webp'] ?? []), function ($variant) {
-        return !empty($variant['url']) && (!isset($variant['path']) || is_file($variant['path']) || str_starts_with($variant['url'], 'http'));
-    }));
+    $optimizedVariants = normalize_manifest_variants((array) ($manifest['variants']['optimized'] ?? []));
+    $webpVariants = normalize_manifest_variants((array) ($manifest['variants']['webp'] ?? []));
 
     $optimizedSrcset = build_srcset_string($optimizedVariants);
     $webpSrcset = build_srcset_string($webpVariants);
+    $resolvedFileUrl = normalize_existing_upload_url($fileUrl) ?? $fileUrl;
+    $original = normalize_existing_upload_url($manifest['original'] ?? $fileUrl);
+    if (!$original) {
+        $original = normalize_existing_upload_url($fileUrl);
+    }
+    $fallbackOriginal = $original ?? $resolvedFileUrl ?? null;
+
     return [
-        'file_url' => $fileUrl,
-        'original' => $manifest['original'] ?? $fileUrl,
-        'fallback_original' => $manifest['original'] ?? $fileUrl,
-        'optimized' => $optimizedVariants ? end($optimizedVariants)['url'] : null,
-        'webp' => $webpVariants ? end($webpVariants)['url'] : null,
+        'file_url' => $resolvedFileUrl ?? $fileUrl,
+        'original' => $original,
+        'fallback_original' => $fallbackOriginal,
+        'optimized' => $optimizedVariants ? $optimizedVariants[0]['url'] : null,
+        'webp' => $webpVariants ? $webpVariants[0]['url'] : null,
         'optimized_variants' => $optimizedVariants,
         'webp_variants' => $webpVariants,
         'optimized_srcset' => $optimizedSrcset,
