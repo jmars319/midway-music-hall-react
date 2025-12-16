@@ -19,6 +19,32 @@ const formatTime = (date) => {
   return value.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 };
 
+const pickBalancedColumns = (count, maxCols = 4) => {
+  const safeCount = Math.max(0, count || 0);
+  const cap = Math.max(1, maxCols);
+  if (safeCount === 0) {
+    return 1;
+  }
+  let best = 1;
+  let bestEmpty = Infinity;
+  let bestRows = Infinity;
+  for (let cols = cap; cols >= 1; cols -= 1) {
+    const rows = Math.ceil(safeCount / cols);
+    const capacity = rows * cols;
+    const empty = capacity - safeCount;
+    if (
+      empty < bestEmpty
+      || (empty === bestEmpty && rows < bestRows)
+      || (empty === bestEmpty && rows === bestRows && cols > best)
+    ) {
+      best = cols;
+      bestEmpty = empty;
+      bestRows = rows;
+    }
+  }
+  return best;
+};
+
 export default function RecurringEvents({ series = [] }) {
   if (!series.length) {
     return null;
@@ -41,7 +67,10 @@ export default function RecurringEvents({ series = [] }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div
+          className="grid grid-cols-1 md:grid-cols-2 lg:[grid-template-columns:repeat(var(--recur-cols),minmax(0,1fr))] gap-5"
+          style={{ '--recur-cols': String(pickBalancedColumns(series.length, 4)) }}
+        >
           {series.map((item, idx) => {
             const { master, nextOccurrence, upcomingOccurrences, happeningThisWeek, scheduleLabel, summary } = item || {};
             const safeMaster = master || {};
