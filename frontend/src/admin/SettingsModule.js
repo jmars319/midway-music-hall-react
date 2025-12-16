@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { API_BASE, SERVER_BASE } from '../App';
+import { API_BASE, SERVER_BASE, invalidateBrandingCache } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
+import { invalidateSiteContentCache } from '../hooks/useSiteContent';
 
 // SettingsModule: admin UI for business/stage settings
 
@@ -97,7 +98,8 @@ export default function SettingsModule(){
       });
       const data = await res.json();
       if (data && data.success) {
-        // optionally refetch
+        invalidateSiteContentCache();
+        invalidateBrandingCache();
         fetchSettings();
       } else {
         setError('Failed to save settings');
@@ -418,6 +420,31 @@ export default function SettingsModule(){
                   />
                 )}
                 <p className="text-xs text-gray-400 mt-1">Used when events have no image</p>
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">Square Icon / Avatar</label>
+                <select
+                  name="site_brand_mark"
+                  value={settings.site_brand_mark || ''}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded mb-2"
+                >
+                  <option value="">Use navigation logo</option>
+                  {media.map((m) => (
+                    <option key={m.id} value={m.file_url}>{m.original_name}</option>
+                  ))}
+                </select>
+                {settings.site_brand_mark && (
+                  <ResponsiveImage
+                    src={`${SERVER_BASE}${settings.site_brand_mark}`}
+                    alt="Brand icon"
+                    width={128}
+                    height={128}
+                    className="w-24 h-24 border border-gray-600 rounded object-cover"
+                  />
+                )}
+                <p className="text-xs text-gray-400 mt-1">Used for avatars and compact brand marks.</p>
               </div>
             </div>
           </div>

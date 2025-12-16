@@ -7,7 +7,7 @@
 // contact_email) and falls back to the raw `contact` JSON when necessary.
 import React, { useState } from 'react';
 import { Music, Send, CheckCircle } from 'lucide-react';
-import { API_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 
 const GENRES = ['Rock', 'Jazz', 'Country', 'Hip Hop', 'Electronic', 'Folk', 'Blues', 'R&B', 'Pop', 'Metal', 'Indie', 'Other'];
 
@@ -122,13 +122,13 @@ export default function ArtistSuggestion() {
           <form onSubmit={handleSubmit}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-white mb-2">Artist/Band Name</label>
-                <input name="artistName" value={form.artistName} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" required />
+                <label className="block text-white mb-2" htmlFor="artistName">Artist/Band Name</label>
+                <input id="artistName" name="artistName" value={form.artistName} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" required />
               </div>
 
               <div>
-                <label className="block text-white mb-2">Genre</label>
-                <select name="genre" value={form.genre} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg">
+                <label className="block text-white mb-2" htmlFor="genre">Genre</label>
+                <select id="genre" name="genre" value={form.genre} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg">
                   <option value="">Select genre</option>
                   {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
                 </select>
@@ -137,33 +137,33 @@ export default function ArtistSuggestion() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
               <div>
-                <label className="block text-white mb-2">Contact Name</label>
-                <input name="contactName" value={form.contactName} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" required />
+                <label className="block text-white mb-2" htmlFor="contactName">Contact Name</label>
+                <input id="contactName" name="contactName" value={form.contactName} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" required />
               </div>
               <div>
-                <label className="block text-white mb-2">Contact Email</label>
-                <input name="contactEmail" type="email" value={form.contactEmail} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" required />
+                <label className="block text-white mb-2" htmlFor="contactEmail">Contact Email</label>
+                <input id="contactEmail" name="contactEmail" type="email" value={form.contactEmail} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" required />
               </div>
             </div>
 
             <div className="mt-3">
-              <label className="block text-white mb-2">Contact Phone</label>
-              <input name="contactPhone" value={form.contactPhone} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" />
+              <label className="block text-white mb-2" htmlFor="contactPhone">Contact Phone</label>
+              <input id="contactPhone" name="contactPhone" value={form.contactPhone} onChange={handleChange} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" />
             </div>
 
             <div className="mt-3">
-              <label className="block text-white mb-2">Music Links (Spotify, YouTube, etc.)</label>
-              <input name="musicLinks" value={form.musicLinks} onChange={handleChange} placeholder="https://... , https://..." className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" />
+              <label className="block text-white mb-2" htmlFor="musicLinks">Music Links (Spotify, YouTube, etc.)</label>
+              <input id="musicLinks" name="musicLinks" value={form.musicLinks} onChange={handleChange} placeholder="https://... , https://..." className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" />
             </div>
 
             <div className="mt-3">
-              <label className="block text-white mb-2">Social Media</label>
-              <input name="socialMedia" value={form.socialMedia} onChange={handleChange} placeholder="@artist, facebook.com/artist" className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" />
+              <label className="block text-white mb-2" htmlFor="socialMedia">Social Media</label>
+              <input id="socialMedia" name="socialMedia" value={form.socialMedia} onChange={handleChange} placeholder="@artist, facebook.com/artist" className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" />
             </div>
 
             <div className="mt-3">
-              <label className="block text-white mb-2">Message / Why should we book this artist?</label>
-              <textarea name="message" value={form.message} onChange={handleChange} rows={4} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg resize-none" />
+              <label className="block text-white mb-2" htmlFor="suggestionMessage">Message / Why should we book this artist?</label>
+              <textarea id="suggestionMessage" name="message" value={form.message} onChange={handleChange} rows={4} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg resize-none" />
             </div>
 
             <div className="mt-6 flex justify-end items-center gap-3">

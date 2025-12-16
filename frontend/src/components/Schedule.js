@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, DollarSign, Users, Share2, CalendarPlus, DoorOpen, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import EventSeatingModal from './EventSeatingModal';
 import ResponsiveImage from './ResponsiveImage';
-import { API_BASE, getImageUrlSync } from '../App';
+import { API_BASE } from '../apiConfig';
 import { formatEventDateTimeLabel, formatDoorsLabel, eventHasSeating, getEventStartDate, isRecurringEvent } from '../utils/eventFormat';
 import { getCategoryBadge } from '../utils/categoryLabels';
 
@@ -137,53 +137,58 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
             <div className="mb-6">
               <div className="text-sm text-gray-400 mb-2">Filter by month</div>
               <div className="flex flex-wrap gap-2">
-                {monthFilters.map((month) => (
-                  <button
-                    key={month.key}
-                    type="button"
-                    onClick={() => setActiveMonth(month.key)}
-                    className={`px-3 py-1.5 rounded-full text-sm border transition ${
-                      activeMonth === month.key
-                        ? 'bg-purple-600 text-white border-purple-500'
-                        : 'border-gray-700 text-gray-300 hover:text-white'
-                    }`}
-                  >
-                    {month.label}
-                  </button>
-                ))}
+                {monthFilters.map((month) => {
+                  const isActive = activeMonth === month.key;
+                  return (
+                    <button
+                      key={month.key}
+                      type="button"
+                      onClick={() => setActiveMonth(month.key)}
+                      aria-pressed={isActive}
+                      className={`px-3 py-1.5 rounded-full text-sm border transition ${
+                        isActive
+                          ? 'bg-purple-600 text-white border-purple-500'
+                          : 'border-gray-700 text-gray-300 hover:text-white'
+                      }`}
+                    >
+                      {month.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
 
-          {loading ? (
-            <div className="flex items-center justify-center h-48">
-              <div className="animate-spin h-12 w-12 border-4 border-purple-500 border-t-transparent rounded-full"></div>
-            </div>
-          ) : errorMessage ? (
-            <div className="text-center py-12">
-              <Calendar className="h-16 w-16 text-red-400 mx-auto mb-4" />
-              <p className="text-xl text-red-200">Events are temporarily unavailable.</p>
-              <p className="text-red-300 mt-2">{errorMessage}</p>
-            </div>
-          ) : events.length === 0 ? (
-            <div className="text-center py-12">
-              <Calendar className="h-16 w-16 text-gray-500 mx-auto mb-4" />
-              <p className="text-xl text-gray-400">No upcoming shows</p>
-              <p className="text-gray-500 mt-2">Check back soon for new events.</p>
-            </div>
-          ) : showFilteredEmptyState ? (
-            <div className="text-center py-12">
-              <Calendar className="h-16 w-16 text-gray-500 mx-auto mb-4" />
-              <p className="text-xl text-gray-400">No events in {activeMonthLabel}</p>
-              <p className="text-gray-500 mt-2">Try another month or tap \"All\".</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-              {pagedEvents.map((event) => (
-                <div
-                  key={event.id || event.slug || event.title}
-                  id={event.id ? `event-${event.id}` : undefined}
-                  className="bg-gray-800 rounded-xl border border-gray-700/70 hover:border-purple-400/60 transition p-4 flex flex-col gap-4"
+          <div className="min-h-[360px]">
+            {loading ? (
+              <div className="flex items-center justify-center h-48">
+                <div className="animate-spin h-12 w-12 border-4 border-purple-500 border-t-transparent rounded-full"></div>
+              </div>
+            ) : errorMessage ? (
+              <div className="text-center py-12">
+                <Calendar className="h-16 w-16 text-red-400 mx-auto mb-4" />
+                <p className="text-xl text-red-200">Events are temporarily unavailable.</p>
+                <p className="text-red-300 mt-2">{errorMessage}</p>
+              </div>
+            ) : events.length === 0 ? (
+              <div className="text-center py-12">
+                <Calendar className="h-16 w-16 text-gray-500 mx-auto mb-4" />
+                <p className="text-xl text-gray-400">No upcoming shows</p>
+                <p className="text-gray-500 mt-2">Check back soon for new events.</p>
+              </div>
+            ) : showFilteredEmptyState ? (
+              <div className="text-center py-12">
+                <Calendar className="h-16 w-16 text-gray-500 mx-auto mb-4" />
+                <p className="text-xl text-gray-400">No events in {activeMonthLabel}</p>
+                <p className="text-gray-500 mt-2">Try another month or tap "All".</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 min-h-[360px]">
+                {pagedEvents.map((event) => (
+                  <div
+                    key={event.id || event.slug || event.title}
+                    id={event.id ? `event-${event.id}` : undefined}
+                    className="bg-gray-800 rounded-xl border border-gray-700/70 hover:border-purple-400/60 transition p-4 flex flex-col gap-4 min-h-[320px]"
                 >
                   {(!event.start_datetime && !event.event_date) && (
                     <div className="text-xs font-semibold text-amber-200 bg-amber-500/10 border border-amber-400/30 rounded-full px-3 py-1 w-fit">
@@ -193,11 +198,14 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                   <div className="flex items-start gap-4">
                     <div className="w-20 h-20 rounded-lg overflow-hidden bg-gray-800 flex-shrink-0">
                       <ResponsiveImage
-                        src={getImageUrlSync(event.image_url)}
+                        image={event.image_variants}
                         alt={event.artist_name || 'Event'}
-                        width={160}
-                        height={160}
+                        width={event.image_intrinsic_width}
+                        height={event.image_intrinsic_height}
+                        sizes="80px"
                         className="w-full h-full object-cover"
+                        pictureClassName="block w-full h-full"
+                        fallbackAspectRatio="1 / 1"
                       />
                     </div>
                     <div className="flex-1 space-y-2">
@@ -290,9 +298,10 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                     )}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
 
           {events.length > 0 && filteredEvents.length > 0 && (
             <div className="mt-8 flex flex-wrap items-center justify-end gap-2 text-sm">

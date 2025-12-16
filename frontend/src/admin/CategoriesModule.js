@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { API_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 
 const initialEditState = { id: null, name: '', seat_request_email_to: '' };
 

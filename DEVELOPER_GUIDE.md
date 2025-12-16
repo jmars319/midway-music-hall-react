@@ -84,6 +84,7 @@ Architecture overview
   - Uses `mysql2` promise pool for DB access. Environment config via `.env`.
   - Responsible for events, seating config, seat_requests, layout history,
     suggestions, and simple auth.
+- Production API traffic runs through `php-backend/` (GoDaddy-compatible PHP stack). When deploying or adding endpoints, update `php-backend/index.php` and related libs; the Node service is used for local tooling/tests only.
 - Frontend: React app in `frontend/` (Tailwind CSS). Key UI areas:
   - Public site: seating chart, event pages, suggestion form
   - Admin panel: events, seating layout editor, seat requests review

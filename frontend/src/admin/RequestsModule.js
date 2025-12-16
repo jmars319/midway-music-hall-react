@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Trash2 } from 'lucide-react';
-import { API_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 
 function parseSeats(selected_seats){
   if (!selected_seats) return [];

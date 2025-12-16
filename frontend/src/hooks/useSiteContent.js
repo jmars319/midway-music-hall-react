@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { API_BASE } from '../App';
+import { API_BASE, invalidateBrandingCache, primeBrandingCache } from '../apiConfig';
 
 const DEFAULT_CONTENT = {
   business: {
@@ -72,10 +72,62 @@ const DEFAULT_CONTENT = {
   review: {
     google_review_url: '',
   },
+  branding: {
+    logo: null,
+    mark: null,
+    default_event: null,
+  },
 };
 
 let cachedContent = null;
 let pendingRequest = null;
+const STORAGE_KEY = 'mmh_site_content_cache_v1';
+
+const supportsStorage = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+const loadStoredContent = () => {
+  if (!supportsStorage()) {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch (err) {
+    console.warn('Failed to read cached site content', err);
+    return null;
+  }
+};
+
+const persistStoredContent = (value) => {
+  if (!supportsStorage()) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+  } catch (err) {
+    console.warn('Unable to persist site content cache', err);
+  }
+};
+
+const clearStoredContent = () => {
+  if (!supportsStorage()) {
+    return;
+  }
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch (err) {
+    console.warn('Unable to clear site content cache', err);
+  }
+};
+
+const stored = loadStoredContent();
+if (stored) {
+  cachedContent = stored;
+  primeBrandingCache(stored?.branding || null);
+}
 
 const fetchSiteContent = () => {
   if (!pendingRequest) {
@@ -93,6 +145,8 @@ const fetchSiteContent = () => {
 export const invalidateSiteContentCache = () => {
   cachedContent = null;
   pendingRequest = null;
+  clearStoredContent();
+  invalidateBrandingCache();
 };
 
 export default function useSiteContent() {
@@ -104,6 +158,8 @@ export default function useSiteContent() {
     fetchSiteContent().then((data) => {
       if (cancelled) return;
       cachedContent = data || DEFAULT_CONTENT;
+      primeBrandingCache(cachedContent?.branding || null);
+      persistStoredContent(cachedContent);
       setContent(cachedContent);
       setVersion((prev) => prev + 1);
     });

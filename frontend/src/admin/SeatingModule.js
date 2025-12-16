@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, Edit } from 'lucide-react';
 import TableComponent from '../components/TableComponent';
-import { API_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 import { resolveRowHeaderLabels } from '../utils/seatLabelUtils';
 
 const seatTypes = ['general', 'premium', 'vip', 'accessible'];

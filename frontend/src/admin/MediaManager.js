@@ -1,8 +1,10 @@
 // MediaManager: admin interface for uploading and organizing images
 import React, { useEffect, useState } from 'react';
 import { Upload, Trash2, Image as ImageIcon, X } from 'lucide-react';
-import { API_BASE, SERVER_BASE } from '../App';
+import { API_BASE, SERVER_BASE } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
+import useSiteContent from '../hooks/useSiteContent';
+import { getBrandImages } from '../utils/brandAssets';
 
 const categories = [
   { value: 'all', label: 'All Files', color: 'bg-gray-500' },
@@ -35,8 +37,6 @@ const mediaPreviewUrl = (item) => {
   return resolveMediaUrl(candidate);
 };
 
-const FALLBACK_THUMB = '/android-chrome-192x192.png';
-
 export default function MediaManager() {
   const [media, setMedia] = useState([]);
   const [filteredMedia, setFilteredMedia] = useState([]);
@@ -47,6 +47,8 @@ export default function MediaManager() {
   const [uploadCategory, setUploadCategory] = useState('other');
   const [editingMedia, setEditingMedia] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
+  const siteContent = useSiteContent();
+  const { defaultEventUrl: fallbackThumb } = getBrandImages(siteContent);
 
   const fetchMedia = async () => {
     setLoading(true);
@@ -167,7 +169,7 @@ export default function MediaManager() {
   const handleImageError = (event) => {
     if (!event?.currentTarget) return;
     event.currentTarget.onerror = null;
-    event.currentTarget.src = FALLBACK_THUMB;
+        event.currentTarget.src = fallbackThumb;
     event.currentTarget.classList.add('object-contain', 'bg-gray-900');
   };
 

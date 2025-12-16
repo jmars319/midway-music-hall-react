@@ -1,7 +1,8 @@
 import React from 'react';
 import './index.css';
 import ResponsiveImage from './components/ResponsiveImage';
-
+import useSiteContent from './hooks/useSiteContent';
+import { getBrandImages } from './utils/brandAssets';
 import eventsData from './data/events.json';
 import contactsData from './data/contacts.json';
 import policiesData from './data/policies.json';
@@ -22,7 +23,8 @@ function formatShortDate(d) {
 }
 
 function SinglePageLanding() {
-  const logo = '/logo.png'; // Static logo for production
+  const siteContent = useSiteContent();
+  const { logoUrl } = getBrandImages(siteContent);
 
   // derive map query from policies (Venue Address) or environment
   const venueAddress = (
@@ -99,12 +101,13 @@ function SinglePageLanding() {
       <header className="bg-gradient-to-br from-purple-900 via-gray-900 to-blue-900 text-white relative overflow-hidden py-16" role="banner">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <ResponsiveImage 
-            src={logo} 
+            src={logoUrl} 
             alt="Midway Music Hall Logo" 
             width={320}
             height={192}
             priority
             className="mx-auto h-40 md:h-48 w-auto mb-4 object-contain"
+            sizes="(max-width: 640px) 240px, 320px"
           />
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
             Midway Music Hall

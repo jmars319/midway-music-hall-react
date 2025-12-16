@@ -12,8 +12,9 @@ import About from '../components/About';
 import MapSection from '../components/MapSection';
 import Footer from '../components/Footer';
 import BackToTopButton from '../components/BackToTopButton';
-import { API_BASE, getImageUrlSync } from '../App';
+import { API_BASE } from '../apiConfig';
 import { getEventStartDate, getEventEndDate } from '../utils/eventFormat';
+import { resolveEventImageUrl } from '../utils/imageVariants';
 
 const SITE_BASE_URL = 'https://midwaymusichall.net';
 
@@ -65,8 +66,18 @@ const BEACH_SERIES_LINEUP = [
   'band of oz',
 ];
 
+const normalizeLower = (value) => {
+  if (typeof value === 'string') {
+    return value.toLowerCase();
+  }
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value).toLowerCase();
+};
+
 const hasBeachSeriesPhrase = (value = '') => {
-  const lower = value.toLowerCase();
+  const lower = normalizeLower(value);
   return BEACH_SERIES_PHRASES.some((phrase) => lower.includes(phrase));
 };
 
@@ -352,7 +363,7 @@ export default function HomePage({ onAdminClick, onNavigate }) {
         event.venue_code === 'TGP'
           ? 'The Gathering Place'
           : 'Midway Music Hall';
-      const imageUrl = event.image_url ? getImageUrlSync(event.image_url) : `${baseUrl}/og-image.png`;
+      const imageUrl = resolveEventImageUrl(event, `${baseUrl}/og-image.png`);
       return {
         '@type': 'Event',
         name: event.artist_name || event.title || 'Midway Music Hall Event',

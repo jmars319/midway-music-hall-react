@@ -65,6 +65,8 @@ CREATE TABLE `admins` (
   `username` varchar(100) NOT NULL,
   `password_hash` varchar(255) NOT NULL,
   `email` varchar(255) DEFAULT NULL,
+  `display_name` varchar(191) DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `username` (`username`)
@@ -77,7 +79,7 @@ CREATE TABLE `admins` (
 
 LOCK TABLES `admins` WRITE;
 /*!40000 ALTER TABLE `admins` DISABLE KEYS */;
-INSERT INTO `admins` VALUES (1,'admin','$2y$12$Hcr2f1sOyKQjByB/xZGL1uLZQKc6uAVuipf7Joqp1D4//wGkV7InK','admin@midwaymusichall.net','2025-12-13 17:41:40');
+INSERT INTO `admins` VALUES (1,'admin','$2y$12$Hcr2f1sOyKQjByB/xZGL1uLZQKc6uAVuipf7Joqp1D4//wGkV7InK','admin@midwaymusichall.net','Midway Admin','2025-12-13 17:41:40','2025-12-13 17:41:40');
 /*!40000 ALTER TABLE `admins` ENABLE KEYS */;
 UNLOCK TABLES;
 

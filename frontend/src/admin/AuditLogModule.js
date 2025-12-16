@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { API_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 
 const initialFilters = {
   action: '',

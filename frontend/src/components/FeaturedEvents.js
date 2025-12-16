@@ -1,6 +1,5 @@
 import React from 'react';
 import { Sparkles } from 'lucide-react';
-import { getImageUrlSync } from '../App';
 import { formatEventDateTimeLabel, formatDoorsLabel } from '../utils/eventFormat';
 import { getCategoryBadge } from '../utils/categoryLabels';
 import ResponsiveImage from './ResponsiveImage';
@@ -40,13 +39,16 @@ export default function FeaturedEvents({ events = [], loading = false }) {
               key={event.id}
               className="bg-gray-900 rounded-2xl border border-purple-500/30 shadow-xl overflow-hidden flex flex-col"
             >
-              <div className="h-48 bg-gray-800 overflow-hidden">
+              <div className="bg-gray-800 overflow-hidden">
                 <ResponsiveImage
-                  src={getImageUrlSync(event.image_url)}
+                  image={event.image_variants}
                   alt={event.artist_name || event.title || 'Featured event'}
-                  width={640}
-                  height={384}
+                  width={event.image_intrinsic_width}
+                  height={event.image_intrinsic_height}
+                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                   className="w-full h-full object-cover"
+                  pictureClassName="block w-full h-full"
+                  fallbackAspectRatio="4 / 3"
                 />
               </div>
               <div className="p-6 flex-1 flex flex-col">

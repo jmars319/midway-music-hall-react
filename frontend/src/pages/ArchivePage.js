@@ -3,7 +3,7 @@ import { Calendar, CalendarPlus, ChevronLeft, ChevronRight, Share2 } from 'lucid
 import Navigation from '../components/Navigation';
 import Footer from '../components/Footer';
 import ResponsiveImage from '../components/ResponsiveImage';
-import { API_BASE, getImageUrlSync } from '../App';
+import { API_BASE } from '../apiConfig';
 import { formatEventDateTimeLabel } from '../utils/eventFormat';
 import { getCategoryBadge } from '../utils/categoryLabels';
 
@@ -123,11 +123,14 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
                       >
                         <div className="w-full md:w-60 flex-shrink-0">
                           <ResponsiveImage
-                            src={getImageUrlSync(event.image_url)}
+                            image={event.image_variants}
                             alt={event.artist_name || event.title || 'Event poster'}
-                            width={320}
-                            height={200}
-                            className="w-full h-40 object-cover rounded-lg border border-gray-700"
+                            width={event.image_intrinsic_width}
+                            height={event.image_intrinsic_height}
+                            className="w-full h-full object-cover rounded-lg border border-gray-700"
+                            pictureClassName="block w-full aspect-[16/9]"
+                            fallbackAspectRatio="16 / 9"
+                            sizes="(max-width: 768px) 100vw, 240px"
                           />
                         </div>
                         <div className="flex-1 flex flex-col gap-2">

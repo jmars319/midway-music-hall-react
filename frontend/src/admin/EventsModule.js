@@ -1,7 +1,7 @@
 // EventsModule: admin UI to create and manage events
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Edit, Copy, CheckCircle, XCircle, Archive as ArchiveIcon } from 'lucide-react';
-import { API_BASE, getImageUrlSync } from '../App';
+import { API_BASE, getImageUrlSync } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
 const SECTION_STORAGE_KEY = 'mmh_event_sections';
 

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 // Hero: large header/hero section used on the home page and TGP route
 import { Music2, Calendar, MapPin } from 'lucide-react';
-import { API_BASE, SERVER_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
+import ResponsiveImage from './ResponsiveImage';
 
 const HERO_VARIANTS = {
   main: {
@@ -84,31 +85,6 @@ const HERO_VARIANTS = {
   },
 };
 
-const prefixServerUrl = (url) => {
-  if (!url) return null;
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//')) {
-    return url;
-  }
-  if (SERVER_BASE && url.startsWith('/')) {
-    return `${SERVER_BASE}${url}`;
-  }
-  return url;
-};
-
-const guessMimeTypeFromUrl = (url) => {
-  if (!url || typeof url !== 'string') return null;
-  const normalized = url.split('?')[0] || '';
-  const ext = normalized.split('.').pop();
-  if (!ext) return null;
-  const lower = ext.toLowerCase();
-  if (['jpg', 'jpeg', 'jpe'].includes(lower)) return 'image/jpeg';
-  if (lower === 'png') return 'image/png';
-  if (['gif'].includes(lower)) return 'image/gif';
-  if (lower === 'webp') return 'image/webp';
-  if (lower === 'avif') return 'image/avif';
-  return null;
-};
-
 const normalizeVariantEntries = (entries) => {
   if (!entries) return [];
   const parsed = typeof entries === 'string' ? (() => {
@@ -151,7 +127,7 @@ const resolveHeroImagesFromSettings = (settings, config) => {
   return fallbackList.length > 0 ? fallbackList : [];
 };
 
-const shouldPrioritizeImage = (variant, index) => variant === 'main' && index === 0;
+const shouldPrioritizeImage = (variantKey, index) => variantKey === 'main' && index === 0;
 
 export default function Hero({ variant = 'main', ctaTarget }) {
   const config = HERO_VARIANTS[variant] || HERO_VARIANTS.main;
@@ -227,45 +203,22 @@ export default function Hero({ variant = 'main', ctaTarget }) {
     <section className={`bg-gradient-to-br ${config.theme.gradient} text-white relative overflow-hidden`}>
       {heroImages.length > 0 && (
         <div className="absolute inset-0 z-0" aria-hidden="true">
-          {heroImages.map((image, index) => {
-            const fallbackSrc = prefixServerUrl(image.optimized || image.original || image.webp);
-            const fetchPriority = shouldPrioritizeImage(variant, index) ? 'high' : undefined;
-            const imgProps = fetchPriority ? { fetchpriority: fetchPriority } : {};
-            return (
-              <div
-                key={`${image.original || 'image'}-${index}`}
-                className={`absolute inset-0 transition-opacity duration-1000 ${index === currentImageIndex ? 'opacity-100' : 'opacity-0'}`}
-              >
-                <picture className="block w-full h-full">
-                  {image.webp && (
-                    <source
-                      type="image/webp"
-                      srcSet={prefixServerUrl(image.webp)}
-                    />
-                  )}
-                  {image.optimized && (
-                    <source
-                      type={guessMimeTypeFromUrl(image.optimized) || undefined}
-                      srcSet={prefixServerUrl(image.optimized)}
-                    />
-                  )}
-                  <img
-                    src={fallbackSrc}
-                    alt=""
-                    className="w-full h-full object-cover"
-                    {...imgProps}
-                    onError={(event) => {
-                      if (!image.original) return;
-                      if (!event.target.dataset.fallbackApplied) {
-                        event.target.dataset.fallbackApplied = 'true';
-                        event.target.src = prefixServerUrl(image.original);
-                      }
-                    }}
-                  />
-                </picture>
-              </div>
-            );
-          })}
+          {heroImages.map((image, index) => (
+            <div
+              key={`${image.original || image.file_url || 'image'}-${index}`}
+              className={`absolute inset-0 transition-opacity duration-1000 ${index === currentImageIndex ? 'opacity-100' : 'opacity-0'}`}
+            >
+              <ResponsiveImage
+                image={image}
+                alt=""
+                sizes="(max-width: 1024px) 100vw, 100vw"
+                className="w-full h-full object-cover"
+                pictureClassName="block w-full h-full"
+                priority={shouldPrioritizeImage(variant, index)}
+                fallbackAspectRatio="16 / 9"
+              />
+            </div>
+          ))}
           <div
             className="absolute inset-0 pointer-events-none"
             style={{

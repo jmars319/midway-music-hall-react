@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Menu, X } from 'lucide-react';
-import { API_BASE, SERVER_BASE } from '../App';
 import ResponsiveImage from './ResponsiveImage';
+import useSiteContent from '../hooks/useSiteContent';
+import { getBrandImages } from '../utils/brandAssets';
 
 // Navigation: top site navigation with smooth scrolling links
 export default function Navigation() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [logo, setLogo] = useState('/logo.png');
   const [currentPath, setCurrentPath] = useState('/');
+  const siteContent = useSiteContent();
+  const { logoUrl } = getBrandImages(siteContent);
   const SECTION_MAP = {
     home: 'home',
     schedule: 'schedule',
@@ -20,15 +22,6 @@ export default function Navigation() {
   };
 
   useEffect(() => {
-    fetch(`${API_BASE}/settings`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.settings?.site_logo) {
-          setLogo(`${SERVER_BASE}${data.settings.site_logo}`);
-        }
-      })
-      .catch(() => {});
-
     if (typeof window !== 'undefined') {
       setCurrentPath(window.location.pathname || '/');
     }
@@ -101,12 +94,13 @@ export default function Navigation() {
                 className="flex items-center text-white"
               >
                 <ResponsiveImage
-                  src={logo}
+                  src={logoUrl}
                   alt="Midway Music Hall"
                   width={160}
                   height={80}
                   priority
                   className="h-20 w-auto mr-3 object-contain"
+                  sizes="(max-width: 640px) 140px, 180px"
                 />
                 <span className="font-bold text-xl">Midway Music Hall</span>
               </a>

@@ -1,7 +1,7 @@
 // LayoutsModule: admin UI to create and manage seating layout templates with visual editor
 import React, { useEffect, useState, useRef } from 'react';
 import { Plus, Edit, Trash2, Star, Eye, Copy, Save, X, ZoomIn, ZoomOut, RotateCcw, Move, Shapes } from 'lucide-react';
-import { API_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 import TableComponent from '../components/TableComponent';
 import SeatingChart from '../components/SeatingChart';
 import { buildSeatLabel, normalizeSeatLabels, resolveRowHeaderLabels } from '../utils/seatLabelUtils';

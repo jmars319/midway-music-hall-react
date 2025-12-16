@@ -1,5 +1,5 @@
 // AdminPanel: top-level admin container and navigation for admin modules
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   DashboardModule,
   EventsModule,
@@ -13,8 +13,10 @@ import {
   SettingsModule,
   AdminUsersModule,
 } from './index';
-import { API_BASE, SERVER_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
+import useSiteContent from '../hooks/useSiteContent';
+import { getBrandImages } from '../utils/brandAssets';
 
 const MENU = [
   { key: 'dashboard', label: 'Dashboard', comp: DashboardModule },
@@ -33,7 +35,8 @@ const MENU = [
 export default function AdminPanel({ user = null, onLogout = () => {}, onBackToSite = () => {} }){
   const [active, setActive] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
-  const [logo, setLogo] = useState('/logo.png');
+  const siteContent = useSiteContent();
+  const { logoUrl, markUrl } = getBrandImages(siteContent);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
@@ -43,7 +46,6 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
     next: '',
     confirm: ''
   });
-  const sidebarAvatar = '/apple-touch-icon.png';
   const resolveDisplayName = () => {
     if (!user) return 'Admin';
     if (user.display_name) return user.display_name;
@@ -58,17 +60,6 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
     }
     return 'Admin';
   };
-
-  useEffect(() => {
-    fetch(`${SERVER_BASE}/api/settings`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.settings && data.settings.site_logo) {
-          setLogo(SERVER_BASE + data.settings.site_logo);
-        }
-      })
-      .catch(err => console.error('Failed to load logo:', err));
-  }, []);
 
   const ActiveComponent = (MENU.find(m => m.key === active) || MENU[0]).comp;
   const displayName = resolveDisplayName();
@@ -122,12 +113,13 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
                       className="flex items-center space-x-2 bg-transparent border-0 p-0"
                     >
                       <ResponsiveImage
-                        src={logo}
+                        src={logoUrl}
                         alt="Midway Music Hall"
                         width={collapsed ? 64 : 96}
                         height={collapsed ? 64 : 96}
                         priority
                         className={`${collapsed ? 'h-8' : 'h-10'} w-auto transition-all duration-200 object-contain`}
+                        sizes={collapsed ? '64px' : '96px'}
                       />
                       {!collapsed && <div className="text-lg font-semibold">Midway Admin</div>}
                     </button>
@@ -181,12 +173,13 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
 
               <div className="flex items-center gap-3">
                 <ResponsiveImage
-                  src={sidebarAvatar}
+                  src={markUrl}
                   alt="Midway Music Hall"
                   width={48}
                   height={48}
                   priority
                   className="w-9 h-9 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 object-cover"
+                  sizes="48px"
                 />
                 {!collapsed && (
                   <div className="flex-1">

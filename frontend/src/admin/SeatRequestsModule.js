@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { CheckCircle, XCircle, Trash2, Edit3, RefreshCw, X, Clock, ChevronDown, ChevronRight, Plus, Info } from 'lucide-react';
-import { API_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 import TableComponent from '../components/TableComponent';
 import { seatingLegendSwatches, seatingStatusLabels } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';

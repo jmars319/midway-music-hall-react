@@ -2,112 +2,365 @@
 
 namespace Midway\Backend;
 
-function optimize_uploaded_image(string $sourcePath, string $originalFilename, string $mime): array
+use DateTimeInterface;
+use RuntimeException;
+
+const MANIFEST_VERSION = 2;
+
+function process_image_variants(string $sourcePath, string $originalFilename, string $mime): array
 {
-    if (!file_exists($sourcePath)) {
+    if (!is_file($sourcePath)) {
         return [
-            'width' => null,
-            'height' => null,
-            'optimized_path' => null,
-            'webp_path' => null,
+            'intrinsic_width' => null,
+            'intrinsic_height' => null,
+            'optimized_variants' => [],
+            'webp_variants' => [],
+            'optimized_srcset' => null,
+            'webp_srcset' => null,
+            'fallback_original' => '/uploads/' . ltrim($originalFilename, '/'),
+            'manifest_path' => null,
+            'derived_files' => [],
             'optimization_status' => 'failed',
-            'processing_notes' => 'Source file missing.'
+            'processing_notes' => 'Source file missing',
         ];
     }
 
     $info = @getimagesize($sourcePath);
     if (!$info) {
         return [
-            'width' => null,
-            'height' => null,
-            'optimized_path' => null,
-            'webp_path' => null,
+            'intrinsic_width' => null,
+            'intrinsic_height' => null,
+            'optimized_variants' => [],
+            'webp_variants' => [],
+            'optimized_srcset' => null,
+            'webp_srcset' => null,
+            'fallback_original' => '/uploads/' . ltrim($originalFilename, '/'),
+            'manifest_path' => null,
+            'derived_files' => [],
             'optimization_status' => 'failed',
-            'processing_notes' => 'Unable to read image metadata.'
+            'processing_notes' => 'Unable to read image metadata',
         ];
     }
 
-    $width = $info[0] ?? null;
-    $height = $info[1] ?? null;
+    $width = (int) ($info[0] ?? 0);
+    $height = (int) ($info[1] ?? 0);
     $type = $info[2] ?? null;
-    $maxDimension = defined('IMAGE_MAX_DIMENSION') ? max(600, IMAGE_MAX_DIMENSION) : 2000;
-    $optimizedPath = null;
-    $webpPath = null;
-    $status = 'complete';
-    $notes = '';
+    if ($width <= 0 || $height <= 0) {
+        return [
+            'intrinsic_width' => $width ?: null,
+            'intrinsic_height' => $height ?: null,
+            'optimized_variants' => [],
+            'webp_variants' => [],
+            'optimized_srcset' => null,
+            'webp_srcset' => null,
+            'fallback_original' => '/uploads/' . ltrim($originalFilename, '/'),
+            'manifest_path' => null,
+            'derived_files' => [],
+            'optimization_status' => 'failed',
+            'processing_notes' => 'Invalid intrinsic dimensions',
+        ];
+    }
 
     $image = create_image_resource($sourcePath, $type);
     if (!$image) {
         return [
-            'width' => $width,
-            'height' => $height,
-            'optimized_path' => null,
-            'webp_path' => null,
+            'intrinsic_width' => $width,
+            'intrinsic_height' => $height,
+            'optimized_variants' => [],
+            'webp_variants' => [],
+            'optimized_srcset' => null,
+            'webp_srcset' => null,
+            'fallback_original' => '/uploads/' . ltrim($originalFilename, '/'),
+            'manifest_path' => null,
+            'derived_files' => [],
             'optimization_status' => 'skipped',
-            'processing_notes' => 'Unsupported image type for optimization.'
+            'processing_notes' => 'Unsupported image format',
         ];
     }
 
     $image = apply_exif_orientation($image, $sourcePath, $type, $width, $height);
+    $targets = determine_responsive_targets($width);
+    $baseName = pathinfo($originalFilename, PATHINFO_FILENAME);
+    $extension = strtolower(pathinfo($originalFilename, PATHINFO_EXTENSION));
+    $optimizedVariants = [];
+    $webpVariants = [];
+    $derivedFiles = [];
+    $notes = [];
 
-    $resized = $image;
-    $longestSide = max($width ?? 0, $height ?? 0);
-    if ($longestSide && $longestSide > $maxDimension) {
-        $scale = $maxDimension / $longestSide;
-        $targetWidth = max(1, (int) round(($width ?? 0) * $scale));
-        $targetHeight = max(1, (int) round(($height ?? 0) * $scale));
+    foreach ($targets as $targetWidth) {
+        if ($targetWidth <= 0) {
+            continue;
+        }
+        $scale = $targetWidth / $width;
+        $targetHeight = max(1, (int) round($height * $scale));
         $resized = imagecreatetruecolor($targetWidth, $targetHeight);
-        if ($type === IMAGETYPE_PNG || $type === IMAGETYPE_WEBP) {
+        if ($type === IMAGETYPE_PNG || $type === IMAGETYPE_GIF || $type === IMAGETYPE_WEBP) {
             imagealphablending($resized, false);
             imagesavealpha($resized, true);
         }
         imagecopyresampled($resized, $image, 0, 0, 0, 0, $targetWidth, $targetHeight, $width, $height);
-        $width = $targetWidth;
-        $height = $targetHeight;
-    }
 
-    $optimizedFilename = pathinfo($originalFilename, PATHINFO_FILENAME) . '-optimized.' . pathinfo($originalFilename, PATHINFO_EXTENSION);
-    $optimizedFullPath = rtrim(UPLOADS_OPTIMIZED_DIR, '/') . '/' . $optimizedFilename;
-
-    if (save_image_resource($resized, $type, $optimizedFullPath)) {
-        $optimizedPath = '/uploads/optimized/' . $optimizedFilename;
-    } else {
-        $status = 'skipped';
-        $notes = 'Failed to write optimized asset.';
-    }
-
-    $webpFilename = pathinfo($originalFilename, PATHINFO_FILENAME) . '.webp';
-    $webpFullPath = rtrim(UPLOADS_WEBP_DIR, '/') . '/' . $webpFilename;
-    if (function_exists('imagewebp')) {
-        if ($type === IMAGETYPE_PNG || $type === IMAGETYPE_WEBP) {
-            imagepalettetotruecolor($resized);
-            imagealphablending($resized, true);
-            imagesavealpha($resized, true);
-        }
-        $webpQuality = defined('IMAGE_WEBP_QUALITY') ? IMAGE_WEBP_QUALITY : 85;
-        $webpQuality = max(50, min(100, (int) $webpQuality));
-        if (@imagewebp($resized, $webpFullPath, $webpQuality)) {
-            $webpPath = '/uploads/webp/' . $webpFilename;
+        $optimizedFilename = $baseName . '-w' . $targetWidth . '.' . $extension;
+        $optimizedFullPath = rtrim(UPLOADS_RESPONSIVE_OPTIMIZED_DIR, '/') . '/' . $optimizedFilename;
+        if (save_image_resource($resized, $type, $optimizedFullPath)) {
+            $optimizedUrl = '/uploads/variants/optimized/' . $optimizedFilename;
+            $optimizedVariants[] = [
+                'url' => $optimizedUrl,
+                'width' => $targetWidth,
+                'height' => $targetHeight,
+                'path' => $optimizedFullPath,
+                'size' => @filesize($optimizedFullPath) ?: null,
+            ];
+            $derivedFiles[] = $optimizedFullPath;
         } else {
-            $notes .= ' Failed to generate WebP variant.';
+            $notes[] = "Failed optimized variant {$targetWidth}px";
         }
-    } else {
-        $notes .= ' WebP not supported on host.';
-    }
 
-    if ($resized !== $image) {
+        $webpFilename = $baseName . '-w' . $targetWidth . '.webp';
+        $webpFullPath = rtrim(UPLOADS_RESPONSIVE_WEBP_DIR, '/') . '/' . $webpFilename;
+        if (function_exists('imagewebp')) {
+            $webpResource = $resized;
+            if ($type === IMAGETYPE_PNG || $type === IMAGETYPE_WEBP || $type === IMAGETYPE_GIF) {
+                imagepalettetotruecolor($webpResource);
+                imagealphablending($webpResource, true);
+                imagesavealpha($webpResource, true);
+            }
+            $webpQuality = defined('IMAGE_WEBP_QUALITY') ? (int) IMAGE_WEBP_QUALITY : 85;
+            $webpQuality = max(50, min(100, $webpQuality));
+            if (@imagewebp($webpResource, $webpFullPath, $webpQuality)) {
+                $webpUrl = '/uploads/variants/webp/' . $webpFilename;
+                $webpVariants[] = [
+                    'url' => $webpUrl,
+                    'width' => $targetWidth,
+                    'height' => $targetHeight,
+                    'path' => $webpFullPath,
+                    'size' => @filesize($webpFullPath) ?: null,
+                ];
+                $derivedFiles[] = $webpFullPath;
+            } else {
+                $notes[] = "Failed webp variant {$targetWidth}px";
+            }
+        } else {
+            $notes[] = 'WebP not supported on host';
+        }
+
         imagedestroy($resized);
     }
+
     imagedestroy($image);
 
-    return [
-        'width' => $width,
-        'height' => $height,
-        'optimized_path' => $optimizedPath,
-        'webp_path' => $webpPath,
-        'optimization_status' => $status,
-        'processing_notes' => trim($notes)
+    $optimizedSrcset = build_srcset_string($optimizedVariants);
+    $webpSrcset = build_srcset_string($webpVariants);
+    $manifest = [
+        'version' => MANIFEST_VERSION,
+        'generated_at' => gmdate(DateTimeInterface::ATOM),
+        'original' => '/uploads/' . ltrim($originalFilename, '/'),
+        'relative' => ltrim($originalFilename, '/'),
+        'intrinsic_width' => $width,
+        'intrinsic_height' => $height,
+        'mime' => $mime,
+        'variants' => [
+            'optimized' => $optimizedVariants,
+            'webp' => $webpVariants,
+        ],
+        'srcset' => [
+            'optimized' => $optimizedSrcset,
+            'webp' => $webpSrcset,
+        ],
+        'derived_files' => $derivedFiles,
     ];
+    $manifestPath = persist_image_manifest($originalFilename, $manifest);
+
+    return [
+        'intrinsic_width' => $width,
+        'intrinsic_height' => $height,
+        'optimized_variants' => $optimizedVariants,
+        'webp_variants' => $webpVariants,
+        'optimized_srcset' => $optimizedSrcset,
+        'webp_srcset' => $webpSrcset,
+        'fallback_original' => '/uploads/' . ltrim($originalFilename, '/'),
+        'manifest_path' => $manifestPath,
+        'derived_files' => $derivedFiles,
+        'optimization_status' => ($optimizedVariants || $webpVariants) ? 'complete' : 'skipped',
+        'processing_notes' => implode('; ', array_unique(array_filter($notes))),
+        'optimized_path' => $optimizedVariants ? end($optimizedVariants)['url'] : null,
+        'webp_path' => $webpVariants ? end($webpVariants)['url'] : null,
+    ];
+}
+
+function determine_responsive_targets(int $intrinsicWidth): array
+{
+    $targets = [];
+    $configured = defined('RESPONSIVE_IMAGE_WIDTHS') && is_array(RESPONSIVE_IMAGE_WIDTHS) ? RESPONSIVE_IMAGE_WIDTHS : [320, 480, 768, 1024, 1440, 1920];
+    foreach ($configured as $candidate) {
+        $candidate = (int) $candidate;
+        if ($candidate > 0 && $candidate <= $intrinsicWidth) {
+            $targets[] = $candidate;
+        }
+    }
+    if (empty($targets)) {
+        $targets[] = $intrinsicWidth;
+    }
+    $targets = array_values(array_unique($targets));
+    sort($targets, SORT_NUMERIC);
+    return $targets;
+}
+
+function build_srcset_string(array $variants): ?string
+{
+    if (!$variants) {
+        return null;
+    }
+    $parts = [];
+    foreach ($variants as $variant) {
+        if (empty($variant['url']) || empty($variant['width'])) {
+            continue;
+        }
+        $parts[] = $variant['url'] . ' ' . (int) $variant['width'] . 'w';
+    }
+    return $parts ? implode(', ', $parts) : null;
+}
+
+function persist_image_manifest(string $filename, array $payload): ?string
+{
+    $baseName = pathinfo($filename, PATHINFO_FILENAME);
+    if ($baseName === '') {
+        return null;
+    }
+    $manifestPath = rtrim(UPLOADS_MANIFEST_DIR, '/') . '/' . $baseName . '.json';
+    $payload['manifest_path'] = $manifestPath;
+    @file_put_contents($manifestPath, json_encode($payload, JSON_PRETTY_PRINT));
+    return $manifestPath;
+}
+
+function load_image_manifest(string $fileUrl): ?array
+{
+    $relative = relative_upload_path($fileUrl);
+    if (!$relative) {
+        return null;
+    }
+    $baseName = pathinfo($relative, PATHINFO_FILENAME);
+    if ($baseName === '') {
+        return null;
+    }
+    $manifestPath = rtrim(UPLOADS_MANIFEST_DIR, '/') . '/' . $baseName . '.json';
+    if (!is_file($manifestPath)) {
+        return null;
+    }
+    $decoded = json_decode(file_get_contents($manifestPath), true);
+    if (!is_array($decoded)) {
+        return null;
+    }
+    return $decoded;
+}
+
+function relative_upload_path(string $fileUrl): ?string
+{
+    if (!is_string($fileUrl) || trim($fileUrl) === '') {
+        return null;
+    }
+    if (str_starts_with($fileUrl, '/uploads/')) {
+        $relative = ltrim(substr($fileUrl, strlen('/uploads/')), '/');
+        return $relative !== '' ? $relative : null;
+    }
+    if (str_starts_with($fileUrl, 'uploads/')) {
+        $relative = ltrim(substr($fileUrl, strlen('uploads/')), '/');
+        return $relative !== '' ? $relative : null;
+    }
+    return null;
+}
+
+function build_variant_payload_from_manifest(string $fileUrl, array $manifest): array
+{
+    $optimizedVariants = array_values(array_filter((array) ($manifest['variants']['optimized'] ?? []), function ($variant) {
+        return !empty($variant['url']) && (!isset($variant['path']) || !isset($variant['width']) || is_file($variant['path']) || str_starts_with($variant['url'], 'http'));
+    }));
+    $webpVariants = array_values(array_filter((array) ($manifest['variants']['webp'] ?? []), function ($variant) {
+        return !empty($variant['url']) && (!isset($variant['path']) || is_file($variant['path']) || str_starts_with($variant['url'], 'http'));
+    }));
+
+    $optimizedSrcset = build_srcset_string($optimizedVariants);
+    $webpSrcset = build_srcset_string($webpVariants);
+    return [
+        'file_url' => $fileUrl,
+        'original' => $manifest['original'] ?? $fileUrl,
+        'fallback_original' => $manifest['original'] ?? $fileUrl,
+        'optimized' => $optimizedVariants ? end($optimizedVariants)['url'] : null,
+        'webp' => $webpVariants ? end($webpVariants)['url'] : null,
+        'optimized_variants' => $optimizedVariants,
+        'webp_variants' => $webpVariants,
+        'optimized_srcset' => $optimizedSrcset,
+        'webp_srcset' => $webpSrcset,
+        'intrinsic_width' => $manifest['intrinsic_width'] ?? null,
+        'intrinsic_height' => $manifest['intrinsic_height'] ?? null,
+    ];
+}
+
+function delete_image_with_variants(string $fileUrl): void
+{
+    $relative = relative_upload_path($fileUrl);
+    if (!$relative) {
+        return;
+    }
+    $originalPath = rtrim(UPLOADS_DIR, '/') . '/' . $relative;
+    $manifest = load_image_manifest($fileUrl);
+    $derivedFiles = [];
+    if ($manifest && !empty($manifest['derived_files'])) {
+        foreach ((array) $manifest['derived_files'] as $path) {
+            if (is_string($path) && is_file($path)) {
+                $derivedFiles[] = $path;
+            }
+        }
+    } else {
+        $baseName = pathinfo($relative, PATHINFO_FILENAME);
+        $extension = pathinfo($relative, PATHINFO_EXTENSION);
+        foreach ([UPLOADS_RESPONSIVE_OPTIMIZED_DIR => $extension, UPLOADS_RESPONSIVE_WEBP_DIR => 'webp'] as $dir => $ext) {
+            foreach (RESPONSIVE_IMAGE_WIDTHS as $width) {
+                $candidate = rtrim($dir, '/') . '/' . $baseName . '-w' . $width . '.' . $ext;
+                if (is_file($candidate)) {
+                    $derivedFiles[] = $candidate;
+                }
+            }
+        }
+    }
+    $manifestPath = null;
+    if ($manifest && !empty($manifest['manifest_path'])) {
+        $manifestPath = $manifest['manifest_path'];
+    } else {
+        $baseName = pathinfo($relative, PATHINFO_FILENAME);
+        $candidate = rtrim(UPLOADS_MANIFEST_DIR, '/') . '/' . $baseName . '.json';
+        if (is_file($candidate)) {
+            $manifestPath = $candidate;
+        }
+    }
+    $filesToDelete = array_filter(array_merge([$originalPath], $derivedFiles, [$manifestPath]));
+    atomic_delete_files($filesToDelete);
+}
+
+function atomic_delete_files(array $paths): void
+{
+    $moves = [];
+    foreach ($paths as $path) {
+        if (!$path || !is_string($path) || !is_file($path)) {
+            continue;
+        }
+        $temp = $path . '.del.' . bin2hex(random_bytes(4));
+        if (!@rename($path, $temp)) {
+            foreach (array_reverse($moves) as [$orig, $tmp]) {
+                if (is_file($tmp)) {
+                    @rename($tmp, $orig);
+                }
+            }
+            throw new RuntimeException('Failed to prepare files for deletion');
+        }
+        $moves[] = [$path, $temp];
+    }
+
+    foreach ($moves as [, $temp]) {
+        if (is_file($temp)) {
+            @unlink($temp);
+        }
+    }
 }
 
 function create_image_resource(string $path, ?int $type)

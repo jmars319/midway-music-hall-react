@@ -1,7 +1,7 @@
 // About: unified section that blends venue overview with location/policy info
 import React, { useState, useEffect } from 'react';
 import { Music, Users, Star, Heart, MapPin, Shield, Phone, Mail } from 'lucide-react';
-import { API_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 import useSiteContent from '../hooks/useSiteContent';
 
 // TODO: Confirm actual capacity; using neutral phrasing for now.

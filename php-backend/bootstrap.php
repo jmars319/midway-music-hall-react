@@ -36,15 +36,30 @@ if (!is_dir($webpDir)) {
     mkdir($webpDir, 0775, true);
 }
 
+$responsiveDir = $absUploadDir . '/variants';
+$responsiveOptimizedDir = $responsiveDir . '/optimized';
+$responsiveWebpDir = $responsiveDir . '/webp';
+$manifestDir = $absUploadDir . '/manifests';
+foreach ([$responsiveDir, $responsiveOptimizedDir, $responsiveWebpDir, $manifestDir] as $dir) {
+    if (!is_dir($dir)) {
+        mkdir($dir, 0775, true);
+    }
+}
+
 define('UPLOADS_DIR', $absUploadDir);
 define('UPLOADS_OPTIMIZED_DIR', $optimizedDir);
 define('UPLOADS_WEBP_DIR', $webpDir);
+define('UPLOADS_RESPONSIVE_DIR', $responsiveDir);
+define('UPLOADS_RESPONSIVE_OPTIMIZED_DIR', $responsiveOptimizedDir);
+define('UPLOADS_RESPONSIVE_WEBP_DIR', $responsiveWebpDir);
+define('UPLOADS_MANIFEST_DIR', $manifestDir);
 
 define('IMAGE_MAX_DIMENSION', (int) Env::get('IMAGE_MAX_DIMENSION', 2000));
 define('IMAGE_JPEG_QUALITY', (int) Env::get('IMAGE_JPEG_QUALITY', 85));
 define('IMAGE_WEBP_QUALITY', (int) Env::get('IMAGE_WEBP_QUALITY', 85));
 define('IMAGE_PNG_COMPRESSION', (int) Env::get('IMAGE_PNG_COMPRESSION', 6));
 define('IMAGE_UPLOAD_MAX_BYTES', (int) Env::get('IMAGE_UPLOAD_MAX_BYTES', 8 * 1024 * 1024));
+define('RESPONSIVE_IMAGE_WIDTHS', [320, 480, 768, 1024, 1440, 1920]);
 
 define('LAYOUT_HISTORY_MAX', (int) Env::get('LAYOUT_HISTORY_MAX', 200));
 define('LAYOUT_HISTORY_RETENTION_DAYS', (int) Env::get('LAYOUT_HISTORY_RETENTION_DAYS', 90));
@@ -98,9 +113,24 @@ header('X-Frame-Options: SAMEORIGIN');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: strict-origin-when-cross-origin');
 header("Permissions-Policy: fullscreen=(self 'https://www.google.com'), geolocation=()");
-$hsts = Env::get('FORCE_STRICT_TRANSPORT', false);
-if ($hsts && (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')) {
-    header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+header('Cross-Origin-Opener-Policy: same-origin');
+$cspDirectives = [
+    "default-src 'self'",
+    "img-src 'self' data: https://www.google.com https://maps.googleapis.com https://maps.gstatic.com https://fonts.gstatic.com",
+    "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://c2.godaddy.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "connect-src 'self' https://maps.googleapis.com https://maps.gstatic.com",
+    "frame-src https://www.google.com",
+    "form-action 'self'",
+    "base-uri 'self'"
+];
+header('Content-Security-Policy-Report-Only: ' . implode('; ', $cspDirectives));
+$hstsMode = strtolower((string) Env::get('FORCE_STRICT_TRANSPORT', 'auto'));
+$isHttps = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+$shouldSendHsts = ($hstsMode === 'auto' && $isHttps) || in_array($hstsMode, ['1', 'true', 'yes'], true);
+if ($shouldSendHsts) {
+    header('Strict-Transport-Security: max-age=63072000; includeSubDomains');
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {

@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Send, X, AlertCircle } from 'lucide-react';
 import TableComponent from './TableComponent';
-import { API_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow, seatIdsForRow, resolveRowHeaderLabels } from '../utils/seatLabelUtils';
 
 const DEFAULT_STAGE_POSITION = { x: 50, y: 8 };

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Send, AlertCircle } from 'lucide-react';
 import TableComponent, { isSeatReserved } from './TableComponent';
-import { API_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 import { seatingLegendSwatches, seatingStatusLabels } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/seatLabelUtils';

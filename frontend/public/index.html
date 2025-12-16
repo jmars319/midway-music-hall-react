@@ -225,5 +225,40 @@
         </footer>
       </div>
     </div>
+    <script>
+      (function () {
+        const scripts = [
+          { id: 'cf-email-decode', src: 'https://static.cloudflareinsights.com/static/email-decode.min.js' },
+          { id: 'godaddy-scc', src: 'https://c2.godaddy.com/c2/scripts/cscc/scc-c2.min.js' }
+        ];
+        const injectScript = (cfg) => {
+          if (!cfg?.src) return;
+          const existing = document.querySelector(`script[src="${cfg.src}"]`);
+          if (existing) {
+            existing.defer = true;
+            existing.async = true;
+            return;
+          }
+          const script = document.createElement('script');
+          script.src = cfg.src;
+          script.defer = true;
+          script.async = true;
+          script.dataset.lazy = 'true';
+          if (cfg.id) {
+            script.id = cfg.id;
+          }
+          document.body.appendChild(script);
+        };
+        const loadThirdPartyScripts = () => scripts.forEach(injectScript);
+        const scheduleLoad = () => {
+          if ('requestIdleCallback' in window) {
+            window.requestIdleCallback(loadThirdPartyScripts, { timeout: 2000 });
+          } else {
+            window.setTimeout(loadThirdPartyScripts, 1500);
+          }
+        };
+        window.addEventListener('load', scheduleLoad, { once: true });
+      }());
+    </script>
   </body>
 </html>

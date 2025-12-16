@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, Search, Trash2, Edit2, X } from 'lucide-react';
-import { API_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 
 const submissionClasses = {
   self: 'bg-purple-500/20 text-purple-300',

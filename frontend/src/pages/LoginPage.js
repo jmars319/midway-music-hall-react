@@ -1,25 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 // LoginPage: admin login form; lightweight demo auth + DB lookup
-import { API_BASE, SERVER_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
+import useSiteContent from '../hooks/useSiteContent';
+import { getBrandImages } from '../utils/brandAssets';
 
 export default function LoginPage({ onLogin, onBack }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [logo, setLogo] = useState('/logo.png');
-
-  useEffect(() => {
-    fetch(`${API_BASE}/settings`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.settings && data.settings.site_logo) {
-          setLogo(SERVER_BASE + data.settings.site_logo);
-        }
-      })
-      .catch(err => console.error('Failed to load logo:', err));
-  }, []);
+  const siteContent = useSiteContent();
+  const { logoUrl } = getBrandImages(siteContent);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -51,7 +43,15 @@ export default function LoginPage({ onLogin, onBack }) {
     <div className="min-h-screen flex items-center justify-center bg-gray-900 py-12">
       <div className="max-w-md w-full bg-gray-800 rounded-xl p-6 border border-purple-500/20">
         <div className="flex justify-center mb-4">
-          <ResponsiveImage src={logo} alt="Midway Music Hall" width={160} height={64} priority className="h-16 w-auto object-contain" />
+          <ResponsiveImage
+            src={logoUrl}
+            alt="Midway Music Hall"
+            width={160}
+            height={64}
+            priority
+            className="h-16 w-auto object-contain"
+            sizes="160px"
+          />
         </div>
         <h2 className="text-2xl font-bold text-white mb-2">Admin Login</h2>
         {/* Demo credentials removed for security */}

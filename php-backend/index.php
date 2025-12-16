@@ -8,7 +8,11 @@ use Midway\Backend\Env;
 use Midway\Backend\Request;
 use Midway\Backend\Response;
 use Midway\Backend\Router;
-use function Midway\Backend\optimize_uploaded_image;
+use function Midway\Backend\process_image_variants;
+use function Midway\Backend\load_image_manifest;
+use function Midway\Backend\delete_image_with_variants;
+use function Midway\Backend\relative_upload_path;
+use function Midway\Backend\build_variant_payload_from_manifest;
 
 $router = new Router();
 
@@ -58,7 +62,8 @@ function save_uploaded_file(array $file): ?array
         return null;
     }
 
-    $allowed = ['image/jpeg','image/png','image/gif','image/webp'];
+    $allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
     $mime = finfo_file($finfo, $file['tmp_name']);
     finfo_close($finfo);
@@ -74,38 +79,7 @@ function save_uploaded_file(array $file): ?array
         return ['error' => "File exceeds the {$maxMb}MB limit"];
     }
 
-    if (!in_array($mime, $allowed, true)) {
-        return ['error' => 'Only image files are allowed'];
-    }
-    if (!in_array($extension, ['jpg','jpeg','png','gif','webp'], true)) {
-        return ['error' => 'Only image files are allowed'];
-    }
-
-    $hashPrefix = substr(sha1(($originalName ?: '') . $fileSize . microtime(true) . random_bytes(8)), 0, 12);
-    $unique = 'event-' . $hashPrefix . '-' . mt_rand(100000, 999999999);
-    $filename = $unique . '.' . $extension;
-    $targetPath = rtrim(UPLOADS_DIR, '/') . '/' . $filename;
-
-    $allowed = ['image/jpeg','image/png','image/gif','image/webp'];
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    $mime = finfo_file($finfo, $file['tmp_name']);
-    finfo_close($finfo);
-    $originalName = $file['name'] ?? 'upload';
-    $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
-    $fileSize = (int) ($file['size'] ?? 0);
-    if ($fileSize <= 0 && is_file($file['tmp_name'])) {
-        $fileSize = (int) filesize($file['tmp_name']);
-    }
-
-    if (IMAGE_UPLOAD_MAX_BYTES > 0 && $fileSize > IMAGE_UPLOAD_MAX_BYTES) {
-        $maxMb = round(IMAGE_UPLOAD_MAX_BYTES / (1024 * 1024));
-        return ['error' => "File exceeds the {$maxMb}MB limit"];
-    }
-
-    if (!in_array($mime, $allowed, true)) {
-        return ['error' => 'Only image files are allowed'];
-    }
-    if (!in_array($extension, ['jpg','jpeg','png','gif','webp'], true)) {
+    if (!in_array($mime, $allowedMimes, true) || !in_array($extension, $allowedExtensions, true)) {
         return ['error' => 'Only image files are allowed'];
     }
 
@@ -118,7 +92,7 @@ function save_uploaded_file(array $file): ?array
         return ['error' => 'Failed to save file'];
     }
 
-    $optimization = optimize_uploaded_image($targetPath, $filename, $mime);
+    $responsive = process_image_variants($targetPath, $filename, $mime);
 
     return [
         'filename' => $filename,
@@ -126,12 +100,21 @@ function save_uploaded_file(array $file): ?array
         'mime' => $mime,
         'size' => @filesize($targetPath) ?: $fileSize,
         'original_name' => $originalName,
-        'width' => $optimization['width'] ?? null,
-        'height' => $optimization['height'] ?? null,
-        'optimized_path' => $optimization['optimized_path'] ?? null,
-        'webp_path' => $optimization['webp_path'] ?? null,
-        'optimization_status' => $optimization['optimization_status'] ?? 'pending',
-        'processing_notes' => $optimization['processing_notes'] ?? null,
+        'width' => $responsive['intrinsic_width'] ?? null,
+        'height' => $responsive['intrinsic_height'] ?? null,
+        'optimized_path' => $responsive['optimized_path'] ?? null,
+        'webp_path' => $responsive['webp_path'] ?? null,
+        'optimized_srcset' => $responsive['optimized_srcset'] ?? null,
+        'webp_srcset' => $responsive['webp_srcset'] ?? null,
+        'fallback_original' => $responsive['fallback_original'] ?? ('/uploads/' . $filename),
+        'responsive_variants' => [
+            'optimized' => $responsive['optimized_variants'] ?? [],
+            'webp' => $responsive['webp_variants'] ?? [],
+        ],
+        'manifest_path' => $responsive['manifest_path'] ?? null,
+        'derived_files' => $responsive['derived_files'] ?? [],
+        'optimization_status' => $responsive['optimization_status'] ?? 'pending',
+        'processing_notes' => $responsive['processing_notes'] ?? null,
         'checksum' => is_file($targetPath) ? hash_file('sha256', $targetPath) : null,
     ];
 }
@@ -619,26 +602,25 @@ function decode_settings_json(array $settings, string $key, $default = [])
     return is_array($decoded) ? $decoded : $default;
 }
 
-function normalize_upload_relative_path(string $fileUrl): ?string
-{
-    if (!is_string($fileUrl) || trim($fileUrl) === '') {
-        return null;
-    }
-    if (!str_starts_with($fileUrl, '/uploads/')) {
-        return null;
-    }
-    $relative = ltrim(substr($fileUrl, strlen('/uploads/')), '/');
-    return $relative !== '' ? $relative : null;
-}
-
 function derive_variant_paths_from_disk(string $fileUrl): array
 {
-    $relative = normalize_upload_relative_path($fileUrl);
+    $manifest = load_image_manifest($fileUrl);
+    if ($manifest) {
+        $payload = build_variant_payload_from_manifest($fileUrl, $manifest);
+        return array_merge([
+            'original' => $fileUrl,
+        ], $payload);
+    }
+
+    $relative = relative_upload_path($fileUrl);
     if (!$relative) {
         return [
             'original' => $fileUrl,
             'optimized' => null,
             'webp' => null,
+            'optimized_srcset' => null,
+            'webp_srcset' => null,
+            'fallback_original' => $fileUrl,
         ];
     }
 
@@ -666,7 +648,39 @@ function derive_variant_paths_from_disk(string $fileUrl): array
         'original' => $fileUrl,
         'optimized' => $optimizedUrl,
         'webp' => $webpUrl,
+        'optimized_srcset' => null,
+        'webp_srcset' => null,
+        'fallback_original' => $fileUrl,
     ];
+}
+
+function normalize_variant_candidate_url($candidate): ?string
+{
+    if (!is_string($candidate)) {
+        return null;
+    }
+    $candidate = trim($candidate);
+    if ($candidate === '') {
+        return null;
+    }
+
+    $relative = null;
+    if (str_starts_with($candidate, '/uploads/')) {
+        $relative = ltrim(substr($candidate, strlen('/uploads/')), '/');
+    } elseif (str_starts_with($candidate, 'uploads/')) {
+        $relative = ltrim(substr($candidate, strlen('uploads/')), '/');
+        $candidate = '/uploads/' . $relative;
+    }
+
+    if ($relative !== null) {
+        if ($relative === '') {
+            return null;
+        }
+        $fullPath = rtrim(UPLOADS_DIR, '/') . '/' . $relative;
+        return is_file($fullPath) ? $candidate : null;
+    }
+
+    return $candidate;
 }
 
 function build_image_variants(array $fileUrls): array
@@ -709,23 +723,52 @@ function build_image_variants(array $fileUrls): array
     }
 
     foreach ($normalized as $url) {
+        $manifest = load_image_manifest($url);
+        if ($manifest) {
+            $variants[] = build_variant_payload_from_manifest($url, $manifest);
+            continue;
+        }
         $fromDb = $map[$url] ?? [];
-        $optimized = $fromDb['optimized'] ?? null;
-        $webp = $fromDb['webp'] ?? null;
+        $optimized = normalize_variant_candidate_url($fromDb['optimized'] ?? null);
+        $webp = normalize_variant_candidate_url($fromDb['webp'] ?? null);
         if (!$optimized || !$webp) {
             $derived = derive_variant_paths_from_disk($url);
-            $optimized = $optimized ?: $derived['optimized'];
-            $webp = $webp ?: $derived['webp'];
+            $optimized = $optimized ?: ($derived['optimized'] ?? null);
+            $webp = $webp ?: ($derived['webp'] ?? null);
         }
         $variants[] = [
             'file_url' => $url,
             'original' => $url,
             'optimized' => $optimized,
             'webp' => $webp,
+            'optimized_srcset' => null,
+            'webp_srcset' => null,
+            'fallback_original' => $url,
         ];
     }
 
     return $variants;
+}
+
+function build_single_image_variant(?string $fileUrl): ?array
+{
+    if (!$fileUrl || trim($fileUrl) === '') {
+        return null;
+    }
+    $variants = build_image_variants([$fileUrl]);
+    if (!empty($variants)) {
+        return $variants[0];
+    }
+    $derived = derive_variant_paths_from_disk($fileUrl);
+    return [
+        'file_url' => $fileUrl,
+        'original' => $derived['original'] ?? $fileUrl,
+        'optimized' => $derived['optimized'] ?? null,
+        'webp' => $derived['webp'] ?? null,
+        'optimized_srcset' => $derived['optimized_srcset'] ?? null,
+        'webp_srcset' => $derived['webp_srcset'] ?? null,
+        'fallback_original' => $derived['fallback_original'] ?? $fileUrl,
+    ];
 }
 
 function log_admin_session_state(string $message): void
@@ -1777,6 +1820,51 @@ function list_events(Request $request, ?string $scopeOverride = null): array
                 error_log('[events] Admin scope returning events without schedule metadata; ids=' . $preview . (count($missingIds) > 10 ? '...' : ''));
             }
         }
+        $imageLookup = [];
+        $imageUrls = [];
+        foreach ($rows as $row) {
+            $imageUrl = trim((string) ($row['image_url'] ?? ''));
+            if ($imageUrl !== '') {
+                $imageUrls[] = $imageUrl;
+            }
+        }
+        if ($imageUrls) {
+            $variants = build_image_variants($imageUrls);
+            foreach ($variants as $variant) {
+                $key = $variant['file_url'] ?? $variant['original'] ?? null;
+                if ($key) {
+                    $imageLookup[$key] = $variant;
+                }
+            }
+        }
+        $defaultEventVariant = null;
+        if ($scope === 'public') {
+            $settings = fetch_business_settings();
+            $defaultEventVariant = build_single_image_variant($settings['default_event_image'] ?? null);
+        }
+        foreach ($rows as &$row) {
+            $imageUrl = trim((string) ($row['image_url'] ?? ''));
+            $variant = null;
+            $variantSource = null;
+            if ($imageUrl !== '' && isset($imageLookup[$imageUrl])) {
+                $variant = $imageLookup[$imageUrl];
+                $variantSource = 'event_image';
+            }
+            if (!$variant && $defaultEventVariant) {
+                $variant = $defaultEventVariant;
+                $variantSource = 'branding_default';
+            }
+            if ($variant) {
+                $row['image_variants'] = $variant;
+                $row['image_variant_source'] = $variantSource;
+                $row['resolved_image_url'] = $variant['webp'] ?? $variant['optimized'] ?? $variant['original'];
+                $row['image_webp_srcset'] = $variant['webp_srcset'] ?? null;
+                $row['image_optimized_srcset'] = $variant['optimized_srcset'] ?? null;
+                $row['image_intrinsic_width'] = $variant['intrinsic_width'] ?? null;
+                $row['image_intrinsic_height'] = $variant['intrinsic_height'] ?? null;
+            }
+        }
+        unset($row);
         return $rows;
     } catch (Throwable $error) {
         if (APP_DEBUG) {
@@ -1927,20 +2015,17 @@ $router->add('POST', '/api/upload-image', function (Request $request) {
         return Response::error($result['error'] ?? 'Upload failed', 400);
     }
     $fileUrl = '/uploads/' . $result['filename'];
-    $variantInfo = derive_variant_paths_from_disk($fileUrl);
-    if ($result['optimized_path'] ?? null) {
-        $variantInfo['optimized'] = $result['optimized_path'];
-    }
-    if ($result['webp_path'] ?? null) {
-        $variantInfo['webp'] = $result['webp_path'];
-    }
     Response::success([
         'url' => $fileUrl,
         'filename' => $result['filename'],
         'width' => $result['width'],
         'height' => $result['height'],
-        'optimized_url' => $variantInfo['optimized'],
-        'webp_url' => $variantInfo['webp'],
+        'optimized_url' => $result['optimized_path'] ?? null,
+        'webp_url' => $result['webp_path'] ?? null,
+        'fallback_original' => $result['fallback_original'] ?? $fileUrl,
+        'optimized_srcset' => $result['optimized_srcset'] ?? null,
+        'webp_srcset' => $result['webp_srcset'] ?? null,
+        'responsive_variants' => $result['responsive_variants'] ?? null,
     ]);
 });
 
@@ -3828,6 +3913,18 @@ $router->add('GET', '/api/media', function (Request $request) {
             $stmt = Database::run('SELECT * FROM media ORDER BY created_at DESC');
         }
         $media = $stmt->fetchAll();
+        if ($media) {
+            foreach ($media as &$item) {
+                $variant = build_single_image_variant($item['file_url'] ?? null);
+                if ($variant) {
+                    $item['image_variants'] = $variant;
+                    $item['optimized_srcset'] = $variant['optimized_srcset'] ?? null;
+                    $item['webp_srcset'] = $variant['webp_srcset'] ?? null;
+                    $item['fallback_original'] = $variant['fallback_original'] ?? ($item['file_url'] ?? null);
+                }
+            }
+            unset($item);
+        }
         Response::success(['media' => $media]);
     } catch (Throwable $error) {
         if (APP_DEBUG) {
@@ -3885,6 +3982,10 @@ $router->add('POST', '/api/media', function (Request $request) {
                 'height' => $result['height'],
                 'optimized_path' => $result['optimized_path'],
                 'webp_path' => $result['webp_path'],
+                'optimized_srcset' => $result['optimized_srcset'] ?? null,
+                'webp_srcset' => $result['webp_srcset'] ?? null,
+                'fallback_original' => $result['fallback_original'] ?? $fileUrl,
+                'responsive_variants' => $result['responsive_variants'] ?? null,
             ],
         ]);
     } catch (Throwable $error) {
@@ -3918,23 +4019,14 @@ $router->add('DELETE', '/api/media/:id', function ($request, $params) {
         if (!$row) {
             return Response::error('Media not found', 404);
         }
+        $fileUrl = $row['file_url'] ?? null;
+        if (!$fileUrl && !empty($row['filename'])) {
+            $fileUrl = '/uploads/' . ltrim($row['filename'], '/');
+        }
+        if ($fileUrl) {
+            delete_image_with_variants($fileUrl);
+        }
         Database::run('DELETE FROM media WHERE id = ?', [$params['id']]);
-        $filePath = rtrim(UPLOADS_DIR, '/') . '/' . $row['filename'];
-        if (is_file($filePath)) {
-            @unlink($filePath);
-        }
-        if (!empty($row['optimized_path'])) {
-            $optPath = __DIR__ . $row['optimized_path'];
-            if (is_file($optPath)) {
-                @unlink($optPath);
-            }
-        }
-        if (!empty($row['webp_path'])) {
-            $webpPath = __DIR__ . $row['webp_path'];
-            if (is_file($webpPath)) {
-                @unlink($webpPath);
-            }
-        }
         Response::success();
     } catch (Throwable $error) {
         if (APP_DEBUG) {
@@ -4035,6 +4127,14 @@ $router->add('GET', '/api/site-content', function () {
         $review = [
             'google_review_url' => $settings['google_review_url'] ?? '',
         ];
+        $branding = [
+            'logo' => build_single_image_variant($settings['site_logo'] ?? null),
+            'mark' => build_single_image_variant(
+                $settings['site_brand_mark'] ?? $settings['site_logo'] ?? $settings['default_event_image'] ?? null
+            ),
+            'default_event' => build_single_image_variant($settings['default_event_image'] ?? null),
+        ];
+
         Response::success([
             'content' => [
                 'business' => $business,
@@ -4045,6 +4145,7 @@ $router->add('GET', '/api/site-content', function () {
                 'lessons' => $lessons,
                 'social' => $social,
                 'review' => $review,
+                'branding' => $branding,
             ],
         ]);
     } catch (Throwable $error) {

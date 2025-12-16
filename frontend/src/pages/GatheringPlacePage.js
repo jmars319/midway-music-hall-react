@@ -4,7 +4,7 @@ import Hero from '../components/Hero';
 import Schedule from '../components/Schedule';
 import ArtistSuggestion from '../components/ArtistSuggestion';
 import Footer from '../components/Footer';
-import { API_BASE } from '../App';
+import { API_BASE } from '../apiConfig';
 
 export default function GatheringPlacePage({ onAdminClick, onNavigate }) {
   const [events, setEvents] = useState([]);
