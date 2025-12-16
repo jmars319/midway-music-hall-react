@@ -14,11 +14,11 @@ export default function MapSection() {
           <div>
             <p className="text-sm uppercase tracking-widest text-purple-300">Visit</p>
             <h2 className="text-3xl font-bold text-white mt-1">Find Midway Music Hall</h2>
-            <p className="text-gray-400 mt-2 flex items-center gap-2">
-              <MapPin className="h-4 w-4 text-purple-300" />
+            <p className="text-gray-200 mt-2 flex items-center gap-2">
+              <MapPin className="h-4 w-4 text-purple-300" aria-hidden="true" />
               {map.address_label || '11141 Old U.S. Hwy 52, Winston-Salem, NC 27107'}
             </p>
-            {map.subtext && <p className="text-gray-500 mt-1 text-sm">{map.subtext}</p>}
+            {map.subtext && <p className="text-gray-300 mt-1 text-sm">{map.subtext}</p>}
           </div>
         </div>
 

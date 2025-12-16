@@ -3,6 +3,7 @@ import { Waves, Calendar, Users, Phone, Mail } from 'lucide-react';
 import EventSeatingModal from './EventSeatingModal';
 import useSiteContent from '../hooks/useSiteContent';
 import { eventHasSeating, isRecurringEvent } from '../utils/eventFormat';
+import { formatPhoneHref, CONTACT_LINK_CLASSES } from '../utils/contactLinks';
 
 const resolveDateValue = (event = {}) => event.start_datetime || event.event_date || event.date || null;
 
@@ -15,14 +16,6 @@ const formatDate = (value) => {
     month: 'short',
     day: 'numeric',
   });
-};
-
-const formatPhoneHref = (value) => {
-  if (!value) return null;
-  const digits = value.replace(/\D/g, '');
-  if (!digits) return null;
-  const normalized = digits.length === 10 ? `+1${digits}` : digits;
-  return `tel:${normalized}`;
 };
 
 export default function BeachSeriesShowcase({ events = [] }) {
@@ -63,7 +56,7 @@ export default function BeachSeriesShowcase({ events = [] }) {
       )}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-3 mb-6">
-          <Waves className="h-8 w-8 text-cyan-300" />
+          <Waves className="h-8 w-8 text-cyan-300" aria-hidden="true" />
           <div>
             <p className="text-sm uppercase tracking-widest text-cyan-200">Carolina Beach Music Series</p>
             <h2 className="text-3xl font-bold text-white">Beach Bands at Midway</h2>
@@ -75,22 +68,24 @@ export default function BeachSeriesShowcase({ events = [] }) {
             <p className="text-xs uppercase tracking-[0.2em] text-cyan-200 mb-2">Beach Bands Contact</p>
             <h3 className="text-2xl font-semibold text-white">{beachContact.name}{beachContact.title ? ` · ${beachContact.title}` : ''}</h3>
             <p className="text-cyan-100 mt-2 text-base">{contactInstructions}</p>
-            <div className="flex flex-wrap gap-6 mt-4 text-white text-lg font-semibold">
+            <div className="flex flex-col gap-3 mt-4 text-white text-lg font-semibold sm:flex-row sm:flex-wrap">
               {beachContact.phone && (
                 <a
                   href={formatPhoneHref(beachContact.phone)}
-                  className="inline-flex items-center gap-2 hover:text-cyan-200 transition"
+                  className={`${CONTACT_LINK_CLASSES} text-white hover:text-cyan-200`}
+                  aria-label={`Call ${beachContact.name || 'beach contact'} at ${beachContact.phone}`}
                 >
-                  <Phone className="h-5 w-5" />
+                  <Phone className="h-5 w-5" aria-hidden="true" />
                   <span>{beachContact.phone}</span>
                 </a>
               )}
               {beachContact.email && (
                 <a
                   href={`mailto:${beachContact.email}`}
-                  className="inline-flex items-center gap-2 hover:text-cyan-200 transition"
+                  className={`${CONTACT_LINK_CLASSES} text-white hover:text-cyan-200`}
+                  aria-label={`Email ${beachContact.name || 'beach contact'} at ${beachContact.email}`}
                 >
-                  <Mail className="h-5 w-5" />
+                  <Mail className="h-5 w-5" aria-hidden="true" />
                   <span>{beachContact.email}</span>
                 </a>
               )}
@@ -105,7 +100,7 @@ export default function BeachSeriesShowcase({ events = [] }) {
               <h3 className="text-2xl font-semibold text-white">{event.artist_name || event.title}</h3>
               <p className="text-gray-300 mt-1">{event.description || event.notes || 'Classic Carolina beach music vibes.'}</p>
               <div className="flex items-center gap-2 text-gray-300 mt-4">
-                <Calendar className="h-4 w-4 text-cyan-200" />
+                <Calendar className="h-4 w-4 text-cyan-200" aria-hidden="true" />
                 <span>{formatDate(resolveDateValue(event))} · {event.venue_code || 'MMH'}</span>
               </div>
               {eventHasSeating(event) && !isRecurringEvent(event) && (
@@ -114,7 +109,7 @@ export default function BeachSeriesShowcase({ events = [] }) {
                   onClick={() => setSelectedEvent(event)}
                   className="mt-5 inline-flex items-center gap-2 rounded-lg bg-cyan-600/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500"
                 >
-                  <Users className="h-4 w-4" /> Request Seats
+                  <Users className="h-4 w-4" aria-hidden="true" /> Request Seats
                 </button>
               )}
             </article>

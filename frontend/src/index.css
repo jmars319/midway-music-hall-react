@@ -97,10 +97,10 @@ a:focus, button:focus, iframe:focus {
 .sp-contact-item strong { color: #f8fafc; }
 .sp-contact-top { display:flex; gap:0.5rem; align-items:baseline; }
 .sp-contact-role { color: #9ca3af; font-size:0.95rem; }
-.sp-contact-meta { color: #9ca3af; margin-top: 0.25rem; font-size:0.95rem; }
+.sp-contact-meta { color: #9ca3af; margin-top: 0.25rem; font-size:0.95rem; display:flex; flex-direction:column; gap:0.35rem; align-items:flex-start; }
 .sp-contact-notes { color: #cbd5e1; margin-top:0.25rem; font-size:0.92rem; }
-.sp-contact-link { color: #9ca3af; text-decoration: none; transition: color 0.2s; }
-.sp-contact-link:hover, .sp-contact-link:focus { color: #c084fc; text-decoration: underline; }
+.sp-contact-link { color: #e5e7eb; text-decoration: underline; text-underline-offset: 0.2rem; transition: color 0.2s; display:inline-flex; align-items:center; min-height:44px; padding:0.1rem 0; font-weight:600; }
+.sp-contact-link:hover, .sp-contact-link:focus { color: #c084fc; }
 .sp-contact-link:focus { outline: 2px solid #c084fc; outline-offset: 2px; }
 
 .sp-map-wrapper { border-radius: 6px; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02); }
@@ -139,4 +139,3 @@ a:focus, button:focus, iframe:focus {
   .sp-classes { grid-column: 1 / 2; grid-row: 3; }
   .sp-location { grid-column: 2 / 3; grid-row: 1 / 4; }
 }
-

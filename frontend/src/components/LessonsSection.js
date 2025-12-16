@@ -1,6 +1,7 @@
 import React from 'react';
 import { Phone } from 'lucide-react';
 import useSiteContent from '../hooks/useSiteContent';
+import { formatPhoneHref, CONTACT_LINK_CLASSES } from '../utils/contactLinks';
 
 export default function LessonsSection() {
   const siteContent = useSiteContent();
@@ -22,10 +23,14 @@ export default function LessonsSection() {
               <p className="text-gray-300 mt-2">{lesson.schedule}</p>
               <p className="text-gray-400 text-sm mt-4 flex-1">{lesson.description}</p>
               <div className="mt-6 text-sm text-gray-300 flex items-center gap-2">
-                <Phone className="h-4 w-4 text-purple-300" />
+                <Phone className="h-4 w-4 text-purple-300" aria-hidden="true" />
                 <div>
                   <p className="font-semibold text-white">{lesson.instructor}</p>
-                  <a href={`tel:${lesson.phone.replace(/[^0-9+]/g, '')}`} className="text-purple-300 hover:text-purple-100 transition">
+                  <a
+                    href={formatPhoneHref(lesson.phone)}
+                    className={CONTACT_LINK_CLASSES}
+                    aria-label={`Call ${lesson.instructor || lesson.title} at ${lesson.phone}`}
+                  >
                     {lesson.phone}
                   </a>
                 </div>

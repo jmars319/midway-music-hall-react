@@ -95,7 +95,9 @@ export default function Navigation() {
               >
                 <ResponsiveImage
                   src={logoUrl}
-                  alt="Midway Music Hall"
+                  alt=""
+                  aria-hidden="true"
+                  role="presentation"
                   width={160}
                   height={80}
                   priority

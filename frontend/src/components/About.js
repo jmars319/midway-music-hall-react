@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Music, Users, Star, Heart, MapPin, Shield, Phone, Mail } from 'lucide-react';
 import { API_BASE } from '../apiConfig';
 import useSiteContent from '../hooks/useSiteContent';
+import { formatPhoneHref, CONTACT_LINK_CLASSES } from '../utils/contactLinks';
 
 // TODO: Confirm actual capacity; using neutral phrasing for now.
 const features = [
@@ -56,7 +57,7 @@ export default function About(){
               {features.map((f) => (
                 <div key={f.title} className="bg-gray-800 rounded-xl p-6 border border-purple-500/20">
                   <div className="flex items-start gap-4">
-                    <f.icon className="h-8 w-8 text-purple-400" />
+                    <f.icon className="h-8 w-8 text-purple-400" aria-hidden="true" />
                     <div>
                       <h4 className="text-lg font-semibold">{f.title}</h4>
                       <p className="text-gray-300 text-sm mt-1">{f.description}</p>
@@ -72,7 +73,7 @@ export default function About(){
             <div className="mt-6 space-y-6">
               <div className="bg-gray-800 rounded-2xl border border-gray-700 p-5">
                 <div className="flex items-start gap-3">
-                  <MapPin className="h-5 w-5 text-purple-300 mt-1" />
+                  <MapPin className="h-5 w-5 text-purple-300 mt-1" aria-hidden="true" />
                   <div>
                     <h4 className="font-semibold text-white">Address</h4>
                     <p className="text-gray-300">{siteContent.business?.address || '11141 Old US Hwy 52, Winston-Salem, NC 27107'}</p>
@@ -83,7 +84,7 @@ export default function About(){
 
               <div className="bg-gray-800 rounded-2xl border border-gray-700 p-5">
                 <div className="flex items-start gap-3">
-                  <Shield className="h-5 w-5 text-purple-300 mt-1" />
+                  <Shield className="h-5 w-5 text-purple-300 mt-1" aria-hidden="true" />
                   <div>
                     <h4 className="font-semibold text-white">Family Policy</h4>
                     <p className="text-gray-300">{siteContent.policies?.family || 'Family venue - no profanity or disrespectful behavior.'}</p>
@@ -101,16 +102,24 @@ export default function About(){
                     <div key={`${contact.email}-${contact.phone}`}>
                       <p className="text-white font-semibold">{contact.name}</p>
                       {contact.title && <p className="text-gray-400 text-sm">{contact.title}</p>}
-                      {contact.notes && <p className="text-xs text-gray-500 mt-1">{contact.notes}</p>}
-                      <div className="flex flex-wrap items-center gap-4 text-sm mt-1">
+                      {contact.notes && <p className="text-sm text-gray-200 mt-1">{contact.notes}</p>}
+                      <div className="flex flex-wrap items-center gap-4 text-sm mt-2">
                         {contact.phone && (
-                          <a href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`} className="flex items-center gap-1 text-purple-300 hover:text-purple-100">
-                            <Phone className="h-4 w-4" /> {contact.phone}
+                          <a
+                            href={formatPhoneHref(contact.phone)}
+                            className={CONTACT_LINK_CLASSES}
+                            aria-label={`Call ${contact.name || 'contact'} at ${contact.phone}`}
+                          >
+                            <Phone className="h-4 w-4" aria-hidden="true" /> {contact.phone}
                           </a>
                         )}
                         {contact.email && (
-                          <a href={`mailto:${contact.email}`} className="flex items-center gap-1 text-purple-300 hover:text-purple-100">
-                            <Mail className="h-4 w-4" /> {contact.email}
+                          <a
+                            href={`mailto:${contact.email}`}
+                            className={CONTACT_LINK_CLASSES}
+                            aria-label={`Email ${contact.name || 'contact'} at ${contact.email}`}
+                          >
+                            <Mail className="h-4 w-4" aria-hidden="true" /> {contact.email}
                           </a>
                         )}
                       </div>

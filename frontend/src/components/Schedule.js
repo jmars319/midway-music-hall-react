@@ -161,28 +161,28 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
 
           <div className="min-h-[360px]">
             {loading ? (
-              <div className="flex items-center justify-center h-48">
-                <div className="animate-spin h-12 w-12 border-4 border-purple-500 border-t-transparent rounded-full"></div>
-              </div>
-            ) : errorMessage ? (
-              <div className="text-center py-12">
-                <Calendar className="h-16 w-16 text-red-400 mx-auto mb-4" />
-                <p className="text-xl text-red-200">Events are temporarily unavailable.</p>
-                <p className="text-red-300 mt-2">{errorMessage}</p>
-              </div>
-            ) : events.length === 0 ? (
-              <div className="text-center py-12">
-                <Calendar className="h-16 w-16 text-gray-500 mx-auto mb-4" />
-                <p className="text-xl text-gray-400">No upcoming shows</p>
-                <p className="text-gray-500 mt-2">Check back soon for new events.</p>
-              </div>
-            ) : showFilteredEmptyState ? (
-              <div className="text-center py-12">
-                <Calendar className="h-16 w-16 text-gray-500 mx-auto mb-4" />
-                <p className="text-xl text-gray-400">No events in {activeMonthLabel}</p>
-                <p className="text-gray-500 mt-2">Try another month or tap "All".</p>
-              </div>
-            ) : (
+            <div className="flex items-center justify-center h-48">
+              <div className="animate-spin h-12 w-12 border-4 border-purple-500 border-t-transparent rounded-full"></div>
+            </div>
+          ) : errorMessage ? (
+            <div className="text-center py-12">
+              <Calendar className="h-16 w-16 text-red-400 mx-auto mb-4" />
+              <p className="text-xl text-red-200">Events are temporarily unavailable.</p>
+              <p className="text-red-100 mt-2">{errorMessage}</p>
+            </div>
+          ) : events.length === 0 ? (
+            <div className="text-center py-12">
+              <Calendar className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+              <p className="text-xl text-gray-200">No upcoming shows</p>
+              <p className="text-gray-300 mt-2">Check back soon for new events.</p>
+            </div>
+          ) : showFilteredEmptyState ? (
+            <div className="text-center py-12">
+              <Calendar className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+              <p className="text-xl text-gray-200">No events in {activeMonthLabel}</p>
+              <p className="text-gray-300 mt-2">Try another month or tap "All".</p>
+            </div>
+          ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 min-h-[360px]">
                 {pagedEvents.map((event) => (
                   <div

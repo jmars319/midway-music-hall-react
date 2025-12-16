@@ -106,9 +106,9 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
               <div className="animate-spin h-12 w-12 border-4 border-purple-500 border-t-transparent rounded-full" />
             </div>
           ) : grouped.length === 0 ? (
-            <div className="text-center py-16 border border-dashed border-gray-700 rounded-xl">
-              <Calendar className="h-12 w-12 mx-auto text-gray-500 mb-4" />
-              <p className="text-gray-400">No archived events found.</p>
+            <div className="text-center py-16 border border-dashed border-gray-600 rounded-xl">
+              <Calendar className="h-12 w-12 mx-auto text-gray-300 mb-4" />
+              <p className="text-gray-200">No archived events found.</p>
             </div>
           ) : (
             <div className="space-y-10">

@@ -24,6 +24,12 @@ export default function EventSeatingModal({ event, onClose }) {
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const titleId = `event-seating-title-${event.id}`;
+  const nameInputId = `${titleId}-customer-name`;
+  const emailInputId = `${titleId}-customer-email`;
+  const phoneInputId = `${titleId}-customer-phone`;
+  const selectedSeatsId = `${titleId}-selected-seats`;
+  const specialRequestsId = `${titleId}-special-requests`;
+  const phoneHelpTextId = `${titleId}-phone-help`;
   const [form, setForm] = useState({
     customerName: '',
     customerEmail: '',
@@ -249,9 +255,11 @@ export default function EventSeatingModal({ event, onClose }) {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-white mb-2 font-medium">Your Name *</label>
+                    <label className="block text-white mb-2 font-medium" htmlFor={nameInputId}>Your Name *</label>
                     <input 
+                      id={nameInputId}
                       name="customerName" 
+                      type="text"
                       value={form.customerName} 
                       onChange={handleChange} 
                       className="w-full px-4 py-3 bg-gray-800 text-white rounded-lg border border-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 outline-none transition" 
@@ -260,8 +268,9 @@ export default function EventSeatingModal({ event, onClose }) {
                     />
                   </div>
                   <div>
-                    <label className="block text-white mb-2 font-medium">Email (optional)</label>
+                    <label className="block text-white mb-2 font-medium" htmlFor={emailInputId}>Email (optional)</label>
                     <input 
+                      id={emailInputId}
                       name="customerEmail" 
                       type="email" 
                       value={form.customerEmail} 
@@ -274,8 +283,9 @@ export default function EventSeatingModal({ event, onClose }) {
                 </div>
 
                 <div>
-                  <label className="block text-white mb-2 font-medium">Phone *</label>
+                  <label className="block text-white mb-2 font-medium" htmlFor={phoneInputId}>Phone *</label>
                   <input 
+                    id={phoneInputId}
                     name="customerPhone" 
                     type="tel"
                     value={form.customerPhone} 
@@ -284,15 +294,25 @@ export default function EventSeatingModal({ event, onClose }) {
                     disabled={submitting}
                     required
                     aria-required="true"
+                    aria-describedby={phoneHelpTextId}
                     placeholder="Required so staff can confirm your seats"
                   />
+                  <p id={phoneHelpTextId} className="mt-1 text-sm text-gray-400">
+                    Required so staff can confirm your seats.
+                  </p>
                 </div>
 
                 <div>
-                  <label className="block text-white mb-2 font-medium">Selected Seats ({selectedSeats.length})</label>
-                  <div className="flex flex-wrap gap-2 p-4 bg-gray-800 rounded-lg border border-gray-700 min-h-[60px]">
+                  <p id={selectedSeatsId} className="block text-white mb-2 font-medium">
+                    Selected Seats ({selectedSeats.length})
+                  </p>
+                  <div
+                    className="flex flex-wrap gap-2 p-4 bg-gray-800 rounded-lg border border-gray-700 min-h-[60px]"
+                    role="list"
+                    aria-labelledby={selectedSeatsId}
+                  >
                     {selectedSeats.map((seatId) => (
-                      <div key={seatId} className="px-3 py-1 bg-purple-600 text-white rounded-full text-sm font-medium">
+                      <div key={seatId} className="px-3 py-1 bg-purple-600 text-white rounded-full text-sm font-medium" role="listitem">
                         {describeSeatSelection(seatId, seatLabelMap[seatId])}
                       </div>
                     ))}
@@ -300,8 +320,9 @@ export default function EventSeatingModal({ event, onClose }) {
                 </div>
 
                 <div>
-                  <label className="block text-white mb-2 font-medium">Special Requests</label>
+                  <label className="block text-white mb-2 font-medium" htmlFor={specialRequestsId}>Special Requests</label>
                   <textarea 
+                    id={specialRequestsId}
                     name="specialRequests" 
                     value={form.specialRequests} 
                     onChange={handleChange} 
@@ -448,7 +469,7 @@ export default function EventSeatingModal({ event, onClose }) {
                   )}
                 </div>
               ) : (
-                <p className="mt-2 text-gray-500">Pick seats on the map to continue.</p>
+                <p className="mt-2 text-gray-200">Pick seats on the map to continue.</p>
               )}
             </div>
             <div className="flex flex-col sm:flex-row gap-3">

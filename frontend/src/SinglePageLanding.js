@@ -3,6 +3,7 @@ import './index.css';
 import ResponsiveImage from './components/ResponsiveImage';
 import useSiteContent from './hooks/useSiteContent';
 import { getBrandImages } from './utils/brandAssets';
+import { formatPhoneHref } from './utils/contactLinks';
 import eventsData from './data/events.json';
 import contactsData from './data/contacts.json';
 import policiesData from './data/policies.json';
@@ -63,9 +64,8 @@ function SinglePageLanding() {
 
   // Helper to format phone numbers as tel: links
   const formatPhoneLink = (phone) => {
-    if (!phone || phone === 'N/A') return phone;
-    const cleaned = phone.replace(/\D/g, '');
-    return cleaned.length >= 10 ? `tel:+1${cleaned}` : null;
+    if (!phone || phone === 'N/A') return null;
+    return formatPhoneHref(phone);
   };
 
   // Helper to format email links
@@ -220,12 +220,29 @@ function SinglePageLanding() {
                 <li key={i} className="sp-contact-item">
                   <div className="sp-contact-top"><strong>{c.name}</strong>{c.role ? <span className="sp-contact-role"> · {c.role}</span> : null}</div>
                   <div className="sp-contact-meta">
-                    {phoneLink ? <a href={phoneLink} className="sp-contact-link">{c.phone}</a> : c.phone}
+                    {phoneLink ? (
+                      <a
+                        href={phoneLink}
+                        className="sp-contact-link"
+                        aria-label={`Call ${c.name || 'contact'} at ${c.phone}`}
+                      >
+                        {c.phone}
+                      </a>
+                    ) : (
+                      <span>{c.phone}</span>
+                    )}
                     {c.email && (
-                      <span>
-                        {' · '}
-                        {emailLink ? <a href={emailLink} className="sp-contact-link">{c.email}</a> : c.email}
-                      </span>
+                      emailLink ? (
+                        <a
+                          href={emailLink}
+                          className="sp-contact-link"
+                          aria-label={`Email ${c.name || 'contact'} at ${c.email}`}
+                        >
+                          {c.email}
+                        </a>
+                      ) : (
+                        <span>{c.email}</span>
+                      )
                     )}
                   </div>
                   {c.notes ? <div className="sp-contact-notes">{c.notes}</div> : null}
@@ -250,10 +267,18 @@ function SinglePageLanding() {
                     {instructor.class_price && <div className="sp-class-price">💵 {instructor.class_price}</div>}
                     <div className="sp-class-instructor">
                       <strong>Instructor:</strong> {instructor.name}
-                      {phoneLink && (
-                        <span> · <a href={phoneLink} className="sp-contact-link">{instructor.phone}</a></span>
-                      )}
                     </div>
+                    {phoneLink && (
+                      <div className="sp-contact-meta mt-1">
+                        <a
+                          href={phoneLink}
+                          className="sp-contact-link"
+                          aria-label={`Call instructor ${instructor.name} at ${instructor.phone}`}
+                        >
+                          {instructor.phone}
+                        </a>
+                      </div>
+                    )}
                   </div>
                 </li>
               );

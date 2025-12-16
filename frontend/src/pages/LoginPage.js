@@ -56,17 +56,31 @@ export default function LoginPage({ onLogin, onBack }) {
         <h2 className="text-2xl font-bold text-white mb-2">Admin Login</h2>
         {/* Demo credentials removed for security */}
 
-        {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500 text-red-300 rounded">{error}</div>}
+        {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500 text-red-300 rounded" role="alert" aria-live="assertive">{error}</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="mb-3">
-            <label className="block text-white mb-2">Email</label>
-            <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" required />
+            <label className="block text-white mb-2" htmlFor="admin-login-email">Email</label>
+            <input
+              id="admin-login-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg"
+              required
+            />
           </div>
 
           <div className="mb-4">
-            <label className="block text-white mb-2">Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg" required />
+            <label className="block text-white mb-2" htmlFor="admin-login-password">Password</label>
+            <input
+              id="admin-login-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg"
+              required
+            />
           </div>
 
           <div className="flex items-center justify-between gap-3">

@@ -227,10 +227,12 @@
     </div>
     <script>
       (function () {
-        const scripts = [
-          { id: 'cf-email-decode', src: 'https://static.cloudflareinsights.com/static/email-decode.min.js' },
-          { id: 'godaddy-scc', src: 'https://c2.godaddy.com/c2/scripts/cscc/scc-c2.min.js' }
-        ];
+        const optionalScripts = Array.isArray(window.__MMH_OPTIONAL_SCRIPTS__)
+          ? window.__MMH_OPTIONAL_SCRIPTS__
+          : [];
+        if (!optionalScripts.length) {
+          return;
+        }
         const injectScript = (cfg) => {
           if (!cfg?.src) return;
           const existing = document.querySelector(`script[src="${cfg.src}"]`);
@@ -247,9 +249,14 @@
           if (cfg.id) {
             script.id = cfg.id;
           }
+          script.onerror = () => {
+            if (window.__MMH_LOG_OPTIONAL_ERRORS__) {
+              console.warn('Optional script failed to load', cfg.src);
+            }
+          };
           document.body.appendChild(script);
         };
-        const loadThirdPartyScripts = () => scripts.forEach(injectScript);
+        const loadThirdPartyScripts = () => optionalScripts.forEach(injectScript);
         const scheduleLoad = () => {
           if ('requestIdleCallback' in window) {
             window.requestIdleCallback(loadThirdPartyScripts, { timeout: 2000 });

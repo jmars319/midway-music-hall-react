@@ -1,6 +1,7 @@
 import React from 'react';
 import { MapPin, Shield, Ban, PhoneCall, Info, Car } from 'lucide-react';
 import useSiteContent from '../hooks/useSiteContent';
+import { formatPhoneHref, CONTACT_LINK_CLASSES } from '../utils/contactLinks';
 
 // Short onboarding block for first-time visitors.
 export default function FirstTimeHere() {
@@ -40,21 +41,30 @@ export default function FirstTimeHere() {
       icon: PhoneCall,
       title: 'Best Contact',
       description: (
-        <>
-          {(primaryContact?.name || 'Donna Cheek')}{primaryContact?.title ? ` · ${primaryContact.title}` : ' · Venue Manager'}
-          <br />
-          {primaryContact?.phone && (
-            <>
-              <a href={`tel:${primaryContact.phone.replace(/[^0-9+]/g, '')}`} className="text-purple-200 hover:text-white underline">
+        <div className="space-y-3">
+          <p>
+            {(primaryContact?.name || 'Donna Cheek')}
+            {primaryContact?.title ? ` · ${primaryContact.title}` : ' · Venue Manager'}
+          </p>
+          <div className="flex flex-col gap-2">
+            {primaryContact?.phone && (
+              <a
+                href={formatPhoneHref(primaryContact.phone)}
+                className={CONTACT_LINK_CLASSES}
+                aria-label={`Call ${primaryContact.name || 'best contact'} at ${primaryContact.phone}`}
+              >
                 {primaryContact.phone}
               </a>
-              {' · '}
-            </>
-          )}
-          <a href={`mailto:${primaryContact?.email || 'midwayeventcenter@gmail.com'}`} className="text-purple-200 hover:text-white underline">
-            {primaryContact?.email || 'midwayeventcenter@gmail.com'}
-          </a>
-        </>
+            )}
+            <a
+              href={`mailto:${primaryContact?.email || 'midwayeventcenter@gmail.com'}`}
+              className={CONTACT_LINK_CLASSES}
+              aria-label={`Email ${primaryContact?.name || 'best contact'} at ${primaryContact?.email || 'midwayeventcenter@gmail.com'}`}
+            >
+              {primaryContact?.email || 'midwayeventcenter@gmail.com'}
+            </a>
+          </div>
+        </div>
       ),
       detail: 'Main point of contact',
     },
@@ -85,11 +95,11 @@ export default function FirstTimeHere() {
                 <card.icon className="h-6 w-6 text-purple-300 flex-shrink-0" aria-hidden="true" />
                 <div>
                   <h3 className="text-lg font-semibold text-white">{card.title}</h3>
-                  <p className="text-gray-300 mt-2 text-sm">
+                  <div className="text-gray-300 mt-2 text-sm space-y-2">
                     {card.description}
-                  </p>
+                  </div>
                   {card.detail && (
-                    <p className="text-xs uppercase tracking-wide text-gray-400 mt-3">{card.detail}</p>
+                    <p className="text-xs uppercase tracking-wide text-gray-200 mt-3">{card.detail}</p>
                   )}
                 </div>
               </div>

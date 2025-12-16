@@ -92,7 +92,7 @@ export default function TermsOfService({ onAdminClick }) {
             </p>
           </section>
 
-          <p className="text-sm text-gray-500 mt-8">Last updated: {new Date().toLocaleDateString()}</p>
+          <p className="text-sm text-gray-200 mt-8">Last updated: {new Date().toLocaleDateString()}</p>
         </div>
       </main>
 

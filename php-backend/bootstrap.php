@@ -125,12 +125,30 @@ $cspDirectives = [
     "form-action 'self'",
     "base-uri 'self'"
 ];
-header('Content-Security-Policy-Report-Only: ' . implode('; ', $cspDirectives));
-$hstsMode = strtolower((string) Env::get('FORCE_STRICT_TRANSPORT', 'auto'));
+$cspPolicy = implode('; ', $cspDirectives);
+$cspMode = strtolower((string) Env::get('CSP_MODE', 'report-only'));
+if ($cspMode === 'enforce') {
+    header('Content-Security-Policy: ' . $cspPolicy);
+} else {
+    header('Content-Security-Policy-Report-Only: ' . $cspPolicy);
+}
 $isHttps = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
-$shouldSendHsts = ($hstsMode === 'auto' && $isHttps) || in_array($hstsMode, ['1', 'true', 'yes'], true);
-if ($shouldSendHsts) {
-    header('Strict-Transport-Security: max-age=63072000; includeSubDomains');
+$hstsEnabledEnv = Env::get('HSTS_ENABLED', null);
+$hstsEnabled = $hstsEnabledEnv !== null
+    ? filter_var($hstsEnabledEnv, FILTER_VALIDATE_BOOL)
+    : filter_var(Env::get('FORCE_STRICT_TRANSPORT', false), FILTER_VALIDATE_BOOL);
+if ($hstsEnabled && $isHttps) {
+    $maxAge = max(0, (int) Env::get('HSTS_MAX_AGE', 63072000));
+    $includeSubdomains = filter_var(Env::get('HSTS_INCLUDE_SUBDOMAINS', true), FILTER_VALIDATE_BOOL);
+    $preload = filter_var(Env::get('HSTS_PRELOAD', false), FILTER_VALIDATE_BOOL);
+    $header = 'Strict-Transport-Security: max-age=' . $maxAge;
+    if ($includeSubdomains) {
+        $header .= '; includeSubDomains';
+    }
+    if ($preload) {
+        $header .= '; preload';
+    }
+    header($header);
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
