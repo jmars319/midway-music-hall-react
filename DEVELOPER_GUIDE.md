@@ -80,11 +80,7 @@ Table of contents
 
 Architecture overview
 ---------------------
-- Backend: Node.js + Express in `backend/` (single file `server.js` for now).
-  - Uses `mysql2` promise pool for DB access. Environment config via `.env`.
-  - Responsible for events, seating config, seat_requests, layout history,
-    suggestions, and simple auth.
-- Production API traffic runs through `php-backend/` (GoDaddy-compatible PHP stack). When deploying or adding endpoints, update `php-backend/index.php` and related libs; the Node service is used for local tooling/tests only.
+- Backend: PHP API in `backend/` (`index.php` and `lib/*`). Configurable via `backend/.env`, deployable on GoDaddy or any PHP 8+ host. Handles events, seating config/history, seat requests, suggestions, and admin auth.
 - Frontend: React app in `frontend/` (Tailwind CSS). Key UI areas:
   - Public site: seating chart, event pages, suggestion form
   - Admin panel: events, seating layout editor, seat requests review
@@ -93,7 +89,8 @@ Architecture overview
 Local development setup
 -----------------------
 Prerequisites
-- Node.js (LTS, e.g. 18+)
+- PHP 8.1+ with GD + mysqli extensions
+- Node.js (LTS, e.g. 18+) for the React frontend
 - MySQL server (local or Docker)
 
 Backend
@@ -103,16 +100,14 @@ Backend
    DB_USER=root
    DB_PASSWORD=yourpassword
    DB_NAME=midway_music_hall
-   PORT=5001
 
 2. From the repository root:
 
 ```bash
-cd backend
-npm install
-# ensure the DB exists and schema applied (see next section)
-node server.js
+php -S localhost:8080 -t backend
 ```
+
+This serves the API at http://localhost:8080/ with routing handled by `backend/index.php`.
 
 Frontend
 1. From the repository root:
@@ -142,38 +137,17 @@ SOURCE path/to/database/schema.sql;
 
 ## Migrations
 
-We provide a small set of migration and helper scripts in `backend/scripts` to manage safe schema transitions for development.
+We provide a small set of PHP helper scripts in `backend/scripts` to manage schema transitions and sanity checks.
 
-- Backfill and consolidation: `migrate_events_to_start_datetime.js`
-  - Purpose: consolidate `event_date` + `event_time` into `start_datetime`, backfill missing values, and optionally drop the old columns.
-  - Dry-run (preview):
-    ```bash
-    cd backend
-    node scripts/migrate_events_to_start_datetime.js
-    ```
-  - Apply schema changes (destructive):
-    ```bash
-    cd backend
-    node scripts/migrate_events_to_start_datetime.js --confirm
-    ```
-  - Script creates a backup table `events_backup_<timestamp>` before making destructive changes.
+- Event backfill + admin setup: `scripts/migrate_events.php`
+  - Usage (dry run): `php backend/scripts/migrate_events.php`
+  - Apply changes: `php backend/scripts/migrate_events.php --force`
+  - Creates timestamped backups of affected tables before destructive changes.
+- Image audit: `scripts/check_image_variants.php`
+  - Usage: `php backend/scripts/check_image_variants.php`
+  - Confirms every uploaded media item has the expected responsive variants.
 
-- Convenience scripts
-  - Run all migrations in `backend/scripts` (alphabetical):
-    ```bash
-    cd backend
-    npm run migrate
-    ```
-  - Backfill only:
-    ```bash
-    npm run migrate:events
-    ```
-  - Seed sample events (dev):
-    ```bash
-    npm run seed:events
-    ```
-
-Always review dry-run output before running with `--confirm`. Backups are created but it's still recommended to snapshot your DB before running destructive steps on production.
+Always review script output before running with `--force`. Snapshot your DB before destructive migrations, especially in production.
 ```
 
 If you prefer Docker you can run a MySQL container and point `.env` at it.
@@ -181,7 +155,7 @@ If you prefer Docker you can run a MySQL container and point `.env` at it.
 API reference (summary)
 -----------------------
 This is a short summary of the most-used endpoints. Prefer reading
-`backend/server.js` for the canonical implementation and comments.
+`backend/index.php` for the canonical implementation and comments.
 
 - GET /api/health
   - Returns { success: true, status: 'ok' }
@@ -266,7 +240,7 @@ Testing & debugging
 cat > /tmp/payload.json <<EOF
 { "event_id": 1, "customer_name": "Alice", "contact": { "email": "a@b.com" }, "selected_seats": ["Main-A-1","Main-A-2"] }
 EOF
-curl -X POST -H "Content-Type: application/json" --data-binary @/tmp/payload.json http://localhost:5001/api/seat-requests
+curl -X POST -H "Content-Type: application/json" --data-binary @/tmp/payload.json http://localhost:8080/api/seat-requests
 ```
 
 - To simulate conflicts, insert a `selected_seats` value into the `seating`
@@ -306,8 +280,8 @@ A: Add new rendering support in `Table6` (or a new Table8 component), update
 
 Q: Who can approve seats?
 A: Currently approval is a simple POST endpoint; there's a demo auth flow in
-   `server.js`. For production, add proper auth/roles and protect the admin
-   endpoints.
+   `backend/index.php`. For production, add proper auth/roles and protect the
+   admin endpoints.
 
 Contact
 -------

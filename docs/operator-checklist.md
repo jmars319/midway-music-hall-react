@@ -11,10 +11,10 @@
 
 ## 2. Import authoritative events
 1. Ensure `frontend/src/data/events.json` contains the latest single-page source of truth.
-2. Copy or edit `php-backend/.env` with the production credentials.
+2. Copy or edit `backend/.env` with the production credentials.
 3. Run the importer once from the repo root:
    ```bash
-   php php-backend/scripts/migrate_events.php
+   php backend/scripts/migrate_events.php
    ```
    - The script backs up `events` into `events_backup_20251212`, clears placeholder events, and imports both single-date events and recurring series.
    - Re-run with `--force` only if you explicitly need to overwrite existing production data. A key in `business_settings (events_seed_version_20251212)` prevents accidental repeats.

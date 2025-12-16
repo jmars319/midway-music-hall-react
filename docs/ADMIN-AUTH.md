@@ -25,7 +25,7 @@ Notes and operational guidance for admin authentication and session management.
 > **Note:** All of the above expect `credentials: 'include'` on the frontend fetch call so the browser sends the session cookie.
 
 ## Configuration
-Set the following in `php-backend/.env` (defaults shown):
+Set the following in `backend/.env` (defaults shown):
 
 ```
 ADMIN_SESSION_COOKIE=mmh_admin

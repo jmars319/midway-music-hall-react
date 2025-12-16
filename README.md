@@ -14,10 +14,8 @@ REACT_APP_SINGLE_PAGE=true npm run build
 ### Full Application (Development)
 ```bash
 # Backend (Terminal 1)
-cd backend
-npm install
-# Configure backend/.env with database credentials
-npm run dev
+cp backend/.env.example backend/.env    # update DB credentials
+php -S localhost:8080 -t backend
 
 # Frontend (Terminal 2)
 cd frontend
@@ -33,7 +31,7 @@ npm start
   - Production build: `frontend/build/`
   - Deployment package: `frontend/midway-music-hall-deploy.zip`
 
-- **`backend/`** - Node.js/Express API server
+- **`backend/`** - PHP API server
   - Event management endpoints
   - Seating chart system
   - Artist suggestion handling
@@ -50,7 +48,7 @@ See **`DEPLOYMENT_GUIDE.md`** for the authoritative GoDaddy/Cloudflare steps (in
 **Quick Deploy (summary – still read the guide):**
 1. `cd frontend && npm run build`
 2. Upload the **contents** of `frontend/build/` into `public_html/midwaymusichall.net/`
-3. Copy the repo `php-backend/` folder to `public_html/midwaymusichall.net/api/`
+3. Copy the repo `backend/` folder to `public_html/midwaymusichall.net/api/`
 4. Upload the root `.htaccess` into `public_html/midwaymusichall.net/.htaccess`
 5. Create/update `api/.env` (keep `SEND_EMAILS=false` until production testing)
 6. Create/import the database using `database/20250320_full_seed_nodb.sql`
@@ -77,7 +75,7 @@ See **`DEPLOYMENT_GUIDE.md`** for the authoritative GoDaddy/Cloudflare steps (in
 ## Technology Stack
 
 - **Frontend:** React 18.2.0, Tailwind CSS 3.4.7
-- **Backend:** Node.js, Express
+- **Backend:** PHP 8.1+, custom router + GD-powered media pipeline
 - **Database:** MySQL
 - **Build:** Create React App
 - **Server:** Apache with .htaccess configuration

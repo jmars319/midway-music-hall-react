@@ -3,7 +3,7 @@
 _Last updated: 2025-12-12_
 
 ## A. Admin Panel Inventory
-Each module lives under `frontend/src/admin/` and calls the PHP (currently Node) API via `API_BASE`.
+Each module lives under `frontend/src/admin/` and calls the PHP API via `API_BASE`.
 
 ### DashboardModule
 - **Purpose:** Snapshot of venue health (counts + quick links).
@@ -82,7 +82,7 @@ Each module lives under `frontend/src/admin/` and calls the PHP (currently Node)
 - **Notes:** Any additional CMS text must be persisted via `business_settings`.
 
 ## B. Current Database Schema Inventory
-Sources: `database/schema.sql` plus migrations, plus fields referenced in `backend/server.js`.
+Sources: `database/schema.sql` plus migrations, plus fields referenced in `backend/index.php`.
 
 | Table | Key Columns / Notes | Usage |
 | --- | --- | --- |
@@ -104,7 +104,7 @@ Sources: `database/schema.sql` plus migrations, plus fields referenced in `backe
 
 ## D. Reference Data Sources
 - **Single-page authoritative events:** `frontend/src/data/events.json` (dated + recurring beach bands data). Additional contextual content: `frontend/src/data/contacts.json` and `frontend/src/data/policies.json` (venue info displayed publicly).
-- **Existing backend contract:** `/backend/server.js` (Node/Express) mirrors the API that must be reimplemented in `/php-backend/`.
+- **Existing backend contract:** `/backend/index.php` (PHP API) defines the canonical endpoints consumed by the React app.
 
 ## E. Immediate Gaps / Observations
 1. `events` schema mismatch - DB DDL lacks the fields the UI/API rely on (`artist_name`, `ticket_price`, `status`, layout reference, etc.).

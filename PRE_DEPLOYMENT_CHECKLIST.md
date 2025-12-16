@@ -7,13 +7,13 @@ Use this sheet right before uploading to GoDaddy. All steps assume the site live
 ## Build + code sanity
 - [ ] `npm install && npm run lint`
 - [ ] `npm run build` (output: `frontend/build/`)
-- [ ] `php -l php-backend/index.php php-backend/bootstrap.php php-backend/lib/Emailer.php`
+- [ ] `php -l backend/index.php backend/bootstrap.php backend/lib/Emailer.php`
 - [ ] `.htaccess` (repo root) reviewed – includes HTTPS + `/api` + `/uploads` + SPA fallback
-- [ ] `php-backend/.env.production.example` updated locally with the keys we expect to set in production
+- [ ] `backend/.env.production.example` updated locally with the keys we expect to set in production
 
 ## Files to upload
 - [ ] Copy **contents** of `frontend/build/` into `public_html/midwaymusichall.net/`
-- [ ] Copy entire `php-backend/` folder to `public_html/midwaymusichall.net/api/`
+- [ ] Copy entire `backend/` folder to `public_html/midwaymusichall.net/api/`
 - [ ] Upload the root `.htaccess` to `public_html/midwaymusichall.net/.htaccess`
 - [ ] Ensure `api/uploads/` exists and permissions allow PHP writes (775)
 - [ ] Confirm no other `.htaccess` files remain in subfolders (avoid conflicts)

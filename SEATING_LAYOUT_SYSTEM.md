@@ -242,7 +242,7 @@ useEffect(() => {
 ## Next Steps
 
 1. ✅ **Database Migration** - Run `seating_layouts_migration.sql`
-2. ✅ **API Endpoints** - Already added to `backend/server.js`
+2. ✅ **API Endpoints** - Already added to `backend/index.php`
 3. ⏳ **Frontend Updates** - Need to implement:
    - Update HomePage to use default layout (non-interactive)
    - Create EventPage component for individual events

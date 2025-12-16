@@ -40,7 +40,7 @@ If phpMyAdmin errors on the primary script, import the `_compat` version instead
 
 ## 4. Admin authentication table
 
-- The PHP backend authenticates against the **`admins`** table. Login (`POST /api/login`), change-password (`POST /api/admin/change-password`), and session helpers in `php-backend/index.php` call `ensure_admins_table_exists()` and query `admins` exclusively.
+- The PHP backend authenticates against the **`admins`** table. Login (`POST /api/login`), change-password (`POST /api/admin/change-password`), and session helpers in `backend/index.php` call `ensure_admins_table_exists()` and query `admins` exclusively.
 - The older **`admin_users`** table remains in the seed only for archival parity. No PHP route reads it today, so treat it as legacy data unless the team decides to migrate or delete it later.
 
 ---

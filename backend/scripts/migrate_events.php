@@ -4,7 +4,7 @@
 // - Reads frontend/src/data/events.json
 // - Replaces events + recurrence tables with canonical data
 // - Generates future occurrences for recurring items (12 months horizon)
-// Usage: php php-backend/scripts/migrate_events.php [--force]
+// Usage: php backend/scripts/migrate_events.php [--force]
 
 use Midway\Backend\Env;
 use Midway\Backend\Database;

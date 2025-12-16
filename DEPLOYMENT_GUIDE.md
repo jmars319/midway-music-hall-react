@@ -13,7 +13,7 @@ public_html/
 └── midwaymusichall.net/
     ├── index.html, asset-manifest.json, robots.txt, sitemap.xml, favicon*, manifest.json
     ├── static/ (hashed JS/CSS assets from frontend build)
-    ├── api/                      ← copy of repo php-backend/ (see §4)
+    ├── api/                      ← copy of repo backend/ (see §4)
     │   ├── index.php, bootstrap.php, lib/, uploads/, vendor/
     │   └── .env                  ← production secrets (see §5)
     ├── uploads/                  ← served via rewrite to api/uploads/ (no PHP here)
@@ -22,7 +22,7 @@ public_html/
 
 Rules:
 1. React build output lives directly inside `public_html/midwaymusichall.net/`.
-2. Backend code sits in `public_html/midwaymusichall.net/api/` (copy/paste the repo `php-backend/` folder, keep the name `api`).
+2. Backend code sits in `public_html/midwaymusichall.net/api/` (copy/paste the repo `backend/` folder, keep the name `api`).
 3. `api/uploads/` must be writable (chmod 775 or use cPanel “change permissions”).
 4. Only one `.htaccess` exists—root-level file shipped with the repo.
 
@@ -32,7 +32,7 @@ Rules:
 
 1. `npm install` (front-end dependencies)
 2. `cd frontend && npm run lint && npm run build`
-3. PHP syntax: `find php-backend -name "*.php" -print0 | xargs -0 -n1 php -l`
+3. PHP syntax: `find backend -name "*.php" -print0 | xargs -0 -n1 php -l`
 4. Confirm `.env.production.example` matches the secrets you plan to set.
 5. Ensure `database/20250320_full_seed_nodb.sql` is ready for phpMyAdmin import.
 6. Verify `.htaccess` is the repo copy (no local edits unless required).
@@ -58,7 +58,7 @@ Zip the contents of `frontend/build/` (not the folder itself) for upload, or use
 3. (Recommended) Select all existing files in `midwaymusichall.net/`, click **Compress**, download the ZIP as a rollback backup.
 4. Zip everything inside `frontend/build/` (contents only). Upload that ZIP into `public_html/midwaymusichall.net/`, select it, and click **Extract**. This keeps hashed filenames intact and mirrors prior successful deployments. Delete the ZIP after extraction.
 5. Upload the root `.htaccess` into the same folder (show hidden files).
-5. Upload the repo `php-backend/` folder, rename it to `api/` after uploading.
+5. Upload the repo `backend/` folder, rename it to `api/` after uploading.
 6. Set permissions:
    - Directories: 755 (apply recursively).
    - Files: 644.
@@ -72,7 +72,7 @@ Uploads folder mapping: `.htaccess` already rewrites `/uploads/*` → `/api/uplo
 
 Location: `public_html/midwaymusichall.net/api/.env`
 
-1. Copy `php-backend/.env.production.example` to `.env`.
+1. Copy `backend/.env.production.example` to `.env`.
 2. Populate with production values:
 
 ```
@@ -204,5 +204,5 @@ Archive each deployment package (zip + date) under `/midway-deploy-*` for rollba
 ## Proof
 
 - **Updated file:** `DEPLOYMENT_GUIDE.md`
-- **Commands run:** `sed`, `rg`, `find php-backend -name "*.php" -print0 | xargs -0 -n1 php -l` (for lint verification earlier)
+- **Commands run:** `sed`, `rg`, `find backend -name "*.php" -print0 | xargs -0 -n1 php -l` (for lint verification earlier)
 - **Key additions:** Layout + instructions (`DEPLOYMENT_GUIDE.md:1-210`), DB import/compat info (§6), Cloudflare/SSL notes (§7), Smoke test (§9), Common issues (§10)
