@@ -87,7 +87,11 @@ export default function ResponsiveImage({
   };
 
   const basePictureClass = fill ? 'absolute inset-0 w-full h-full' : '';
-  const mergedPictureClass = [basePictureClass, pictureClassName].filter(Boolean).join(' ');
+  // In fill mode, ensure the internal sizing/positioning classes win.
+  const mergedPictureClass = fill
+    ? [pictureClassName, basePictureClass].filter(Boolean).join(' ')
+    : [basePictureClass, pictureClassName].filter(Boolean).join(' ');
+
   const pictureProps = {
     className: mergedPictureClass || undefined,
     style: fill ? undefined : pictureStyle,
@@ -96,13 +100,18 @@ export default function ResponsiveImage({
   const appliedSizes = sizesProp || (resolvedWidth ? `${Math.round(resolvedWidth)}px` : '100vw');
 
   const baseImgClass = fill ? 'absolute inset-0 w-full h-full object-cover object-center' : '';
-  const mergedImgClass = [baseImgClass, className].filter(Boolean).join(' ') || undefined;
+  // In fill mode, ensure the internal sizing/positioning classes win (caller may pass w-auto/h-auto).
+  const mergedImgClass = fill
+    ? [className, baseImgClass].filter(Boolean).join(' ') || undefined
+    : (className || undefined);
 
-  const pictureWrapperClass = fill ? 'relative w-full h-full' : '';
+  const imgSrcSet = variant.optimizedSrcSet || null;
 
-  return (
-    <div className={fill ? pictureWrapperClass : undefined}>
-      <picture {...pictureProps}>
+  const imgWidth = fill ? undefined : resolvedWidth;
+  const imgHeight = fill ? undefined : resolvedHeight;
+
+  const pictureElement = (
+    <picture {...pictureProps}>
       {variant.sources.map((source, index) => (
         <source
           key={`${source.type || 'default'}-${index}`}
@@ -114,17 +123,28 @@ export default function ResponsiveImage({
       <img
         src={currentSrc || variant.fallback || defaultFallback}
         alt={alt}
-        width={resolvedWidth}
-        height={resolvedHeight}
+        width={imgWidth}
+        height={imgHeight}
         loading={loading}
         decoding="async"
         sizes={appliedSizes}
         className={mergedImgClass}
+        srcSet={imgSrcSet || undefined}
         onError={handleError}
         {...(fetchPriority ? { fetchpriority: fetchPriority } : {})}
         {...rest}
       />
-      </picture>
+    </picture>
+  );
+
+// Only wrap when caller did NOT already provide a positioned container
+if (fill && !rest['data-slot']) {
+  return (
+    <div className="relative w-full h-full">
+      {pictureElement}
     </div>
   );
+}
+
+return pictureElement;
 }

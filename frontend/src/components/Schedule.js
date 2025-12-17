@@ -182,13 +182,21 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                     </div>
                   )}
                   <div className="flex items-start gap-4">
-                    <div className="w-24 sm:w-28 md:w-32 lg:w-36 aspect-square rounded-lg overflow-hidden bg-gray-800 flex-shrink-0">
+                    {/* IMPORTANT:
+                        This thumbnail slot MUST define the layout (aspect-square + fixed widths).
+                        ResponsiveImage is intentionally run in `fill` + `disableAspectRatio` mode
+                        so no intrinsic dimensions or metadata can override the square crop.
+                        Do NOT add width/height or aspect logic back to the image itself.
+                    */}
+                    <div className="w-24 sm:w-28 md:w-32 lg:w-36 aspect-square rounded-lg overflow-hidden bg-gray-800 flex-shrink-0 relative">
                       <ResponsiveImage
                         image={event.image_variants}
                         alt={event.artist_name || 'Event'}
                         className="w-full h-full object-cover object-center"
-                        pictureClassName="block w-full h-full"
+                        pictureClassName="block"
                         disableAspectRatio
+                        fill
+                        sizes="(max-width: 640px) 96px, (max-width: 768px) 112px, (max-width: 1024px) 128px, 144px"
                       />
                     </div>
                     <div className="flex-1 space-y-2">

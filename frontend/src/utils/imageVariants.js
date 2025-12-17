@@ -27,9 +27,81 @@ const guessMimeTypeFromUrl = (url) => {
   return null;
 };
 
-const prefixSrcSet = (value) => {
-  if (!value) return null;
-  const entries = value
+const inferWidthDescriptorFromUrl = (url) => {
+  if (!url || typeof url !== 'string') return null;
+  const filename = url.split('/').pop() || '';
+  const match = filename.match(/-w(\d+)/);
+  if (match && match[1]) {
+    return `${match[1]}w`;
+  }
+  return null;
+};
+
+const normalizeSrcSetEntries = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    const entries = value
+      .map((entry) => {
+        if (!entry) return null;
+        if (typeof entry === 'string') {
+          const trimmed = entry.trim();
+          if (!trimmed) return null;
+          const segments = trimmed.split(/\s+/);
+          const url = segments.shift();
+          if (!url) return null;
+          let descriptor = segments.join(' ') || null;
+          if (!descriptor) {
+            descriptor = inferWidthDescriptorFromUrl(url);
+          }
+          return {
+            url,
+            descriptor: descriptor || null,
+          };
+        }
+        const url = entry.url || entry.src || entry.path || entry.file_url;
+        if (!url) return null;
+        let descriptor = entry.descriptor || entry.density || entry.pixelDensity || null;
+        if (!descriptor && entry.width) {
+          descriptor = `${entry.width}w`;
+        } else if (!descriptor && entry.pixel_density) {
+          descriptor = `${entry.pixel_density}x`;
+        }
+        if (!descriptor) {
+          descriptor = inferWidthDescriptorFromUrl(url);
+        }
+        return {
+          url,
+          descriptor: descriptor || null,
+        };
+      })
+      .filter(Boolean);
+
+    // Deduplicate entries by url+descriptor
+    const seen = new Set();
+    const deduped = [];
+    for (const e of entries) {
+      const key = `${e.url} ${e.descriptor || ''}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(e);
+      }
+    }
+
+    // Sort entries with numeric width descriptors ascending by width
+    const withWidth = deduped.filter(e => e.descriptor && e.descriptor.endsWith('w') && /^\d+w$/.test(e.descriptor));
+    if (withWidth.length > 1) {
+      const withoutWidth = deduped.filter(e => !(e.descriptor && e.descriptor.endsWith('w') && /^\d+w$/.test(e.descriptor)));
+      withWidth.sort((a, b) => {
+        const aVal = parseInt(a.descriptor, 10);
+        const bVal = parseInt(b.descriptor, 10);
+        return aVal - bVal;
+      });
+      return [...withWidth, ...withoutWidth];
+    }
+
+    return deduped;
+  }
+  const parts = String(value)
     .split(',')
     .map((part) => part.trim())
     .filter(Boolean)
@@ -39,12 +111,58 @@ const prefixSrcSet = (value) => {
       if (!url) {
         return null;
       }
-      const descriptor = segments.join(' ');
+      let descriptor = segments.join(' ') || null;
+      if (!descriptor) {
+        descriptor = inferWidthDescriptorFromUrl(url);
+      }
+      return {
+        url,
+        descriptor: descriptor || null,
+      };
+    })
+    .filter(Boolean);
+
+  // Deduplicate entries by url+descriptor
+  const seen = new Set();
+  const deduped = [];
+  for (const e of parts) {
+    const key = `${e.url} ${e.descriptor || ''}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(e);
+    }
+  }
+
+  // Sort entries with numeric width descriptors ascending by width
+  const withWidth = deduped.filter(e => e.descriptor && e.descriptor.endsWith('w') && /^\d+w$/.test(e.descriptor));
+  if (withWidth.length > 1) {
+    const withoutWidth = deduped.filter(e => !(e.descriptor && e.descriptor.endsWith('w') && /^\d+w$/.test(e.descriptor)));
+    withWidth.sort((a, b) => {
+      const aVal = parseInt(a.descriptor, 10);
+      const bVal = parseInt(b.descriptor, 10);
+      return aVal - bVal;
+    });
+    return [...withWidth, ...withoutWidth];
+  }
+
+  return deduped;
+};
+
+const prefixSrcSet = (value) => {
+  const entries = normalizeSrcSetEntries(value);
+  if (!entries.length) {
+    return null;
+  }
+  const normalized = entries
+    .map(({ url, descriptor }) => {
       const prefixed = prefixAssetUrl(url);
+      if (!prefixed) {
+        return null;
+      }
       return descriptor ? `${prefixed} ${descriptor}` : prefixed;
     })
     .filter(Boolean);
-  return entries.length ? entries.join(', ') : null;
+  return normalized.length ? normalized.join(', ') : null;
 };
 
 const normalizeEntryObject = (entry) => {
@@ -61,8 +179,8 @@ export const buildImageVariant = (entry, fallbackUrl = null) => {
   const fallback = prefixAssetUrl(normalized.fallback_original || fallbackUrl || original);
   const optimized = prefixAssetUrl(normalized.optimized || normalized.optimized_path || null);
   const webp = prefixAssetUrl(normalized.webp || normalized.webp_path || null);
-  const optimizedSrcSet = prefixSrcSet(normalized.optimized_srcset || null);
-  const webpSrcSet = prefixSrcSet(normalized.webp_srcset || null);
+  const optimizedSrcSet = prefixSrcSet(normalized.optimized_srcset || normalized.optimized_variants || null);
+  const webpSrcSet = prefixSrcSet(normalized.webp_srcset || normalized.webp_variants || null);
   const width = normalized.intrinsic_width || normalized.width || null;
   const height = normalized.intrinsic_height || normalized.height || null;
   const aspectRatio = width && height ? width / height : null;
