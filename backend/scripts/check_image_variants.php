@@ -23,7 +23,22 @@ define('UPLOADS_RESPONSIVE_DIR', $absUploads . '/variants');
 define('UPLOADS_RESPONSIVE_OPTIMIZED_DIR', UPLOADS_RESPONSIVE_DIR . '/optimized');
 define('UPLOADS_RESPONSIVE_WEBP_DIR', UPLOADS_RESPONSIVE_DIR . '/webp');
 define('UPLOADS_MANIFEST_DIR', $absUploads . '/manifests');
-define('RESPONSIVE_IMAGE_WIDTHS', [160, 240, 320, 480, 768, 1024, 1440, 1920]);
+define('RESPONSIVE_IMAGE_WIDTH_PROFILES', [
+    'icon' => [32, 48, 64, 96, 128, 160, 192, 256],
+    'thumb' => [96, 128, 160, 192, 240, 320, 480],
+    'hero' => [640, 768, 1024, 1280, 1440, 1920],
+    'gallery' => [320, 480, 640, 768, 1024, 1440, 1920],
+]);
+$responsiveUnion = [];
+foreach (RESPONSIVE_IMAGE_WIDTH_PROFILES as $profile) {
+    if (!is_array($profile)) {
+        continue;
+    }
+    $responsiveUnion = array_merge($responsiveUnion, $profile);
+}
+$responsiveUnion = array_values(array_unique(array_map('intval', $responsiveUnion)));
+sort($responsiveUnion, SORT_NUMERIC);
+define('RESPONSIVE_IMAGE_WIDTHS', $responsiveUnion);
 
 require __DIR__ . '/../lib/ImageUtils.php';
 
@@ -127,7 +142,7 @@ function printImageAudit(string $url, string $uploadsDir, string $prefix = '')
     $intrinsicWidth = $info[0] ?? null;
     $intrinsicHeight = $info[1] ?? null;
     $manifest = load_image_manifest($url);
-    $targets = $intrinsicWidth ? determine_responsive_targets($intrinsicWidth) : RESPONSIVE_IMAGE_WIDTHS;
+    $targets = $intrinsicWidth ? determine_responsive_targets($intrinsicWidth, $intrinsicHeight) : RESPONSIVE_IMAGE_WIDTHS;
 
     $optimizedVariants = [];
     $webpVariants = [];

@@ -79,7 +79,7 @@ function process_image_variants(string $sourcePath, string $originalFilename, st
     }
 
     $image = apply_exif_orientation($image, $sourcePath, $type, $width, $height);
-    $targets = determine_responsive_targets($width);
+    $targets = determine_responsive_targets($width, $height);
     $baseName = pathinfo($originalFilename, PATHINFO_FILENAME);
     $extension = strtolower(pathinfo($originalFilename, PATHINFO_EXTENSION));
     $optimizedVariants = [];
@@ -188,21 +188,42 @@ function process_image_variants(string $sourcePath, string $originalFilename, st
     ];
 }
 
-function determine_responsive_targets(int $intrinsicWidth): array
+function determine_responsive_targets(int $intrinsicWidth, ?int $intrinsicHeight = null): array
 {
+    if ($intrinsicWidth <= 0) {
+        return [];
+    }
+    $profiles = defined('RESPONSIVE_IMAGE_WIDTH_PROFILES') && is_array(RESPONSIVE_IMAGE_WIDTH_PROFILES)
+        ? RESPONSIVE_IMAGE_WIDTH_PROFILES
+        : [
+            'icon' => [32, 48, 64, 96, 128, 160, 192, 256],
+            'thumb' => [96, 128, 160, 192, 240, 320, 480],
+            'hero' => [640, 768, 1024, 1280, 1440, 1920],
+            'gallery' => [320, 480, 640, 768, 1024, 1440, 1920],
+        ];
+    $longEdge = max($intrinsicWidth, $intrinsicHeight ?? 0);
+    if ($longEdge <= 256) {
+        $profileKey = 'icon';
+    } elseif ($intrinsicWidth <= 800) {
+        $profileKey = 'thumb';
+    } elseif ($intrinsicWidth >= 1200) {
+        $profileKey = 'hero';
+    } else {
+        $profileKey = 'gallery';
+    }
+    $candidates = $profiles[$profileKey] ?? array_merge(...array_values($profiles));
     $targets = [];
-    $configured = defined('RESPONSIVE_IMAGE_WIDTHS') && is_array(RESPONSIVE_IMAGE_WIDTHS) ? RESPONSIVE_IMAGE_WIDTHS : [160, 240, 320, 480, 768, 1024, 1440, 1920];
-    foreach ($configured as $candidate) {
+    foreach ((array) $candidates as $candidate) {
         $candidate = (int) $candidate;
         if ($candidate > 0 && $candidate <= $intrinsicWidth) {
             $targets[] = $candidate;
         }
     }
-    if (empty($targets)) {
-        $targets[] = $intrinsicWidth;
-    }
     $targets = array_values(array_unique($targets));
     sort($targets, SORT_NUMERIC);
+    if (!$targets) {
+        $targets[] = $intrinsicWidth;
+    }
     return $targets;
 }
 

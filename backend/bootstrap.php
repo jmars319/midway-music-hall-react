@@ -59,7 +59,22 @@ define('IMAGE_JPEG_QUALITY', (int) Env::get('IMAGE_JPEG_QUALITY', 85));
 define('IMAGE_WEBP_QUALITY', (int) Env::get('IMAGE_WEBP_QUALITY', 85));
 define('IMAGE_PNG_COMPRESSION', (int) Env::get('IMAGE_PNG_COMPRESSION', 6));
 define('IMAGE_UPLOAD_MAX_BYTES', (int) Env::get('IMAGE_UPLOAD_MAX_BYTES', 8 * 1024 * 1024));
-define('RESPONSIVE_IMAGE_WIDTHS', [160, 240, 320, 480, 768, 1024, 1440, 1920]);
+define('RESPONSIVE_IMAGE_WIDTH_PROFILES', [
+    'icon' => [32, 48, 64, 96, 128, 160, 192, 256],
+    'thumb' => [96, 128, 160, 192, 240, 320, 480],
+    'hero' => [640, 768, 1024, 1280, 1440, 1920],
+    'gallery' => [320, 480, 640, 768, 1024, 1440, 1920],
+]);
+$responsiveUnion = [];
+foreach (RESPONSIVE_IMAGE_WIDTH_PROFILES as $profile) {
+    if (!is_array($profile)) {
+        continue;
+    }
+    $responsiveUnion = array_merge($responsiveUnion, $profile);
+}
+$responsiveUnion = array_values(array_unique(array_map('intval', $responsiveUnion)));
+sort($responsiveUnion, SORT_NUMERIC);
+define('RESPONSIVE_IMAGE_WIDTHS', $responsiveUnion);
 
 define('LAYOUT_HISTORY_MAX', (int) Env::get('LAYOUT_HISTORY_MAX', 200));
 define('LAYOUT_HISTORY_RETENTION_DAYS', (int) Env::get('LAYOUT_HISTORY_RETENTION_DAYS', 90));
