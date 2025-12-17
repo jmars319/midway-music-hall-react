@@ -401,13 +401,13 @@ export default function SettingsModule(){
           <div className="mt-6 pt-6 border-t border-gray-700">
             <h3 className="text-lg font-bold mb-4">Site Images</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
+              <div className="space-y-3">
                 <label className="block text-sm text-gray-300 mb-2">Navigation Logo</label>
-                <select 
+                <select
                   name="site_logo" 
                   value={settings.site_logo || ''} 
                   onChange={handleChange} 
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded mb-2"
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
                 >
                   <option value="">Select Logo...</option>
                   {media.map(m => (
@@ -427,13 +427,13 @@ export default function SettingsModule(){
                 <p className="text-xs text-gray-400 mt-1">Upload logos in Media Manager</p>
               </div>
 
-              <div>
+              <div className="space-y-3">
                 <label className="block text-sm text-gray-300 mb-2">Default Event Image</label>
-                <select 
+                <select
                   name="default_event_image" 
                   value={settings.default_event_image || ''} 
                   onChange={handleChange} 
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded mb-2"
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
                 >
                   <option value="">Select Image...</option>
                   {media.map(m => (
@@ -452,13 +452,13 @@ export default function SettingsModule(){
                 <p className="text-xs text-gray-400 mt-1">Used when events have no image</p>
               </div>
 
-              <div>
+              <div className="space-y-3">
                 <label className="block text-sm text-gray-300 mb-2">Square Icon / Avatar</label>
                 <select
                   name="site_brand_mark"
                   value={settings.site_brand_mark || ''}
                   onChange={handleChange}
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded mb-2"
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
                 >
                   <option value="">Use navigation logo</option>
                   {media.map((m) => (

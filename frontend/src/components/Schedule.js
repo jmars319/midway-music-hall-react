@@ -191,7 +191,7 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                         sizes="(max-width: 640px) 140px, 180px"
                         className="w-full h-full object-cover"
                         pictureClassName="block w-full h-full"
-                        fallbackAspectRatio="1 / 1"
+                        fallbackAspectRatio="9 / 4"
                       />
                     </div>
                     <div className="flex-1 space-y-2">
