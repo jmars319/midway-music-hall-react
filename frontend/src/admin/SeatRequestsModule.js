@@ -5,6 +5,8 @@ import TableComponent from '../components/TableComponent';
 import { seatingLegendSwatches, seatingStatusLabels } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/seatLabelUtils';
+import { getSeatReasonMessage, getAdminReservationFailureMessage } from '../utils/reservationReasonMessages';
+import { filterUnavailableSeats } from '../utils/seatAvailability';
 
 const OPEN_STATUSES = ['new', 'contacted', 'waiting'];
 const FINAL_STATUSES = ['confirmed', 'declined', 'closed', 'spam'];
@@ -1025,6 +1027,18 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
     }),
     [layoutRows]
   );
+  const reservedSeatSet = useMemo(() => new Set(reservedSeats || []), [reservedSeats]);
+  const pendingSeatSet = useMemo(() => new Set(pendingSeats || []), [pendingSeats]);
+
+  useEffect(() => {
+    setSelectedSeats((prev) => {
+      if (!prev.length) {
+        return prev;
+      }
+      const filtered = filterUnavailableSeats(prev, reservedSeatSet, pendingSeatSet);
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [pendingSeatSet, reservedSeatSet]);
 
   useEffect(() => {
     if (selectedEventId) {
@@ -1033,9 +1047,12 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
     }
   }, [selectedEventId]);
 
-  const fetchLayout = async (eventId) => {
+  const fetchLayout = async (eventId, options = {}) => {
+    const preserveError = Boolean(options.preserveError);
     setLoadingLayout(true);
-    setError('');
+    if (!preserveError) {
+      setError('');
+    }
     try {
       const res = await fetch(`${API_BASE}/seating/event/${eventId}`);
       const data = await res.json();
@@ -1051,14 +1068,22 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
             height: data.canvasSettings.height || 800,
           });
         }
-      } else {
+      } else if (!preserveError) {
         setError(data?.message || 'Failed to load seating layout');
       }
     } catch (err) {
       console.error('Failed to fetch layout', err);
-      setError('Network error loading seating');
+      if (!preserveError) {
+        setError('Network error loading seating');
+      }
     } finally {
       setLoadingLayout(false);
+    }
+  };
+
+  const refreshAvailability = () => {
+    if (selectedEventId) {
+      fetchLayout(selectedEventId, { preserveError: true });
     }
   };
 
@@ -1103,13 +1128,18 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
       });
       const data = await res.json();
       if (data?.success) {
+        refreshAvailability();
         onCreated();
       } else {
-        setError(data?.message || 'Failed to create reservation');
+        const message = getAdminReservationFailureMessage(data?.reason_code, data?.message, { conflicts: data?.conflicts });
+        setError(message);
+        refreshAvailability();
       }
     } catch (err) {
       console.error('Manual reservation error', err);
-      setError('Network error creating reservation');
+      const message = getAdminReservationFailureMessage('server_error', 'Network error creating reservation');
+      setError(message);
+      refreshAvailability();
     } finally {
       setSaving(false);
     }
@@ -1286,6 +1316,8 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                                 pendingSeats={pendingForRow}
                                 reservedSeats={reservedForRow}
                                 onToggleSeat={(seatId) => toggleSeat(seatId, reservedForRow, pendingForRow)}
+                                showSeatReason
+                                seatReasonResolver={getSeatReasonMessage}
                               />
                             </div>
                           </div>

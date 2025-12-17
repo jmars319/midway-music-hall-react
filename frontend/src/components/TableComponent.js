@@ -41,7 +41,9 @@ export default function TableComponent({
   interactive = true,
   tableShape,
   reservedSeats = [],
-  labelFormatter = null
+  labelFormatter = null,
+  showSeatReason = false,
+  seatReasonResolver = null
 }) {
   const shape = tableShape || row.table_shape || row.seat_type || 'table-6';
   const normalizedShape = shapeAliases[shape] || shape;
@@ -71,7 +73,8 @@ export default function TableComponent({
     if (isReserved) classes = seatingStatusClasses.reserved;
     else if (isPending) classes = seatingStatusClasses.pending;
     else if (isSelected) classes = seatingStatusClasses.selected;
-    return `absolute flex items-center justify-center rounded-full ${classes}`;
+    const cursor = !interactive ? 'cursor-default' : (isReserved || isPending) ? 'cursor-not-allowed' : 'cursor-pointer';
+    return `absolute flex items-center justify-center rounded-full ${cursor} ${classes}`;
   };
 
   // Render individual seat
@@ -86,8 +89,17 @@ export default function TableComponent({
       transform: 'translate(-50%, -50%)', 
       width: seatSize, 
       height: seatSize,
-      cursor: interactive ? 'pointer' : 'default'
     };
+    const seatStatus = getSeatStatus(seatId);
+    const disabledReason = seatStatus.isReserved ? 'reserved' : (seatStatus.isPending ? 'pending' : null);
+    const resolvedReason = disabledReason && typeof seatReasonResolver === 'function'
+      ? seatReasonResolver(disabledReason)
+      : null;
+    const showReasonBadge = showSeatReason && disabledReason;
+    const reasonLabel = showReasonBadge
+      ? (resolvedReason || (disabledReason === 'reserved' ? 'Seat already confirmed.' : 'Seat pending confirmation.'))
+      : '';
+    const titleText = showReasonBadge && reasonLabel ? `Unavailable: ${reasonLabel}` : seatLabel;
 
     if (interactive) {
       return (
@@ -96,18 +108,40 @@ export default function TableComponent({
           onClick={() => onToggleSeat && onToggleSeat(seatId)} 
           className={classes} 
           style={style}
-          disabled={getSeatStatus(seatId).isReserved}
-          title={seatLabel}
-          aria-label={seatLabel}
+          disabled={Boolean(disabledReason)}
+          type="button"
+          aria-disabled={Boolean(disabledReason)}
+          data-seat-id={seatId}
+          data-seat-state={disabledReason || 'available'}
+          data-seat-table={row?.row_label || row?.section_name || 'table'}
+          title={titleText}
+          aria-label={titleText}
         >
-          <span className="text-[9px] font-bold" style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)' }}>{displayLabel}</span>
+          <span className="text-[9px] font-bold relative z-10" style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)' }}>{displayLabel}</span>
+          {showReasonBadge && reasonLabel && (
+            <span className="pointer-events-none absolute -bottom-4 left-1/2 -translate-x-1/2 text-[8px] font-semibold bg-black/80 text-white px-1.5 py-0.5 rounded shadow">
+              Unavailable: {reasonLabel}
+            </span>
+          )}
         </button>
       );
     }
     
     return (
-      <div key={seatId} className={classes} style={style} title={seatLabel}>
+      <div
+        key={seatId}
+        className={classes}
+        style={style}
+        title={titleText}
+        data-seat-id={seatId}
+        data-seat-state={disabledReason || 'available'}
+      >
         <span className="text-[9px] font-bold" style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)' }}>{displayLabel}</span>
+        {showReasonBadge && reasonLabel && (
+          <span className="pointer-events-none absolute -bottom-4 left-1/2 -translate-x-1/2 text-[8px] font-semibold bg-black/80 text-white px-1.5 py-0.5 rounded shadow">
+            Unavailable: {reasonLabel}
+          </span>
+        )}
       </div>
     );
   };

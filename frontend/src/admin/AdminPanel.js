@@ -194,7 +194,7 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
 
         <div className="flex-1 overflow-y-auto px-6 py-6">
           <section className="bg-white dark:bg-gray-950 rounded-lg shadow-sm p-4">
-            <ActiveComponent />
+            <ActiveComponent onNavigate={setActive} />
           </section>
         </div>
       </main>

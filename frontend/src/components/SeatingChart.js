@@ -1,8 +1,10 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { Send, X, AlertCircle } from 'lucide-react';
 import TableComponent from './TableComponent';
 import { API_BASE } from '../apiConfig';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow, seatIdsForRow, resolveRowHeaderLabels } from '../utils/seatLabelUtils';
+import { filterUnavailableSeats, resolveSeatDisableReason } from '../utils/seatAvailability';
+import { useSeatDebugLogger } from '../hooks/useSeatDebug';
 
 const DEFAULT_STAGE_POSITION = { x: 50, y: 8 };
 const DEFAULT_STAGE_SIZE = { width: 200, height: 80 };
@@ -39,6 +41,7 @@ export default function SeatingChart({
   const [pendingSeatIds, setPendingSeatIds] = useState(externalPendingProvided ? pendingSeats : []);
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [showModal, setShowModal] = useState(false);
+  const [layoutRefreshToken, setLayoutRefreshToken] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     customerName: '',
@@ -47,6 +50,7 @@ export default function SeatingChart({
     specialRequests: '',
     eventId: eventId || (events[0]?.id ?? ''),
   });
+  const formEventId = form.eventId;
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [layoutError, setLayoutError] = useState('');
@@ -61,6 +65,34 @@ export default function SeatingChart({
   const [stageSize, setStageSize] = useState(providedStageSize || DEFAULT_STAGE_SIZE);
   const [canvasSettings, setCanvasSettings] = useState(
     providedCanvasSettings || DEFAULT_CANVAS
+  );
+  const errorResetTimer = useRef(null);
+  const { log: seatDebugLog } = useSeatDebugLogger('public');
+
+  const clearTransientErrorTimer = useCallback(() => {
+    if (errorResetTimer.current) {
+      clearTimeout(errorResetTimer.current);
+      errorResetTimer.current = null;
+    }
+  }, []);
+
+  const showTransientError = useCallback(
+    (message) => {
+      setErrorMessage(message);
+      clearTransientErrorTimer();
+      errorResetTimer.current = setTimeout(() => {
+        setErrorMessage('');
+        errorResetTimer.current = null;
+      }, 2500);
+    },
+    [clearTransientErrorTimer]
+  );
+
+  useEffect(
+    () => () => {
+      clearTransientErrorTimer();
+    },
+    [clearTransientErrorTimer]
   );
 
   useEffect(() => {
@@ -119,6 +151,11 @@ export default function SeatingChart({
         const endpoint = eventId
           ? `${API_BASE}/seating/event/${eventId}`
           : `${API_BASE}/seating-layouts/default`;
+        seatDebugLog('layout-load-start', {
+          eventId: eventId || null,
+          refreshToken: layoutRefreshToken,
+          endpoint,
+        });
         const res = await fetch(endpoint);
         const data = await res.json();
         if (cancelled) return;
@@ -126,6 +163,12 @@ export default function SeatingChart({
         if (!data.success) {
           setLayoutError(data.message || 'Unable to load seating layout');
           setLayoutRows([]);
+          seatDebugLog('layout-load-error', {
+            eventId: eventId || null,
+            refreshToken: layoutRefreshToken,
+            message: data.message || 'unknown-error',
+            status: res.status,
+          });
           return;
         }
 
@@ -133,6 +176,13 @@ export default function SeatingChart({
           setLayoutRows(Array.isArray(data.seating) ? data.seating : []);
           setReservedSeatIds(Array.isArray(data.reservedSeats) ? data.reservedSeats : []);
           setPendingSeatIds(Array.isArray(data.pendingSeats) ? data.pendingSeats : []);
+          seatDebugLog('layout-load-success', {
+            eventId,
+            refreshToken: layoutRefreshToken,
+            rows: Array.isArray(data.seating) ? data.seating.length : 0,
+            reserved: Array.isArray(data.reservedSeats) ? data.reservedSeats.length : 0,
+            pending: Array.isArray(data.pendingSeats) ? data.pendingSeats.length : 0,
+          });
           if (data.stagePosition) {
             setStagePosition({
               x: data.stagePosition.x ?? DEFAULT_STAGE_POSITION.x,
@@ -153,6 +203,13 @@ export default function SeatingChart({
           }
         } else if (data.layout) {
           setLayoutRows(Array.isArray(data.layout.layout_data) ? data.layout.layout_data : []);
+          seatDebugLog('layout-load-success', {
+            eventId: null,
+            refreshToken: layoutRefreshToken,
+            rows: Array.isArray(data.layout.layout_data) ? data.layout.layout_data.length : 0,
+            reserved: 0,
+            pending: 0,
+          });
           if (data.layout.stage_position) {
             setStagePosition({
               x: data.layout.stage_position.x ?? DEFAULT_STAGE_POSITION.x,
@@ -176,6 +233,11 @@ export default function SeatingChart({
         if (!cancelled) {
           setLayoutError('Network error while loading seating layout');
           setLayoutRows([]);
+          seatDebugLog('layout-load-error', {
+            eventId: eventId || null,
+            refreshToken: layoutRefreshToken,
+            message: err.message || 'network-error',
+          });
         }
       } finally {
         if (!cancelled) {
@@ -188,7 +250,7 @@ export default function SeatingChart({
     return () => {
       cancelled = true;
     };
-  }, [autoFetch, eventId, externalLayoutProvided]);
+  }, [autoFetch, eventId, externalLayoutProvided, layoutRefreshToken, seatDebugLog]);
 
   useEffect(() => {
     if (!eventId && events[0]?.id) {
@@ -205,6 +267,17 @@ export default function SeatingChart({
   const reservedSeatSet = useMemo(() => new Set(reservedSeatIds || []), [reservedSeatIds]);
   const pendingSeatSet = useMemo(() => new Set(pendingSeatIds || []), [pendingSeatIds]);
 
+  useEffect(() => {
+    setSelectedSeats((prev) => {
+      const filtered = filterUnavailableSeats(prev, reservedSeatSet, pendingSeatSet);
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [pendingSeatSet, reservedSeatSet]);
+
+  useEffect(() => {
+    setSelectedSeats((prev) => (prev.length ? [] : prev));
+  }, [eventId, formEventId]);
+
   const hasPositions = activeRows.some(
     (row) =>
       row &&
@@ -214,23 +287,51 @@ export default function SeatingChart({
       row.pos_y !== undefined
   );
 
-  const toggleSeat = (id) => {
-    if (!interactive) return;
-    setSelectedSeats((prev) =>
-      prev.includes(id) ? prev.filter((seatId) => seatId !== id) : [...prev, id]
-    );
-  };
+  const resolvedEventId = eventId || formEventId || (events[0]?.id ?? null);
+
+  const handleSeatInteraction = useCallback(
+    (seatId, meta = {}) => {
+      if (!interactive) return;
+      const reason = resolveSeatDisableReason(seatId, reservedSeatSet, pendingSeatSet);
+      seatDebugLog('seat-click', {
+        eventId: resolvedEventId,
+        seatId,
+        tableId: meta.tableId || null,
+        disabled: Boolean(reason),
+        reason: reason || 'available',
+      });
+      if (reason) {
+        const message =
+          reason === 'reserved'
+            ? 'That seat is already reserved.'
+            : 'That seat currently has a pending request.';
+        showTransientError(message);
+        return;
+      }
+      setSelectedSeats((prev) => {
+        const exists = prev.includes(seatId);
+        const next = exists ? prev.filter((id) => id !== seatId) : [...prev, seatId];
+        seatDebugLog('seat-selection-updated', {
+          eventId: resolvedEventId,
+          seatId,
+          tableId: meta.tableId || null,
+          selected: !exists,
+          totalSelected: next.length,
+        });
+        return next;
+      });
+    },
+    [interactive, pendingSeatSet, reservedSeatSet, resolvedEventId, seatDebugLog, showTransientError]
+  );
 
   const openRequestModal = () => {
     if (!interactive) return;
     if (selectedSeats.length === 0) {
-      setErrorMessage('Select at least one seat before requesting.');
-      setTimeout(() => setErrorMessage(''), 2500);
+      showTransientError('Select at least one seat before requesting.');
       return;
     }
     if (!eventId && !form.eventId) {
-      setErrorMessage('Select an event before requesting seats.');
-      setTimeout(() => setErrorMessage(''), 2500);
+      showTransientError('Select an event before requesting seats.');
       return;
     }
     setShowModal(true);
@@ -245,15 +346,20 @@ export default function SeatingChart({
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  const resolvedEventId = eventId || form.eventId || (events[0]?.id ?? null);
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     setErrorMessage('');
+    seatDebugLog('reservation-submit-start', {
+      eventId: resolvedEventId,
+      seatIds: selectedSeats.slice(),
+      seatCount: selectedSeats.length,
+      requestType: 'public',
+    });
 
     if (!resolvedEventId) {
-      setErrorMessage('Please select an event.');
+      showTransientError('Please select an event.');
+      seatDebugLog('reservation-submit-abort', { reason: 'missing_event' });
       setSubmitting(false);
       return;
     }
@@ -277,15 +383,36 @@ export default function SeatingChart({
       if (data.success) {
         setSuccessMessage('Request submitted. We will follow up soon.');
         setSelectedSeats([]);
+        setLayoutRefreshToken((prev) => prev + 1);
+        seatDebugLog('reservation-submit-finish', {
+          eventId: resolvedEventId,
+          seatCount: selectedSeats.length,
+          status: res.status,
+          success: true,
+        });
         setTimeout(() => {
           setShowModal(false);
           setSuccessMessage('');
         }, 2200);
       } else {
+        clearTransientErrorTimer();
         setErrorMessage(data.message || 'Failed to submit request');
+        seatDebugLog('reservation-submit-finish', {
+          eventId: resolvedEventId,
+          seatCount: selectedSeats.length,
+          status: res.status,
+          success: false,
+          reason: data.message || 'server-rejection',
+        });
       }
     } catch (err) {
+      clearTransientErrorTimer();
       setErrorMessage('Network error - please try again');
+      seatDebugLog('reservation-submit-error', {
+        eventId: resolvedEventId,
+        seatCount: selectedSeats.length,
+        reason: err.message || 'network-error',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -402,16 +529,18 @@ export default function SeatingChart({
                 <div className="flex items-center justify-center" style={{ minHeight: `${height - 20}px` }}>
                   <div style={{ transform: `rotate(${rotation}deg)` }}>
                     <TableComponent
-                          row={row}
-                          tableShape={row.table_shape || row.seat_type || 'table-6'}
-                          selectedSeats={selectedSeats}
-                          pendingSeats={pendingForRow}
-                          reservedSeats={reservedForRow}
-                          onToggleSeat={(seatId) => {
-                            if (reservedForRow.includes(seatId)) return;
-                            if (pendingForRow.includes(seatId)) return;
-                            toggleSeat(seatId);
-                          }}
+                      row={row}
+                      tableShape={row.table_shape || row.seat_type || 'table-6'}
+                      selectedSeats={selectedSeats}
+                      pendingSeats={pendingForRow}
+                      reservedSeats={reservedForRow}
+                      onToggleSeat={(seatId) =>
+                        handleSeatInteraction(seatId, {
+                          tableId: rowKey,
+                          rowLabel: row.row_label,
+                          section: row.section_name || row.section,
+                        })
+                      }
                       interactive={interactive}
                     />
                   </div>

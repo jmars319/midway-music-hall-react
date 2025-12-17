@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { X, Send, AlertCircle, Phone, Mail } from 'lucide-react';
-import TableComponent, { isSeatReserved } from './TableComponent';
+import TableComponent from './TableComponent';
 import { API_BASE } from '../apiConfig';
 import { seatingLegendSwatches, seatingStatusLabels } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/seatLabelUtils';
 import { CONTACT_LINK_CLASSES, formatPhoneHref } from '../utils/contactLinks';
+import { filterUnavailableSeats, resolveSeatDisableReason } from '../utils/seatAvailability';
+import { useSeatDebugLogger } from '../hooks/useSeatDebug';
 
 const publicSeatLabel = (label = '') => {
   const safe = String(label || '').trim();
@@ -31,6 +33,8 @@ export default function EventSeatingModal({ event, onClose }) {
   const canvasContainerRef = useRef(null);
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
+  const errorResetTimer = useRef(null);
+  const { log: seatDebugLog } = useSeatDebugLogger('event-modal');
   const titleId = `event-seating-title-${event.id}`;
   const nameInputId = `${titleId}-customer-name`;
   const emailInputId = `${titleId}-customer-email`;
@@ -50,6 +54,33 @@ export default function EventSeatingModal({ event, onClose }) {
   const contactNotes = (event.contact_notes || '').trim();
   const hasEventContact = Boolean(contactName || contactPhone || contactEmail || contactNotes);
   const contactPhoneHref = formatPhoneHref(contactPhone);
+  const reservedSet = useMemo(() => new Set(reservedSeats || []), [reservedSeats]);
+  const pendingSet = useMemo(() => new Set(pendingSeats || []), [pendingSeats]);
+  const clearTransientErrorTimer = useCallback(() => {
+    if (errorResetTimer.current) {
+      clearTimeout(errorResetTimer.current);
+      errorResetTimer.current = null;
+    }
+  }, []);
+
+  const showTransientError = useCallback(
+    (message, timeout = 3000) => {
+      setErrorMessage(message);
+      clearTransientErrorTimer();
+      errorResetTimer.current = setTimeout(() => {
+        setErrorMessage('');
+        errorResetTimer.current = null;
+      }, timeout);
+    },
+    [clearTransientErrorTimer]
+  );
+
+  useEffect(
+    () => () => {
+      clearTransientErrorTimer();
+    },
+    [clearTransientErrorTimer]
+  );
 
   const handleModalClose = () => {
     // Close immediately when ESC is pressed; do not force confirmation
@@ -71,17 +102,37 @@ export default function EventSeatingModal({ event, onClose }) {
   useEffect(() => {
     fetchEventSeating();
   }, [event.id]);
+
+  useEffect(() => {
+    setSelectedSeats([]);
+    setShowContactForm(false);
+    setShowCancelConfirm(false);
+  }, [event.id]);
+
+  useEffect(() => {
+    setSelectedSeats((prev) => {
+      const filtered = filterUnavailableSeats(prev, reservedSet, pendingSet);
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [pendingSet, reservedSet]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
   const fetchEventSeating = async () => {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/seating/event/${event.id}`);
+      seatDebugLog('modal-layout-load-start', { eventId: event.id });
       const data = await res.json();
       if (data.success) {
         setSeatingConfig(data.seating || []);
         setReservedSeats(data.reservedSeats || []);
         setPendingSeats(data.pendingSeats || []);
+        seatDebugLog('modal-layout-load-success', {
+          eventId: event.id,
+          rows: Array.isArray(data.seating) ? data.seating.length : 0,
+          reserved: Array.isArray(data.reservedSeats) ? data.reservedSeats.length : 0,
+          pending: Array.isArray(data.pendingSeats) ? data.pendingSeats.length : 0,
+        });
         if (data.stagePosition) {
           setStagePosition(data.stagePosition);
         }
@@ -95,21 +146,59 @@ export default function EventSeatingModal({ event, onClose }) {
           });
         }
       } else {
+        clearTransientErrorTimer();
         setErrorMessage('Failed to load seating data');
+        seatDebugLog('modal-layout-load-error', {
+          eventId: event.id,
+          message: data.message || 'unknown-error',
+        });
       }
     } catch (err) {
       console.error('Failed to fetch event seating:', err);
+      clearTransientErrorTimer();
       setErrorMessage('Network error loading seating');
+      seatDebugLog('modal-layout-load-error', {
+        eventId: event.id,
+        message: err.message || 'network-error',
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleSeat = (id) => {
-    setSelectedSeats(prev => 
-      prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
-    );
-  };
+  const handleSeatInteraction = useCallback(
+    (seatId, meta = {}) => {
+      const reason = resolveSeatDisableReason(seatId, reservedSet, pendingSet);
+      seatDebugLog('seat-click', {
+        eventId: event.id,
+        seatId,
+        tableId: meta.tableId || null,
+        disabled: Boolean(reason),
+        reason: reason || 'available',
+      });
+      if (reason) {
+        const message =
+          reason === 'reserved'
+            ? 'Seat already reserved.'
+            : 'Seat currently pending confirmation.';
+        showTransientError(message);
+        return;
+      }
+      setSelectedSeats((prev) => {
+        const exists = prev.includes(seatId);
+        const next = exists ? prev.filter((s) => s !== seatId) : [...prev, seatId];
+        seatDebugLog('seat-selection-updated', {
+          eventId: event.id,
+          seatId,
+          tableId: meta.tableId || null,
+          selected: !exists,
+          totalSelected: next.length,
+        });
+        return next;
+      });
+    },
+    [event.id, pendingSet, reservedSet, seatDebugLog, showTransientError]
+  );
 
   const handleCancel = () => {
     if (selectedSeats.length > 0 || showContactForm) {
@@ -126,8 +215,7 @@ export default function EventSeatingModal({ event, onClose }) {
 
   const handleConfirmSeats = () => {
     if (selectedSeats.length === 0) {
-      setErrorMessage('Please select at least one seat');
-      setTimeout(() => setErrorMessage(''), 3000);
+      showTransientError('Please select at least one seat');
       return;
     }
     setShowContactForm(true);
@@ -136,6 +224,7 @@ export default function EventSeatingModal({ event, onClose }) {
 
   const handleBackToSeats = () => {
     setShowContactForm(false);
+    clearTransientErrorTimer();
     setForm({
       customerName: '',
       customerEmail: '',
@@ -153,6 +242,12 @@ export default function EventSeatingModal({ event, onClose }) {
     e.preventDefault();
     setSubmitting(true);
     setErrorMessage('');
+    seatDebugLog('reservation-submit-start', {
+      eventId: event.id,
+      seatIds: selectedSeats.slice(),
+      seatCount: selectedSeats.length,
+      requestType: 'event-modal',
+    });
     
     try {
       const payload = {
@@ -176,15 +271,38 @@ export default function EventSeatingModal({ event, onClose }) {
       const data = await res.json();
       if (data.success) {
         setSuccessMessage('Request submitted successfully! We will contact you soon.');
+        setSelectedSeats([]);
+        setShowContactForm(false);
+        fetchEventSeating();
+        seatDebugLog('reservation-submit-finish', {
+          eventId: event.id,
+          seatCount: selectedSeats.length,
+          status: res.status,
+          success: true,
+        });
         setTimeout(() => {
           onClose();
         }, 2000);
       } else {
+        clearTransientErrorTimer();
         setErrorMessage(data.message || 'Failed to submit request');
+        seatDebugLog('reservation-submit-finish', {
+          eventId: event.id,
+          seatCount: selectedSeats.length,
+          status: res.status,
+          success: false,
+          reason: data.message || 'server-rejection',
+        });
       }
     } catch (err) {
       console.error(err);
+      clearTransientErrorTimer();
       setErrorMessage('Network error - please try again');
+      seatDebugLog('reservation-submit-error', {
+        eventId: event.id,
+        seatCount: selectedSeats.length,
+        reason: err.message || 'network-error',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -470,11 +588,13 @@ export default function EventSeatingModal({ event, onClose }) {
                               selectedSeats={selectedSeats}
                               pendingSeats={pendingForRow}
                               reservedSeats={reservedForRow}
-                              onToggleSeat={(seatId) => {
-                                if (isSeatReserved(row, seatId, reservedForRow)) return;
-                                if (pendingForRow.includes(seatId)) return;
-                                toggleSeat(seatId);
-                              }}
+                              onToggleSeat={(seatId) =>
+                                handleSeatInteraction(seatId, {
+                                  tableId: row?.id || `${row.section_name}-${row.row_label}`,
+                                  rowLabel: row.row_label,
+                                  section: row.section_name || row.section,
+                                })
+                              }
                               interactive={true}
                               labelFormatter={publicSeatLabel}
                             />

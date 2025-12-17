@@ -29,16 +29,19 @@ function StatCard({ title, value, color = 'purple', Icon }){
   );
 }
 
-export default function DashboardModule(){
+export default function DashboardModule({ onNavigate = () => {} }){
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [activity, setActivity] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityError, setActivityError] = useState('');
 
   const fetchStats = async () => {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/dashboard-stats`);
+      const res = await fetch(`${API_BASE}/dashboard-stats`, { credentials: 'include' });
       const data = await res.json();
       if (data && data.success && data.stats) {
         setStats(data.stats);
@@ -53,9 +56,45 @@ export default function DashboardModule(){
     }
   };
 
+  const fetchActivity = async () => {
+    setActivityLoading(true);
+    setActivityError('');
+    try {
+      const res = await fetch(`${API_BASE}/audit-log?limit=6`, { credentials: 'include' });
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || 'Failed to load activity');
+      }
+      setActivity(Array.isArray(data.logs) ? data.logs : []);
+    } catch (err) {
+      console.error('Dashboard activity error', err);
+      setActivity([]);
+      setActivityError(err.message || 'Failed to load recent activity');
+    } finally {
+      setActivityLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchStats();
+    fetchActivity();
   }, []);
+
+  const handleQuickNav = (key) => {
+    if (typeof onNavigate === 'function') {
+      onNavigate(key);
+    }
+  };
+
+  const formatActivityTime = (value) => {
+    if (!value) return '';
+    try {
+      const date = new Date(value);
+      return date.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+    } catch (err) {
+      return value;
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -65,7 +104,15 @@ export default function DashboardModule(){
           <p className="text-sm text-gray-400">Overview of venue activity and quick stats.</p>
         </div>
         <div>
-          <button onClick={fetchStats} className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded">Refresh</button>
+          <button
+            onClick={() => {
+              fetchStats();
+              fetchActivity();
+            }}
+            className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded"
+          >
+            Refresh
+          </button>
         </div>
       </div>
 
@@ -90,18 +137,69 @@ export default function DashboardModule(){
           <p className="text-gray-400">Manage your events, seating and requests from the admin panel. Use the sidebar to navigate between modules. This overview shows current counts and quick links for common actions.</p>
 
           <div className="mt-4 flex flex-wrap gap-3">
-            <button className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded">Create Event</button>
-            <button className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">View Requests</button>
-            <button className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded">Review Suggestions</button>
+            <button
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded"
+              onClick={() => handleQuickNav('events')}
+            >
+              Create Event
+            </button>
+            <button
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+              onClick={() => handleQuickNav('requests')}
+            >
+              View Requests
+            </button>
+            <button
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded"
+              onClick={() => handleQuickNav('suggestions')}
+            >
+              Review Suggestions
+            </button>
           </div>
         </div>
 
         <aside className="bg-gray-800 rounded-xl p-6 border border-purple-500/20">
-          <h4 className="text-lg font-semibold mb-2">Recent Activity</h4>
-          <p className="text-gray-400">No recent activity to show. Activity log will appear here.</p>
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-lg font-semibold">Recent Activity</h4>
+            <button
+              onClick={fetchActivity}
+              className="text-xs text-purple-300 hover:text-white"
+            >
+              Refresh
+            </button>
+          </div>
+          {activityLoading ? (
+            <div className="flex items-center justify-center h-24">
+              <div className="animate-spin h-8 w-8 border-2 border-purple-500 border-t-transparent rounded-full" />
+            </div>
+          ) : activityError ? (
+            <p className="text-red-400 text-sm">{activityError}</p>
+          ) : activity.length === 0 ? (
+            <p className="text-gray-400 text-sm">All quiet right now. Updates will appear here after staff actions.</p>
+          ) : (
+            <ul className="space-y-3">
+              {activity.map((entry) => (
+                <li key={entry.id} className="border-b border-gray-700 pb-2 last:pb-0 last:border-0">
+                  <div className="text-sm font-semibold text-white">
+                    {entry.action?.replace(/_/g, ' ') || 'Activity'}
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    {entry.actor || 'system'} · {entry.entity_type || 'n/a'}{' '}
+                    {entry.entity_id ? `#${entry.entity_id}` : ''}
+                  </div>
+                  <div className="text-xs text-gray-500">{formatActivityTime(entry.created_at)}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button
+            className="mt-4 px-3 py-2 text-sm bg-gray-900/60 border border-purple-500/20 rounded text-purple-200 hover:bg-gray-900/80"
+            onClick={() => handleQuickNav('audit-log')}
+          >
+            Open Audit Log
+          </button>
         </aside>
       </div>
     </div>
   );
 }
-
