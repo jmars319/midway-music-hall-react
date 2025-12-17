@@ -114,6 +114,34 @@ export const formatEventStartTime = (event = {}) => {
 };
 
 export const formatEventPriceDisplay = (event = {}) => {
+  const hasValue = (value) => value !== null && value !== undefined && value !== '';
+  const formatTicket = hasValue(event.ticket_price) ? formatPriceValue(event.ticket_price) : null;
+  const formatDoor = hasValue(event.door_price) ? formatPriceValue(event.door_price) : null;
+
+  if (formatTicket || formatDoor) {
+    const normalizeNumber = (value) => {
+      if (!hasValue(value)) return null;
+      const num = Number(value);
+      return Number.isNaN(num) ? null : num;
+    };
+    const ticketNum = normalizeNumber(event.ticket_price);
+    const doorNum = normalizeNumber(event.door_price);
+    const pricesMatch = (
+      ticketNum !== null &&
+      doorNum !== null &&
+      ticketNum === doorNum
+    ) || (formatTicket && formatDoor && formatTicket === formatDoor);
+
+    if (pricesMatch) {
+      return formatTicket || formatDoor;
+    }
+
+    const segments = [];
+    if (formatTicket) segments.push(`Advance ${formatTicket}`);
+    if (formatDoor) segments.push(`Door ${formatDoor}`);
+    return segments.join(' • ') || null;
+  }
+
   const min = formatPriceValue(event.min_ticket_price);
   const max = formatPriceValue(event.max_ticket_price);
   if (min && max && min !== max) {
