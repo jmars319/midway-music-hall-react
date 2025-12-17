@@ -40,16 +40,88 @@ function parse_selected_seats($value): array
     return [];
 }
 
+function reservation_client_fingerprint(): string
+{
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        $sessionId = session_id();
+        if (is_string($sessionId) && $sessionId !== '') {
+            return substr(hash('sha256', $sessionId), 0, 16);
+        }
+    }
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+    $agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+    $seed = $ip . '|' . $agent;
+    if ($seed === '|') {
+        $seed = microtime(true) . random_bytes(4);
+    }
+    return substr(hash('sha256', (string) $seed), 0, 16);
+}
+
+function normalize_seat_id_list($value): array
+{
+    $clean = [];
+    $seats = decode_seat_list($value);
+    foreach ($seats as $seatId) {
+        if (!is_string($seatId)) {
+            continue;
+        }
+        $trimmed = trim($seatId);
+        if ($trimmed === '') {
+            continue;
+        }
+        $clean[$trimmed] = true;
+    }
+    return array_slice(array_keys($clean), 0, 200);
+}
+
+function resolve_reservation_log_context(array $payload = [], array $context = []): array
+{
+    $seatIds = $context['seat_ids'] ?? normalize_seat_id_list($payload['selected_seats'] ?? $payload['selectedSeats'] ?? []);
+    $eventId = $context['event_id'] ?? ($payload['event_id'] ?? $payload['eventId'] ?? null);
+    return [
+        'event_id' => $eventId ? (int) $eventId : null,
+        'layout_id' => $context['layout_id'] ?? null,
+        'layout_version_id' => $context['layout_version_id'] ?? null,
+        'seat_ids' => $seatIds,
+    ];
+}
+
+function log_reservation_rejection(array $details): void
+{
+    $defaults = [
+        'event_id' => null,
+        'layout_id' => null,
+        'layout_version_id' => null,
+        'seat_ids' => [],
+        'request_type' => 'public',
+        'client_fingerprint' => reservation_client_fingerprint(),
+        'reason_code' => 'unknown',
+        'http_status' => 400,
+        'message' => null,
+    ];
+    $payload = array_merge($defaults, $details);
+    $payload['seat_ids'] = normalize_seat_id_list($payload['seat_ids']);
+    if (!$payload['client_fingerprint']) {
+        $payload['client_fingerprint'] = reservation_client_fingerprint();
+    }
+    error_log('[reservation-reject] ' . json_encode($payload, JSON_UNESCAPED_SLASHES));
+}
+
 class SeatRequestException extends RuntimeException
 {
     public int $httpStatus;
     public array $payload;
+    public string $reasonCode;
+    public array $context;
 
-    public function __construct(string $message, int $httpStatus = 400, array $payload = [])
+    public function __construct(string $message, int $httpStatus = 400, array $payload = [], string $reasonCode = 'unknown', array $context = [])
     {
         parent::__construct($message);
         $this->httpStatus = $httpStatus;
         $this->payload = $payload;
+        $reason = $payload['reason'] ?? $payload['reason_code'] ?? $reasonCode;
+        $this->reasonCode = (is_string($reason) && $reason !== '') ? $reason : 'unknown';
+        $this->context = $context;
     }
 }
 
@@ -1514,7 +1586,7 @@ function detect_seat_conflicts(PDO $pdo, int $eventId, array $seatIds): array
     }
     $conflicts = [];
     $now = now_eastern();
-    $stmt = $pdo->prepare("SELECT selected_seats, status, hold_expires_at FROM seat_requests WHERE event_id = ?");
+    $stmt = $pdo->prepare("SELECT selected_seats, status, hold_expires_at FROM seat_requests WHERE event_id = ? FOR UPDATE");
     $stmt->execute([$eventId]);
     $holdStatuses = open_seat_request_statuses();
     while ($row = $stmt->fetch()) {
@@ -1545,7 +1617,7 @@ function detect_seat_conflicts(PDO $pdo, int $eventId, array $seatIds): array
             }
         }
     }
-    $seatStmt = $pdo->prepare('SELECT selected_seats FROM seating WHERE event_id = ? AND selected_seats IS NOT NULL');
+    $seatStmt = $pdo->prepare('SELECT selected_seats FROM seating WHERE event_id = ? AND selected_seats IS NOT NULL FOR UPDATE');
     $seatStmt->execute([$eventId]);
     while ($row = $seatStmt->fetch()) {
         $existing = parse_selected_seats($row['selected_seats']);
@@ -1577,7 +1649,7 @@ function apply_seat_reservations(PDO $pdo, array $seatIds): void
         if (!$section || !$rowLabel) {
             continue;
         }
-        $stmt = $pdo->prepare('SELECT id, selected_seats FROM seating WHERE section = ? AND row_label = ? LIMIT 1');
+        $stmt = $pdo->prepare('SELECT id, selected_seats FROM seating WHERE section = ? AND row_label = ? LIMIT 1 FOR UPDATE');
         $stmt->execute([$section, $rowLabel]);
         $row = $stmt->fetch();
         if (!$row) {
@@ -1594,7 +1666,6 @@ function apply_seat_reservations(PDO $pdo, array $seatIds): void
 
 function create_seat_request_record(PDO $pdo, array $payload, array $options = []): array
 {
-    expire_stale_holds($pdo);
     $createdBy = $options['created_by'] ?? 'public';
     $updatedBy = $options['updated_by'] ?? $createdBy;
     $defaultStatus = normalize_seat_request_status($options['default_status'] ?? 'new');
@@ -1605,6 +1676,19 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
     if (!in_array($status, canonical_seat_request_statuses(), true)) {
         $status = $defaultStatus;
     }
+
+    $exceptionContext = [
+        'event_id' => null,
+        'layout_id' => null,
+        'layout_version_id' => null,
+        'seat_ids' => [],
+    ];
+    $startedTransaction = false;
+    if (!$pdo->inTransaction()) {
+        $pdo->beginTransaction();
+        $startedTransaction = true;
+    }
+
     $rawSeats = $payload['selected_seats'] ?? $payload['selectedSeats'] ?? [];
     if (!is_array($rawSeats)) {
         $rawSeats = [];
@@ -1614,109 +1698,135 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
     }, $rawSeats), function ($seat) {
         return $seat !== '';
     }));
+    $exceptionContext['seat_ids'] = $selectedSeats;
     if (empty($selectedSeats)) {
-        throw new SeatRequestException('selected_seats is required');
-    }
-    $eventIdRaw = $payload['event_id'] ?? $payload['eventId'] ?? null;
-    $eventId = (int) $eventIdRaw;
-    if ($eventId <= 0) {
-        throw new SeatRequestException('event_id is required');
-    }
-    $customerName = trim((string)($payload['customer_name'] ?? $payload['customerName'] ?? ''));
-    if ($customerName === '') {
-        throw new SeatRequestException('customer_name is required');
-    }
-    $contactPayload = $payload['contact'] ?? $payload['contactInfo'] ?? [];
-    $contactPhone = isset($contactPayload['phone']) ? trim((string)$contactPayload['phone']) : '';
-    if ($contactPhone === '') {
-        throw new SeatRequestException('phone is required');
-    }
-    $customerEmail = isset($contactPayload['email']) ? trim((string)$contactPayload['email']) : '';
-    if ($customerEmail && !filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) {
-        throw new SeatRequestException('Invalid email address');
-    }
-    $customerPhoneNormalized = normalize_phone_number($contactPhone) ?: null;
-
-    $hasCategoryTable = event_categories_table_exists($pdo);
-    if ($hasCategoryTable) {
-        $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, e.seat_request_email_override, ec.slug AS category_slug, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
-        $eventStmt->execute([$eventId]);
-    } else {
-        $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone, seat_request_email_override FROM events WHERE id = ? LIMIT 1');
-        $eventStmt->execute([$eventId]);
-    }
-    $event = $eventStmt->fetch();
-    if (!$event) {
-        throw new SeatRequestException('Event not found', 404);
-    }
-    $hasLayout = !empty($event['layout_id']) || !empty($event['layout_version_id']);
-    if ((int)($event['seating_enabled'] ?? 0) !== 1 || !$hasLayout) {
-        throw new SeatRequestException('Seating requests are not available for this event');
+        throw new SeatRequestException('selected_seats is required', 400, [], 'missing_selected_seats', $exceptionContext);
     }
 
-    $conflicts = detect_seat_conflicts($pdo, $eventId, $selectedSeats);
-    if (!empty($conflicts)) {
-        throw new SeatRequestException('Seats unavailable', 409, ['conflicts' => $conflicts]);
-    }
-
-    $now = now_eastern();
+    $created = null;
     $holdDate = null;
-    if (in_array($status, open_seat_request_statuses(), true)) {
-        $holdDate = compute_hold_expiration($now);
-    }
-    $holdExpiry = $holdDate ? $holdDate->format('Y-m-d H:i:s') : null;
-    $finalizedAt = $status === 'confirmed' ? $now->format('Y-m-d H:i:s') : null;
+    $event = null;
 
-    $layoutVersionId = $event['layout_version_id'];
-    if (!$layoutVersionId && $event['layout_id']) {
-        $layoutVersionId = snapshot_layout_version($pdo, $event['layout_id'], 'auto-reservation');
+    try {
+        expire_stale_holds($pdo);
+        $eventIdRaw = $payload['event_id'] ?? $payload['eventId'] ?? null;
+        $eventId = (int) $eventIdRaw;
+        $exceptionContext['event_id'] = $eventId > 0 ? $eventId : null;
+        if ($eventId <= 0) {
+            throw new SeatRequestException('event_id is required', 400, [], 'missing_event_id', $exceptionContext);
+        }
+        $customerName = trim((string)($payload['customer_name'] ?? $payload['customerName'] ?? ''));
+        if ($customerName === '') {
+            throw new SeatRequestException('customer_name is required', 400, [], 'missing_customer_name', $exceptionContext);
+        }
+        $contactPayload = $payload['contact'] ?? $payload['contactInfo'] ?? [];
+        $contactPhone = isset($contactPayload['phone']) ? trim((string)$contactPayload['phone']) : '';
+        if ($contactPhone === '') {
+            throw new SeatRequestException('phone is required', 400, [], 'missing_contact_phone', $exceptionContext);
+        }
+        $customerEmail = isset($contactPayload['email']) ? trim((string)$contactPayload['email']) : '';
+        if ($customerEmail && !filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) {
+            throw new SeatRequestException('Invalid email address', 400, [], 'invalid_contact_email', $exceptionContext);
+        }
+        $customerPhoneNormalized = normalize_phone_number($contactPhone) ?: null;
+
+        $hasCategoryTable = event_categories_table_exists($pdo);
+        if ($hasCategoryTable) {
+            $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, e.seat_request_email_override, ec.slug AS category_slug, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
+            $eventStmt->execute([$eventId]);
+        } else {
+            $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone, seat_request_email_override FROM events WHERE id = ? LIMIT 1');
+            $eventStmt->execute([$eventId]);
+        }
+        $event = $eventStmt->fetch();
+        if (!$event) {
+            throw new SeatRequestException('Event not found', 404, [], 'event_not_found', $exceptionContext);
+        }
+        $exceptionContext['layout_id'] = $event['layout_id'] ?? null;
+        $exceptionContext['layout_version_id'] = $event['layout_version_id'] ?? null;
+        $hasLayout = !empty($event['layout_id']) || !empty($event['layout_version_id']);
+        if ((int)($event['seating_enabled'] ?? 0) !== 1 || !$hasLayout) {
+            throw new SeatRequestException('Seating requests are not available for this event', 400, [], 'event_not_seating_enabled', $exceptionContext);
+        }
+
+        $conflicts = detect_seat_conflicts($pdo, $eventId, $selectedSeats);
+        if (!empty($conflicts)) {
+            throw new SeatRequestException('Seats unavailable', 409, ['conflicts' => $conflicts], 'seat_conflict', $exceptionContext);
+        }
+
+        $now = now_eastern();
+        if (in_array($status, open_seat_request_statuses(), true)) {
+            $holdDate = compute_hold_expiration($now);
+        }
+        $holdExpiry = $holdDate ? $holdDate->format('Y-m-d H:i:s') : null;
+        $finalizedAt = $status === 'confirmed' ? $now->format('Y-m-d H:i:s') : null;
+
+        $layoutVersionId = $event['layout_version_id'];
+        if (!$layoutVersionId && $event['layout_id']) {
+            $layoutVersionId = snapshot_layout_version($pdo, $event['layout_id'], 'auto-reservation');
+            if ($layoutVersionId) {
+                Database::run('UPDATE events SET layout_version_id = ? WHERE id = ?', [$layoutVersionId, $eventId]);
+            }
+        }
         if ($layoutVersionId) {
-            Database::run('UPDATE events SET layout_version_id = ? WHERE id = ?', [$layoutVersionId, $eventId]);
+            $exceptionContext['layout_version_id'] = $layoutVersionId;
+        }
+        $snapshotData = null;
+        if ($layoutVersionId) {
+            $snapStmt = $pdo->prepare('SELECT layout_data FROM seating_layout_versions WHERE id = ? LIMIT 1');
+            $snapStmt->execute([$layoutVersionId]);
+            $snapshotRow = $snapStmt->fetch();
+            $snapshotData = $snapshotRow ? $snapshotRow['layout_data'] : null;
+        }
+
+        Database::run(
+            'INSERT INTO seat_requests (event_id, layout_version_id, seat_map_snapshot, customer_name, customer_email, customer_phone, customer_phone_normalized, selected_seats, total_seats, special_requests, status, hold_expires_at, finalized_at, created_by, updated_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+            [
+                $eventId,
+                $layoutVersionId,
+                $snapshotData,
+                $customerName,
+                $customerEmail ?: '',
+                $contactPhone,
+                $customerPhoneNormalized,
+                json_encode($selectedSeats),
+                count($selectedSeats),
+                $payload['special_requests'] ?? $payload['specialRequests'] ?? null,
+                $status,
+                $holdExpiry,
+                $finalizedAt,
+                $createdBy,
+                $updatedBy
+            ]
+        );
+        $id = (int) $pdo->lastInsertId();
+        if ($status === 'confirmed') {
+            apply_seat_reservations($pdo, $selectedSeats);
+        }
+        $createdStmt = $pdo->prepare('SELECT * FROM seat_requests WHERE id = ? LIMIT 1');
+        $createdStmt->execute([$id]);
+        $created = $createdStmt->fetch() ?: ['id' => $id];
+        if ($created) {
+            $created['seat_display_labels'] = build_display_seat_list($created);
+        }
+        if ($startedTransaction) {
+            $pdo->commit();
+        }
+    } catch (Throwable $error) {
+        if ($startedTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $error;
+    }
+
+    if ($created && $event) {
+        try {
+            notify_seat_request_emails($created, $event);
+        } catch (Throwable $notifyError) {
+            error_log('[email] Unable to process seat request notifications: ' . $notifyError->getMessage());
         }
     }
-    $snapshotData = null;
-    if ($layoutVersionId) {
-        $snapStmt = $pdo->prepare('SELECT layout_data FROM seating_layout_versions WHERE id = ? LIMIT 1');
-        $snapStmt->execute([$layoutVersionId]);
-        $snapshotRow = $snapStmt->fetch();
-        $snapshotData = $snapshotRow ? $snapshotRow['layout_data'] : null;
-    }
 
-    Database::run(
-        'INSERT INTO seat_requests (event_id, layout_version_id, seat_map_snapshot, customer_name, customer_email, customer_phone, customer_phone_normalized, selected_seats, total_seats, special_requests, status, hold_expires_at, finalized_at, created_by, updated_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-        [
-            $eventId,
-            $layoutVersionId,
-            $snapshotData,
-            $customerName,
-            $customerEmail ?: '',
-            $contactPhone,
-            $customerPhoneNormalized,
-            json_encode($selectedSeats),
-            count($selectedSeats),
-            $payload['special_requests'] ?? $payload['specialRequests'] ?? null,
-            $status,
-            $holdExpiry,
-            $finalizedAt,
-            $createdBy,
-            $updatedBy
-        ]
-    );
-    $id = (int) $pdo->lastInsertId();
-    if ($status === 'confirmed') {
-        apply_seat_reservations($pdo, $selectedSeats);
-    }
-    $createdStmt = $pdo->prepare('SELECT * FROM seat_requests WHERE id = ? LIMIT 1');
-    $createdStmt->execute([$id]);
-    $created = $createdStmt->fetch() ?: ['id' => $id];
-    if ($created) {
-        $created['seat_display_labels'] = build_display_seat_list($created);
-    }
-    try {
-        notify_seat_request_emails($created, $event);
-    } catch (Throwable $notifyError) {
-        error_log('[email] Unable to process seat request notifications: ' . $notifyError->getMessage());
-    }
     return [
         'seat_request' => $created,
         'hold_expires_at' => $holdDate ? $holdDate->format(DateTimeInterface::ATOM) : null,
@@ -3017,6 +3127,7 @@ $router->add('GET', '/api/events/:id/recurrence', function ($request, $params) {
 });
 
 $router->add('POST', '/api/events/:id/recurrence', function (Request $request, $params) {
+    $payload = [];
     try {
         $payload = read_json_body($request);
         $frequency = strtolower($payload['frequency'] ?? 'weekly');
@@ -3507,14 +3618,48 @@ $router->add('POST', '/api/admin/seat-requests', function (Request $request) {
         }
         Response::success($result);
     } catch (SeatRequestException $validationError) {
-        Response::error($validationError->getMessage(), $validationError->httpStatus, $validationError->payload);
+        $logContext = resolve_reservation_log_context($payload ?? [], $validationError->context ?? []);
+        log_reservation_rejection([
+            'event_id' => $logContext['event_id'],
+            'layout_id' => $logContext['layout_id'],
+            'layout_version_id' => $logContext['layout_version_id'],
+            'seat_ids' => $logContext['seat_ids'],
+            'request_type' => 'manual',
+            'reason_code' => $validationError->reasonCode,
+            'http_status' => $validationError->httpStatus,
+            'message' => $validationError->getMessage(),
+        ]);
+        $extra = array_merge($validationError->payload, ['reason_code' => $validationError->reasonCode]);
+        Response::error($validationError->getMessage(), $validationError->httpStatus, $extra);
     } catch (RuntimeException $validationError) {
-        Response::error($validationError->getMessage(), 400);
+        $logContext = resolve_reservation_log_context($payload ?? []);
+        log_reservation_rejection([
+            'event_id' => $logContext['event_id'],
+            'layout_id' => $logContext['layout_id'],
+            'layout_version_id' => $logContext['layout_version_id'],
+            'seat_ids' => $logContext['seat_ids'],
+            'request_type' => 'manual',
+            'reason_code' => 'runtime_validation_error',
+            'http_status' => 400,
+            'message' => $validationError->getMessage(),
+        ]);
+        Response::error($validationError->getMessage(), 400, ['reason_code' => 'runtime_validation_error']);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
             error_log('POST /api/admin/seat-requests error: ' . $e->getMessage());
         }
-        Response::error('Failed to create reservation', 500);
+        $logContext = resolve_reservation_log_context($payload ?? []);
+        log_reservation_rejection([
+            'event_id' => $logContext['event_id'],
+            'layout_id' => $logContext['layout_id'],
+            'layout_version_id' => $logContext['layout_version_id'],
+            'seat_ids' => $logContext['seat_ids'],
+            'request_type' => 'manual',
+            'reason_code' => 'server_error',
+            'http_status' => 500,
+            'message' => $e->getMessage(),
+        ]);
+        Response::error('Failed to create reservation', 500, ['reason_code' => 'server_error']);
     }
 });
 
@@ -3592,11 +3737,19 @@ $router->add('POST', '/api/seat-requests/:id/deny', function ($request, $params)
 });
 
 $router->add('POST', '/api/seat-requests', function (Request $request) {
+    $payload = [];
     try {
         $rawBody = trim($request->raw());
         $payload = json_decode($rawBody, true);
         if ($rawBody !== '' && json_last_error() !== JSON_ERROR_NONE) {
-            return Response::error('Invalid JSON payload', 400, ['detail' => json_last_error_msg()]);
+            log_reservation_rejection([
+                'request_type' => 'public',
+                'reason_code' => 'invalid_json',
+                'http_status' => 400,
+                'seat_ids' => [],
+                'message' => json_last_error_msg(),
+            ]);
+            return Response::error('Invalid JSON payload', 400, ['detail' => json_last_error_msg(), 'reason_code' => 'invalid_json']);
         }
         $payload = is_array($payload) ? $payload : [];
         $pdo = Database::connection();
@@ -3608,17 +3761,52 @@ $router->add('POST', '/api/seat-requests', function (Request $request) {
         ]);
         Response::success($result);
     } catch (SeatRequestException $validationError) {
-        Response::error($validationError->getMessage(), $validationError->httpStatus, $validationError->payload);
+        $logContext = resolve_reservation_log_context($payload ?? [], $validationError->context ?? []);
+        log_reservation_rejection([
+            'event_id' => $logContext['event_id'],
+            'layout_id' => $logContext['layout_id'],
+            'layout_version_id' => $logContext['layout_version_id'],
+            'seat_ids' => $logContext['seat_ids'],
+            'request_type' => 'public',
+            'reason_code' => $validationError->reasonCode,
+            'http_status' => $validationError->httpStatus,
+            'message' => $validationError->getMessage(),
+        ]);
+        $extra = array_merge($validationError->payload, ['reason_code' => $validationError->reasonCode]);
+        Response::error($validationError->getMessage(), $validationError->httpStatus, $extra);
     } catch (RuntimeException $validationError) {
-        Response::error($validationError->getMessage(), 400);
+        $logContext = resolve_reservation_log_context($payload ?? []);
+        log_reservation_rejection([
+            'event_id' => $logContext['event_id'],
+            'layout_id' => $logContext['layout_id'],
+            'layout_version_id' => $logContext['layout_version_id'],
+            'seat_ids' => $logContext['seat_ids'],
+            'request_type' => 'public',
+            'reason_code' => 'runtime_validation_error',
+            'http_status' => 400,
+            'message' => $validationError->getMessage(),
+        ]);
+        Response::error($validationError->getMessage(), 400, ['reason_code' => 'runtime_validation_error']);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
             error_log('[seat-requests] error: ' . $e->getMessage());
         }
+        $logContext = resolve_reservation_log_context($payload ?? []);
+        log_reservation_rejection([
+            'event_id' => $logContext['event_id'],
+            'layout_id' => $logContext['layout_id'],
+            'layout_version_id' => $logContext['layout_version_id'],
+            'seat_ids' => $logContext['seat_ids'],
+            'request_type' => 'public',
+            'reason_code' => 'server_error',
+            'http_status' => 500,
+            'message' => $e->getMessage(),
+        ]);
         $extra = APP_DEBUG ? [
             'detail' => $e->getMessage(),
             'where' => $e->getFile() . ':' . $e->getLine(),
-        ] : [];
+            'reason_code' => 'server_error',
+        ] : ['reason_code' => 'server_error'];
         Response::error('Failed to submit seat request', 500, $extra);
     }
 });
