@@ -223,7 +223,7 @@ export default function Hero({ variant = 'main', ctaTarget }) {
               <ResponsiveImage
                 image={image}
                 alt=""
-                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 100vw, 1920px"
+                sizes="100vw"
                 className="w-full h-full object-cover"
                 pictureClassName="block w-full h-full"
                 priority={shouldPrioritizeImage(variant, index)}
