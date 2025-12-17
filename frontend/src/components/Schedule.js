@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, DollarSign, Users, Share2, CalendarPlus, DoorOpen, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import EventSeatingModal from './EventSeatingModal';
 import ResponsiveImage from './ResponsiveImage';
+import BrandImage from './BrandImage';
 import { API_BASE } from '../apiConfig';
 import { formatEventDateTimeLabel, formatDoorsLabel, formatEventPriceDisplay, eventHasSeating, getEventStartDate, isRecurringEvent } from '../utils/eventFormat';
 import { getCategoryBadge } from '../utils/categoryLabels';
@@ -189,15 +190,23 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                         Do NOT add width/height or aspect logic back to the image itself.
                     */}
                     <div className="w-24 sm:w-28 md:w-32 lg:w-36 aspect-square rounded-lg overflow-hidden bg-gray-800 flex-shrink-0 relative">
-                      <ResponsiveImage
-                        image={event.image_variants}
-                        alt={event.artist_name || 'Event'}
-                        className="w-full h-full object-cover object-center"
-                        pictureClassName="block"
-                        disableAspectRatio
-                        fill
-                        sizes="(max-width: 640px) 96px, (max-width: 768px) 112px, (max-width: 1024px) 128px, 144px"
-                      />
+                      {event.image_variants ? (
+                        <ResponsiveImage
+                          image={event.image_variants}
+                          alt={event.artist_name || 'Event'}
+                          className="w-full h-full object-cover object-center"
+                          pictureClassName="block"
+                          disableAspectRatio
+                          fill
+                          sizes="(max-width: 640px) 96px, (max-width: 768px) 112px, (max-width: 1024px) 128px, 144px"
+                        />
+                      ) : (
+                        <BrandImage
+                          variant="defaultEvent"
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover object-center"
+                        />
+                      )}
                     </div>
                     <div className="flex-1 space-y-2">
                       <div className="flex items-center justify-between gap-2">

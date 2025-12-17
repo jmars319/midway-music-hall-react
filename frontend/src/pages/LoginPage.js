@@ -1,17 +1,13 @@
 import React, { useState } from 'react';
 // LoginPage: admin login form; lightweight demo auth + DB lookup
 import { API_BASE } from '../apiConfig';
-import ResponsiveImage from '../components/ResponsiveImage';
-import useSiteContent from '../hooks/useSiteContent';
-import { getBrandImages } from '../utils/brandAssets';
+import BrandImage from '../components/BrandImage';
 
 export default function LoginPage({ onLogin, onBack }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const siteContent = useSiteContent();
-  const { logoVariant } = getBrandImages(siteContent);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -43,14 +39,12 @@ export default function LoginPage({ onLogin, onBack }) {
     <div className="min-h-screen flex items-center justify-center bg-gray-900 py-12">
       <div className="max-w-md w-full bg-gray-800 rounded-xl p-6 border border-purple-500/20">
         <div className="flex justify-center mb-4">
-          <ResponsiveImage
-            image={logoVariant}
+          <BrandImage
+            variant="logo"
             alt="Midway Music Hall"
-            width={160}
-            height={64}
-            priority
             className="h-16 w-auto object-contain"
-            sizes="160px"
+            width={160}
+            height={80}
           />
         </div>
         <h2 className="text-2xl font-bold text-white mb-2">Admin Login</h2>

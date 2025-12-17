@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, CalendarPlus, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
 import Navigation from '../components/Navigation';
+import BrandImage from '../components/BrandImage';
 import Footer from '../components/Footer';
 import ResponsiveImage from '../components/ResponsiveImage';
 import { API_BASE } from '../apiConfig';
@@ -124,16 +125,25 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
                         className="bg-gray-800 rounded-xl border border-purple-500/20 p-4 flex flex-col md:flex-row gap-4"
                       >
                         <div className="w-full md:w-60 flex-shrink-0">
-                          <ResponsiveImage
-                            image={event.image_variants}
-                            alt={event.artist_name || event.title || 'Event poster'}
-                            width={event.image_intrinsic_width}
-                            height={event.image_intrinsic_height}
-                            className="w-full h-full object-cover rounded-lg border border-gray-700"
-                            pictureClassName="block w-full aspect-[16/9]"
-                            fallbackAspectRatio="16 / 9"
-                            sizes="(max-width: 768px) 100vw, 240px"
-                          />
+                          {event.image_variants ? (
+                            <ResponsiveImage
+                              image={event.image_variants}
+                              alt={event.artist_name || event.title || 'Event poster'}
+                              width={event.image_intrinsic_width}
+                              height={event.image_intrinsic_height}
+                              className="w-full h-full object-cover rounded-lg border border-gray-700"
+                              pictureClassName="block w-full aspect-[16/9]"
+                              fallbackAspectRatio="16 / 9"
+                              sizes="(max-width: 768px) 100vw, 240px"
+                            />
+                          ) : (
+                            <BrandImage
+                              variant="defaultEvent"
+                              alt=""
+                              className="w-full h-full object-cover rounded-lg border border-gray-700"
+                              pictureClassName="block w-full aspect-[16/9]"
+                            />
+                          )}
                         </div>
                         <div className="flex-1 flex flex-col gap-2">
                           <div className="flex flex-wrap items-center gap-2">

@@ -3,6 +3,7 @@ import { Sparkles } from 'lucide-react';
 import { formatEventDateTimeLabel, formatDoorsLabel } from '../utils/eventFormat';
 import { getCategoryBadge } from '../utils/categoryLabels';
 import ResponsiveImage from './ResponsiveImage';
+import BrandImage from './BrandImage';
 
 // Highlights the next few headline events at the top of the public site.
 export default function FeaturedEvents({ events = [], loading = false }) {
@@ -40,16 +41,27 @@ export default function FeaturedEvents({ events = [], loading = false }) {
               className="bg-gray-900 rounded-2xl border border-purple-500/30 shadow-xl overflow-hidden flex flex-col"
             >
               <div className="bg-gray-800 overflow-hidden">
-                <ResponsiveImage
-                  image={event.image_variants}
-                  alt={event.artist_name || event.title || 'Featured event'}
-                  width={event.image_intrinsic_width}
-                  height={event.image_intrinsic_height}
-                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                  className="w-full h-full object-cover"
-                  pictureClassName="block w-full h-full"
-                  fallbackAspectRatio="4 / 3"
-                />
+                {event.image_variants ? (
+                  <ResponsiveImage
+                    image={event.image_variants}
+                    alt={event.artist_name || event.title || 'Featured event'}
+                    width={event.image_intrinsic_width}
+                    height={event.image_intrinsic_height}
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                    className="w-full h-full object-cover"
+                    pictureClassName="block w-full h-full"
+                    fallbackAspectRatio="4 / 3"
+                  />
+                ) : (
+                  <BrandImage
+                    variant="defaultEvent"
+                    alt=""
+                    className="w-full h-full object-cover"
+                    pictureClassName="block w-full h-full"
+                    width={400}
+                    height={300}
+                  />
+                )}
               </div>
               <div className="p-6 flex-1 flex flex-col">
                 <p className="text-sm text-purple-300 uppercase tracking-wide mb-2">

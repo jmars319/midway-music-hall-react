@@ -14,9 +14,7 @@ import {
   AdminUsersModule,
 } from './index';
 import { API_BASE } from '../apiConfig';
-import ResponsiveImage from '../components/ResponsiveImage';
-import useSiteContent from '../hooks/useSiteContent';
-import { getBrandImages } from '../utils/brandAssets';
+import BrandImage from '../components/BrandImage';
 
 const MENU = [
   { key: 'dashboard', label: 'Dashboard', comp: DashboardModule },
@@ -35,8 +33,6 @@ const MENU = [
 export default function AdminPanel({ user = null, onLogout = () => {}, onBackToSite = () => {} }){
   const [active, setActive] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
-  const siteContent = useSiteContent();
-  const { logoVariant, markVariant } = getBrandImages(siteContent);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
@@ -112,14 +108,10 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
                       aria-label="Go to dashboard"
                       className="flex items-center space-x-2 bg-transparent border-0 p-0"
                     >
-                      <ResponsiveImage
-                        image={logoVariant}
+                      <BrandImage
+                        variant="logo"
                         alt="Midway Music Hall"
-                        width={collapsed ? 64 : 96}
-                        height={collapsed ? 64 : 96}
-                        priority
                         className={`${collapsed ? 'h-8' : 'h-10'} w-auto transition-all duration-200 object-contain`}
-                        sizes={collapsed ? '64px' : '96px'}
                       />
                       {!collapsed && <div className="text-lg font-semibold">Midway Admin</div>}
                     </button>
@@ -172,14 +164,12 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
               </div>
 
               <div className="flex items-center gap-3">
-                <ResponsiveImage
-                  image={markVariant}
+                <BrandImage
+                  variant="defaultEvent"
                   alt="Midway Music Hall"
                   width={48}
                   height={48}
-                  priority
                   className="w-9 h-9 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 object-cover"
-                  sizes="48px"
                 />
                 {!collapsed && (
                   <div className="flex-1">

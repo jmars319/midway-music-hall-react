@@ -1,15 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Menu, X } from 'lucide-react';
-import ResponsiveImage from './ResponsiveImage';
-import useSiteContent from '../hooks/useSiteContent';
-import { getBrandImages } from '../utils/brandAssets';
+import BrandImage from './BrandImage';
 
 // Navigation: top site navigation with smooth scrolling links
 export default function Navigation() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [currentPath, setCurrentPath] = useState('/');
-  const siteContent = useSiteContent();
-  const { logoVariant } = getBrandImages(siteContent);
   const SECTION_MAP = {
     home: 'home',
     schedule: 'schedule',
@@ -93,16 +89,12 @@ export default function Navigation() {
                 aria-label="Go to homepage"
                 className="flex items-center text-white"
               >
-                <ResponsiveImage
-                  image={logoVariant}
+                <BrandImage
+                  variant="logo"
                   alt=""
                   aria-hidden="true"
                   role="presentation"
-                  width={160}
-                  height={80}
-                  priority
                   className="h-20 w-auto mr-3 object-contain"
-                  sizes="(max-width: 640px) 140px, 180px"
                 />
                 <span className="font-bold text-xl">Midway Music Hall</span>
               </a>
