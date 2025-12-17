@@ -182,16 +182,13 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                     </div>
                   )}
                   <div className="flex items-start gap-4">
-                    <div className="w-[140px] sm:w-[180px] h-20 rounded-lg overflow-hidden bg-gray-800 flex-shrink-0">
+                    <div className="w-24 sm:w-28 md:w-32 lg:w-36 aspect-square rounded-lg overflow-hidden bg-gray-800 flex-shrink-0">
                       <ResponsiveImage
                         image={event.image_variants}
                         alt={event.artist_name || 'Event'}
-                        width={event.image_intrinsic_width}
-                        height={event.image_intrinsic_height}
-                        sizes="(max-width: 640px) 140px, 180px"
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover object-center"
                         pictureClassName="block w-full h-full"
-                        fallbackAspectRatio="9 / 4"
+                        disableAspectRatio
                       />
                     </div>
                     <div className="flex-1 space-y-2">

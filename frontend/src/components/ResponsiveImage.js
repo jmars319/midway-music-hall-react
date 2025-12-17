@@ -19,6 +19,9 @@ export default function ResponsiveImage({
   fallback = null,
   sizes: sizesProp = null,
   fallbackAspectRatio = null,
+  forceAspectRatio = null,
+  disableAspectRatio = false,
+  fill = false,
   ...rest
 }) {
   const siteContent = useSiteContent();
@@ -51,11 +54,17 @@ export default function ResponsiveImage({
     return value;
   };
 
-  const activeAspectRatio = normalizeAspectRatio(
-    variant.aspectRatio
-      || (resolvedWidth && resolvedHeight ? resolvedWidth / resolvedHeight : null)
-      || fallbackAspectRatio,
-  );
+  const normalizedFallbackAspectRatio = normalizeAspectRatio(fallbackAspectRatio);
+  const normalizedForceAspectRatio = normalizeAspectRatio(forceAspectRatio);
+
+  const activeAspectRatio = disableAspectRatio
+    ? null
+    : normalizeAspectRatio(
+        normalizedForceAspectRatio
+        || variant.aspectRatio
+        || (resolvedWidth && resolvedHeight ? resolvedWidth / resolvedHeight : null)
+        || normalizedFallbackAspectRatio,
+      );
 
   const [currentSrc, setCurrentSrc] = useState(variant.src || variant.fallback || defaultFallback);
   useEffect(() => {
@@ -77,15 +86,23 @@ export default function ResponsiveImage({
     setCurrentSrc(fallbackSrc);
   };
 
+  const basePictureClass = fill ? 'absolute inset-0 w-full h-full' : '';
+  const mergedPictureClass = [basePictureClass, pictureClassName].filter(Boolean).join(' ');
   const pictureProps = {
-    className: pictureClassName,
-    style: pictureStyle,
+    className: mergedPictureClass || undefined,
+    style: fill ? undefined : pictureStyle,
   };
 
   const appliedSizes = sizesProp || (resolvedWidth ? `${Math.round(resolvedWidth)}px` : '100vw');
 
+  const baseImgClass = fill ? 'absolute inset-0 w-full h-full object-cover object-center' : '';
+  const mergedImgClass = [baseImgClass, className].filter(Boolean).join(' ') || undefined;
+
+  const pictureWrapperClass = fill ? 'relative w-full h-full' : '';
+
   return (
-    <picture {...pictureProps}>
+    <div className={fill ? pictureWrapperClass : undefined}>
+      <picture {...pictureProps}>
       {variant.sources.map((source, index) => (
         <source
           key={`${source.type || 'default'}-${index}`}
@@ -102,11 +119,12 @@ export default function ResponsiveImage({
         loading={loading}
         decoding="async"
         sizes={appliedSizes}
-        className={className}
+        className={mergedImgClass}
         onError={handleError}
         {...(fetchPriority ? { fetchpriority: fetchPriority } : {})}
         {...rest}
       />
-    </picture>
+      </picture>
+    </div>
   );
 }

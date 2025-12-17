@@ -422,6 +422,7 @@ export default function SettingsModule(){
                     height={128}
                     className="w-32 h-auto border border-gray-600 rounded object-contain"
                     priority
+                    disableAspectRatio
                   />
                 )}
                 <p className="text-xs text-gray-400 mt-1">Upload logos in Media Manager</p>
@@ -447,6 +448,7 @@ export default function SettingsModule(){
                     width={256}
                     height={160}
                     className="w-32 h-auto border border-gray-600 rounded object-cover"
+                    disableAspectRatio
                   />
                 )}
                 <p className="text-xs text-gray-400 mt-1">Used when events have no image</p>
@@ -472,6 +474,7 @@ export default function SettingsModule(){
                     width={128}
                     height={128}
                     className="w-24 h-24 border border-gray-600 rounded object-cover"
+                    disableAspectRatio
                   />
                 )}
                 <p className="text-xs text-gray-400 mt-1">Used for avatars and compact brand marks.</p>
