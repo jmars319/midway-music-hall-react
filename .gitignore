@@ -22,6 +22,7 @@ build/
 backend_pid.txt
 frontend_dev.log
 /tmp/
+backend/uploads/
 # Logs
 logs/
 *.log
