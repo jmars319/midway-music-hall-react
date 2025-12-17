@@ -30,9 +30,9 @@ export const SERVER_BASE = resolvedServer || (typeof window !== 'undefined' && w
   : '');
 
 const BRAND_FALLBACKS = {
-  logo: '/logo.png',
-  mark: '/apple-touch-icon.png',
-  defaultEvent: '/android-chrome-192x192.png',
+  logo: '/iconslogos/mmh-logo@1x.png',
+  mark: '/iconslogos/mmh-logo@1x.png',
+  defaultEvent: '/iconslogos/mmh-default-event@1x.png',
 };
 
 const isAbsoluteUrl = (value = '') => /^https?:\/\//i.test(value) || value.startsWith('//') || value.startsWith('data:');
@@ -44,53 +44,12 @@ export const prefixUploadsUrl = (value) => {
   return value;
 };
 
-const selectBrandingVariant = (entry) => entry?.webp || entry?.optimized || entry?.original || entry?.file_url || null;
+export const primeBrandingCache = () => {};
+export const invalidateBrandingCache = () => {};
 
-let brandingCache = null;
-let brandingFetchPromise = null;
+const resolveDefaultEventImage = async () => BRAND_FALLBACKS.defaultEvent;
 
-export const primeBrandingCache = (branding) => {
-  brandingCache = branding || null;
-};
-
-const fetchBrandingData = async () => {
-  if (brandingCache) {
-    return brandingCache;
-  }
-  if (!brandingFetchPromise) {
-    brandingFetchPromise = fetch(`${API_BASE}/site-content`)
-      .then((res) => res.json())
-      .then((data) => data?.content?.branding || null)
-      .catch(() => null)
-      .then((branding) => {
-        brandingCache = branding;
-        return brandingCache;
-      })
-      .finally(() => {
-        brandingFetchPromise = null;
-      });
-  }
-  return brandingFetchPromise;
-};
-
-export const invalidateBrandingCache = () => {
-  brandingCache = null;
-  brandingFetchPromise = null;
-};
-
-const resolveDefaultEventImage = async () => {
-  const branding = await fetchBrandingData();
-  const preferred = selectBrandingVariant(branding?.default_event);
-  return prefixUploadsUrl(preferred) || BRAND_FALLBACKS.defaultEvent;
-};
-
-const resolveDefaultEventImageSync = () => {
-  if (!brandingCache) {
-    return BRAND_FALLBACKS.defaultEvent;
-  }
-  const preferred = selectBrandingVariant(brandingCache?.default_event);
-  return prefixUploadsUrl(preferred) || BRAND_FALLBACKS.defaultEvent;
-};
+const resolveDefaultEventImageSync = () => BRAND_FALLBACKS.defaultEvent;
 
 export const getImageUrl = async (imageUrl) => {
   if (!imageUrl) {

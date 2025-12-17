@@ -7,7 +7,6 @@ import { invalidateSiteContentCache } from '../hooks/useSiteContent';
 
 export default function SettingsModule(){
   const [settings, setSettings] = useState({});
-  const [media, setMedia] = useState([]);
   const [heroMedia, setHeroMedia] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -16,16 +15,6 @@ export default function SettingsModule(){
   const [selectedTgpHeroImages, setSelectedTgpHeroImages] = useState([]);
 
   const fetchMedia = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/media?category=logo`);
-      const data = await res.json();
-      if (data && data.success) {
-        setMedia(data.media || []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch media', err);
-    }
-
     try {
       const res = await fetch(`${API_BASE}/media?category=hero`);
       const data = await res.json();
@@ -400,86 +389,10 @@ export default function SettingsModule(){
 
           <div className="mt-6 pt-6 border-t border-gray-700">
             <h3 className="text-lg font-bold mb-4">Site Images</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-3">
-                <label className="block text-sm text-gray-300 mb-2">Navigation Logo</label>
-                <select
-                  name="site_logo" 
-                  value={settings.site_logo || ''} 
-                  onChange={handleChange} 
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                >
-                  <option value="">Select Logo...</option>
-                  {media.map(m => (
-                    <option key={m.id} value={m.file_url}>{m.original_name}</option>
-                  ))}
-                </select>
-                {settings.site_logo && (
-                  <ResponsiveImage 
-                    src={`${SERVER_BASE}${settings.site_logo}`} 
-                    alt="Current logo" 
-                    width={256}
-                    height={128}
-                    className="w-32 h-auto border border-gray-600 rounded object-contain"
-                    priority
-                    disableAspectRatio
-                  />
-                )}
-                <p className="text-xs text-gray-400 mt-1">Upload logos in Media Manager</p>
-              </div>
-
-              <div className="space-y-3">
-                <label className="block text-sm text-gray-300 mb-2">Default Event Image</label>
-                <select
-                  name="default_event_image" 
-                  value={settings.default_event_image || ''} 
-                  onChange={handleChange} 
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                >
-                  <option value="">Select Image...</option>
-                  {media.map(m => (
-                    <option key={m.id} value={m.file_url}>{m.original_name}</option>
-                  ))}
-                </select>
-                {settings.default_event_image && (
-                  <ResponsiveImage 
-                    src={`${SERVER_BASE}${settings.default_event_image}`} 
-                    alt="Default event" 
-                    width={256}
-                    height={160}
-                    className="w-32 h-auto border border-gray-600 rounded object-cover"
-                    disableAspectRatio
-                  />
-                )}
-                <p className="text-xs text-gray-400 mt-1">Used when events have no image</p>
-              </div>
-
-              <div className="space-y-3">
-                <label className="block text-sm text-gray-300 mb-2">Square Icon / Avatar</label>
-                <select
-                  name="site_brand_mark"
-                  value={settings.site_brand_mark || ''}
-                  onChange={handleChange}
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                >
-                  <option value="">Use navigation logo</option>
-                  {media.map((m) => (
-                    <option key={m.id} value={m.file_url}>{m.original_name}</option>
-                  ))}
-                </select>
-                {settings.site_brand_mark && (
-                  <ResponsiveImage
-                    src={`${SERVER_BASE}${settings.site_brand_mark}`}
-                    alt="Brand icon"
-                    width={128}
-                    height={128}
-                    className="w-24 h-24 border border-gray-600 rounded object-cover"
-                    disableAspectRatio
-                  />
-                )}
-                <p className="text-xs text-gray-400 mt-1">Used for avatars and compact brand marks.</p>
-              </div>
-            </div>
+            <p className="text-sm text-gray-400">
+              Brand logos and default icons are now hardcoded for performance consistency. Hero and gallery
+              uploads continue to use the Media Manager above.
+            </p>
           </div>
 
           <div className="mt-6 flex justify-end">

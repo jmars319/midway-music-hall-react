@@ -3,8 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Upload, Trash2, Image as ImageIcon, X } from 'lucide-react';
 import { API_BASE, SERVER_BASE } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
-import useSiteContent from '../hooks/useSiteContent';
-import { getBrandImages } from '../utils/brandAssets';
+import { DEFAULT_EVENT_ICON_SRC } from '../components/BrandImage';
 
 const categories = [
   { value: 'all', label: 'All Files', color: 'bg-gray-500' },
@@ -49,8 +48,7 @@ export default function MediaManager() {
   const [uploadCategory, setUploadCategory] = useState('other');
   const [editingMedia, setEditingMedia] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
-  const siteContent = useSiteContent();
-  const { defaultEventUrl: fallbackThumb } = getBrandImages(siteContent);
+  const fallbackThumb = DEFAULT_EVENT_ICON_SRC;
 
   const fetchMedia = async () => {
     setLoading(true);

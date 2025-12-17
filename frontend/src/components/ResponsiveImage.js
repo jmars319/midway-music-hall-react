@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import useSiteContent from '../hooks/useSiteContent';
-import { getBrandImages } from '../utils/brandAssets';
 import { buildImageVariant } from '../utils/imageVariants';
+
+const DEFAULT_EVENT_FALLBACK = '/iconslogos/mmh-default-event@1x.png';
 
 /**
  * Shared image component that renders a responsive <picture> block with
@@ -24,9 +24,7 @@ export default function ResponsiveImage({
   fill = false,
   ...rest
 }) {
-  const siteContent = useSiteContent();
-  const brandImages = useMemo(() => getBrandImages(siteContent), [siteContent]);
-  const defaultFallback = fallback || brandImages.defaultEventVariant?.fallback || brandImages.defaultEventUrl;
+  const defaultFallback = fallback || DEFAULT_EVENT_FALLBACK;
 
   const variant = useMemo(() => {
     if (image) {

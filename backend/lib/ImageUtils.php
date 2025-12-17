@@ -188,11 +188,12 @@ function process_image_variants(string $sourcePath, string $originalFilename, st
     ];
 }
 
-function determine_responsive_targets(int $intrinsicWidth, ?int $intrinsicHeight = null): array
+function determine_responsive_targets(int $intrinsicWidth, ?int $intrinsicHeight = null, ?string $categoryHint = null): array
 {
     if ($intrinsicWidth <= 0) {
         return [];
     }
+
     $profiles = defined('RESPONSIVE_IMAGE_WIDTH_PROFILES') && is_array(RESPONSIVE_IMAGE_WIDTH_PROFILES)
         ? RESPONSIVE_IMAGE_WIDTH_PROFILES
         : [
@@ -201,29 +202,79 @@ function determine_responsive_targets(int $intrinsicWidth, ?int $intrinsicHeight
             'hero' => [640, 768, 1024, 1280, 1440, 1920],
             'gallery' => [320, 480, 640, 768, 1024, 1440, 1920],
         ];
-    $longEdge = max($intrinsicWidth, $intrinsicHeight ?? 0);
-    if ($longEdge <= 256) {
-        $profileKey = 'icon';
-    } elseif ($intrinsicWidth <= 800) {
-        $profileKey = 'thumb';
-    } elseif ($intrinsicWidth >= 1200) {
-        $profileKey = 'hero';
-    } else {
-        $profileKey = 'gallery';
+
+    // Build a safe union of all configured widths (avoids reliance on array spread/variadics).
+    $allCandidates = [];
+    foreach ($profiles as $profile) {
+        if (!is_array($profile)) {
+            continue;
+        }
+        foreach ($profile as $w) {
+            $w = (int) $w;
+            if ($w > 0) {
+                $allCandidates[] = $w;
+            }
+        }
     }
-    $candidates = $profiles[$profileKey] ?? array_merge(...array_values($profiles));
-    $targets = [];
+    $allCandidates = array_values(array_unique($allCandidates));
+    sort($allCandidates, SORT_NUMERIC);
+
+    $longEdge = max($intrinsicWidth, $intrinsicHeight ?? 0);
+
+    $hint = strtolower(trim((string) ($categoryHint ?? '')));
+
+    // Logos/marks often upload as square-ish 512px sources but render very small (e.g. 80px tall in nav).
+    // In those cases we want small-width variants available, not only the largest thumb.
+    $isSquareish = false;
+    if ($intrinsicHeight !== null && $intrinsicHeight > 0) {
+        $diff = abs($intrinsicWidth - $intrinsicHeight);
+        $isSquareish = $diff <= max(10, (int) round($longEdge * 0.05));
+    }
+
+    if (in_array($hint, ['logo', 'icon', 'mark'], true) || ($isSquareish && $longEdge <= 800)) {
+        // Union icon + thumb for brand assets.
+        $candidates = array_merge(
+            is_array($profiles['icon'] ?? null) ? $profiles['icon'] : [],
+            is_array($profiles['thumb'] ?? null) ? $profiles['thumb'] : []
+        );
+    } else {
+        if ($longEdge <= 256) {
+            $profileKey = 'icon';
+        } elseif ($intrinsicWidth <= 800) {
+            $profileKey = 'thumb';
+        } elseif ($intrinsicWidth >= 1200) {
+            $profileKey = 'hero';
+        } else {
+            $profileKey = 'gallery';
+        }
+        $candidates = $profiles[$profileKey] ?? $allCandidates;
+    }
+
+    // Normalize candidate list.
+    $normalizedCandidates = [];
     foreach ((array) $candidates as $candidate) {
         $candidate = (int) $candidate;
-        if ($candidate > 0 && $candidate <= $intrinsicWidth) {
+        if ($candidate > 0) {
+            $normalizedCandidates[] = $candidate;
+        }
+    }
+    $normalizedCandidates = array_values(array_unique($normalizedCandidates));
+    sort($normalizedCandidates, SORT_NUMERIC);
+
+    $targets = [];
+    foreach ($normalizedCandidates as $candidate) {
+        if ($candidate <= $intrinsicWidth) {
             $targets[] = $candidate;
         }
     }
+
     $targets = array_values(array_unique($targets));
     sort($targets, SORT_NUMERIC);
+
     if (!$targets) {
         $targets[] = $intrinsicWidth;
     }
+
     return $targets;
 }
 

@@ -153,6 +153,10 @@ const prefixSrcSet = (value) => {
   if (!entries.length) {
     return null;
   }
+  const hasDescriptor = entries.some(({ descriptor }) => descriptor && descriptor.trim() !== '');
+  if (!hasDescriptor && entries.length === 1) {
+    return null;
+  }
   const normalized = entries
     .map(({ url, descriptor }) => {
       const prefixed = prefixAssetUrl(url);

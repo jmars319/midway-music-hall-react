@@ -1866,11 +1866,6 @@ function list_events(Request $request, ?string $scopeOverride = null): array
                 }
             }
         }
-        $defaultEventVariant = null;
-        if ($scope === 'public') {
-            $settings = fetch_business_settings();
-            $defaultEventVariant = build_single_image_variant($settings['default_event_image'] ?? null);
-        }
         foreach ($rows as &$row) {
             $imageUrl = trim((string) ($row['image_url'] ?? ''));
             $variant = null;
@@ -1878,10 +1873,6 @@ function list_events(Request $request, ?string $scopeOverride = null): array
             if ($imageUrl !== '' && isset($imageLookup[$imageUrl])) {
                 $variant = $imageLookup[$imageUrl];
                 $variantSource = 'event_image';
-            }
-            if (!$variant && $defaultEventVariant) {
-                $variant = $defaultEventVariant;
-                $variantSource = 'branding_default';
             }
             if ($variant) {
                 $row['image_variants'] = $variant;
@@ -4197,11 +4188,31 @@ $router->add('GET', '/api/site-content', function () {
             'google_review_url' => $settings['google_review_url'] ?? '',
         ];
         $branding = [
-            'logo' => build_single_image_variant($settings['site_logo'] ?? null),
-            'mark' => build_single_image_variant(
-                $settings['site_brand_mark'] ?? $settings['site_logo'] ?? $settings['default_event_image'] ?? null
-            ),
-            'default_event' => build_single_image_variant($settings['default_event_image'] ?? null),
+            'logo' => [
+                'png' => [
+                    '1x' => '/iconslogos/mmh-logo@1x.png',
+                    '2x' => '/iconslogos/mmh-logo@2x.png',
+                    '3x' => '/iconslogos/mmh-logo@3x.png',
+                ],
+                'webp' => [
+                    '1x' => '/iconslogos/mmh-logo@1x.webp',
+                    '2x' => '/iconslogos/mmh-logo@2x.webp',
+                    '3x' => '/iconslogos/mmh-logo@3x.webp',
+                ],
+            ],
+            'mark' => null,
+            'default_event' => [
+                'png' => [
+                    '1x' => '/iconslogos/mmh-default-event@1x.png',
+                    '2x' => '/iconslogos/mmh-default-event@2x.png',
+                    '3x' => '/iconslogos/mmh-default-event@3x.png',
+                ],
+                'webp' => [
+                    '1x' => '/iconslogos/mmh-default-event@1x.webp',
+                    '2x' => '/iconslogos/mmh-default-event@2x.webp',
+                    '3x' => '/iconslogos/mmh-default-event@3x.webp',
+                ],
+            ],
         ];
         $beachPriceLabel = trim((string)($settings['beach_price_label'] ?? ''));
         $beachPriceNote = trim((string)($settings['beach_price_note'] ?? ''));
