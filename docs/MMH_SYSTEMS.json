@@ -1,0 +1,142 @@
+{
+  "executiveSummary": [
+    "MMH is a React SPA plus PHP API hosted in one repo (`frontend/src/SinglePageLanding.js`, `backend/index.php`).",
+    "Public seating requests originate from `EventSeatingModal.js` and hit `/api/seating/event/:id` plus `/api/seat-requests` (backend/index.php:3263-3739).",
+    "Admins manage stats, events, seat requests, and media through modules like `DashboardModule.js`, `SeatRequestsModule.js`, and `MediaManager.js` backed by `/api/dashboard-stats`, `/api/seat-requests`, and `/api/media`.",
+    "Image uploads are processed into responsive variants by `/api/media` and `backend/lib/ImageUtils.php`, then rendered via `ResponsiveImage.js` and `imageVariants.js`.",
+    "Brand assets are hardcoded through `BrandImage.js` and `apiConfig.js`, while `useSiteContent.js` caches CMS copy with guaranteed defaults.",
+    "Seat locking, layout snapshots, and audit logging are implemented in helpers such as `detect_seat_conflicts`, `apply_seat_reservations`, and `record_audit` (backend/index.php:1462-1833).",
+    "Caching/security rely on `.htaccess` rewrite and header rules plus CRA build flags like `GENERATE_SOURCEMAP=false` (frontend/.env).",
+    "Uploads are sandboxed by `backend/uploads/.htaccess`, and deploy zips exclude `.env`/uploads per `scripts/make-deploy-zips.sh` and `scripts/check-deploy-zips.sh`.",
+    "Robots, sitemap, and static HTML fallbacks are maintained in `frontend/public/robots.txt`, `sitemap.xml`, and `index.html`.",
+    "Deployment follows the cPanel layout documented in `DEPLOYMENT_GUIDE.md` with `deploy-backend.zip` and `deploy-frontend.zip` artifacts."
+  ],
+  "systems": [
+    {
+      "name": "Seating & Reservation Engine",
+      "purpose": "Interactive seating layouts, holds, approvals, and routing.",
+      "users": "both",
+      "frontend": ["frontend/src/components/EventSeatingModal.js", "frontend/src/components/SeatingChart.js", "frontend/src/admin/SeatRequestsModule.js", "frontend/src/hooks/useSeatDebug.js"],
+      "backend": ["/api/seating/event/:eventId", "/api/seat-requests*", "backend/index.php:1500-3928"],
+      "data": ["seating_layouts", "seating_layout_versions", "seat_requests"],
+      "risks": ["seat conflicts", "stale holds", "invalid contact data"],
+      "monitoring": ["useSeatDebugLogger", "admin status filters", "record_audit entries"]
+    },
+    {
+      "name": "Responsive Image & Media Pipeline",
+      "purpose": "Generate optimized/WebP variants for all imagery.",
+      "users": "both",
+      "frontend": ["frontend/src/components/ResponsiveImage.js", "frontend/src/utils/imageVariants.js", "frontend/src/admin/MediaManager.js", "frontend/src/components/FeaturedEvents.js", "frontend/src/components/Hero.js"],
+      "backend": ["/api/media routes backend/index.php:4155-4281", "backend/lib/ImageUtils.php"],
+      "data": ["backend/uploads/variants", "media table", "manifests"],
+      "risks": ["legacy /uploads references", "failed variant generation"],
+      "monitoring": ["MediaManager progress UI", "backend/scripts/check_image_variants.php"]
+    },
+    {
+      "name": "Brand & Site Content Layer",
+      "purpose": "Serve deterministic logos/default icons and cached business content.",
+      "users": "both",
+      "frontend": ["frontend/src/components/BrandImage.js", "frontend/src/apiConfig.js", "frontend/src/hooks/useSiteContent.js"],
+      "backend": ["/api/site-content (backend/index.php:4303-4429)"] ,
+      "data": ["business_settings table", "frontend/public/iconslogos"],
+      "risks": ["CMS-asset mismatch", "stale cached copy"],
+      "monitoring": ["localStorage cache + primeBrandingCache", "static index.html fallback"]
+    },
+    {
+      "name": "Admin Console & Audit Logging",
+      "purpose": "Provides staff dashboards, CRUD tools, and activity visibility.",
+      "users": "admin",
+      "frontend": ["frontend/src/admin/AdminPanel.js", "frontend/src/admin/DashboardModule.js", "frontend/src/admin/SeatRequestsModule.js", "frontend/src/admin/EventsModule.js"],
+      "backend": ["/api/dashboard-stats", "/api/audit-log", "/api/events", "/api/seat-requests"],
+      "data": ["audit_log", "events", "seat_requests"],
+      "risks": ["session drift", "lack of traceability"],
+      "monitoring": ["dashboard refresh actions", "audit log feed"]
+    },
+    {
+      "name": "Deployment & Routing Stack",
+      "purpose": "Package artifacts and enforce Apache/Cloudflare routing + caching.",
+      "users": "operators",
+      "frontend": [],
+      "backend": [".htaccess", "backend/.htaccess", "scripts/make-deploy-zips.sh", "scripts/check-deploy-zips.sh"],
+      "data": ["deploy-frontend.zip", "deploy-backend.zip", ".env", "uploads"],
+      "risks": ["missing rewrites", "packaging secrets", "stale caches"],
+      "monitoring": ["zip validation script", "DEPLOYMENT_GUIDE smoke tests"]
+    },
+    {
+      "name": "SEO + Robots & Static Fallback",
+      "purpose": "Control crawl rules and provide crawlable fallback HTML.",
+      "users": "public",
+      "frontend": ["frontend/public/robots.txt", "frontend/public/sitemap.xml", "frontend/public/index.html"],
+      "backend": ["served statically via .htaccess"],
+      "data": ["static files"],
+      "risks": ["blocking legitimate crawlers", "stale sitemap"],
+      "monitoring": ["manual verification", "no-cache headers in .htaccess"]
+    }
+  ],
+  "flows": {
+    "publicReservation": "User opens EventSeatingModal, fetches /api/seating/event/:id, selects seats filtered by seatAvailability.js, submits to /api/seat-requests which snapshots the layout (backend/index.php:1733-1833).",
+    "adminManualReservation": "SeatRequestsModule fetches admin events, staff submit manual POST /api/seat-requests with overrides, and backend locking (`detect_seat_conflicts`, `apply_seat_reservations`) enforces exclusivity.",
+    "layoutRefresh": "Layouts managed via /api/seating-layouts* (backend/index.php:3426-3517) are snapshot when requests arrive; holds expire through expire_stale_holds and the modal reloads reserved/pending seats each time.",
+    "eventMediaFlow": "EventsModule previews art with ResponsiveImage/getImageUrlSync, MediaManager uploads to /api/media, backend/lib/ImageUtils.php generates variants, and components consume `image_variants`.",
+    "brandingFlow": "Navigation/Hero use BrandImage srcsets and apiConfig fallbacks while useSiteContent fetches /api/site-content and merges with DEFAULT_CONTENT.",
+    "auditFlow": "DashboardModule calls /api/audit-log?limit=6, backend/index.php:2589-2659 returns recent record_audit entries for seat requests, events, categories, and settings."
+  },
+  "performanceReliability": {
+    "caching": ".htaccess sets immutable caching for JS/CSS/fonts and disables caching for HTML/manifest/robots; DEPLOYMENT_GUIDE §7 describes Cloudflare Full/Strict SSL.",
+    "pagespeed": "hasRenderableImageVariant filters dead /uploads URLs (frontend/src/utils/imageVariants.js), and frontend/.env sets GENERATE_SOURCEMAP=false to keep bundles lean.",
+    "concurrency": "Seat creation uses detect_seat_conflicts with FOR UPDATE locks plus apply_seat_reservations/expire_stale_holds in backend/index.php:1582-1665.",
+    "fallbacks": "BrandImage defines default logos/icons, ResponsiveImage swaps to fallback on load errors, and Hero.js drops invalid hero entries."
+  },
+  "security": {
+    "uploads": "backend/uploads/.htaccess disables indexes, blocks executable extensions, and sets cache headers.",
+    "apiPatterns": "create_seat_request_record enforces required fields and throws SeatRequestException codes; /api/media logs failures in backend/index.php:4155-4281.",
+    "headers": "Root .htaccess sets X-Frame-Options, X-Content-Type-Options, X-XSS-Protection, Referrer-Policy, and Permissions-Policy and strips X-Powered-By/Server.",
+    "omissions": "No service worker or explicit CSP is shipped; only the documented headers are applied."
+  },
+  "deployment": {
+    "artifacts": "deploy-backend.zip excludes .env and uploads, deploy-frontend.zip contains build output plus .htaccess (scripts/make-deploy-zips.sh).",
+    "verification": "scripts/check-deploy-zips.sh asserts backend zips lack .env/uploads/.DS_Store and that frontend zips include index.html, .htaccess, and static/ entries.",
+    "preserved": "DEPLOYMENT_GUIDE notes .env and api/uploads/ stay on the server; scripts explicitly skip them so staff data and secrets persist."
+  },
+  "recentCommits": [
+    {"hash": "e84eddf", "subject": "chore(scripts): make deploy scripts executable and update gitignore", "impacts": ["Deployment"]},
+    {"hash": "b5f7e2b", "subject": "fix(frontend): ignore legacy /uploads images to prevent 404s and console errors", "impacts": ["Responsive Images"]},
+    {"hash": "4ba8cd1", "subject": "feat(scripts): add deploy zip creation and verification scripts", "impacts": ["Deployment"]},
+    {"hash": "506a4e6", "subject": "chore(htaccess): harden caching and allow well-known paths", "impacts": ["Routing", "Security"]},
+    {"hash": "2567de8", "subject": "chore(git): stop tracking uploaded media", "impacts": ["Deployment", "Storage"]},
+    {"hash": "ae57b3d", "subject": "chore(git): stop ignoring env example files", "impacts": ["Config"]},
+    {"hash": "4f69737", "subject": "chore(git): ignore build output, deploy archives, and env files", "impacts": ["Repo Hygiene"]},
+    {"hash": "5624db4", "subject": ".htaccess: do not cache CRA/PWA metadata files (asset-manifest, manifest, robots, sitemap)", "impacts": ["Performance", "SEO"]},
+    {"hash": "5decd45", "subject": "frontend(seating): centralize seat-availability logic, add debug logger, and update UI", "impacts": ["Seating", "Monitoring"]},
+    {"hash": "50c4c00", "subject": "backend(seat-requests): add locking, transactions, and structured rejection logging", "impacts": ["Seating Backend"]},
+    {"hash": "a195cbb", "subject": "chore: commit local edits", "impacts": ["Misc"]},
+    {"hash": "98e4939", "subject": "refactor(branding): remove CMS image settings", "impacts": ["Branding"]},
+    {"hash": "564694e", "subject": "feat(brand): hardcode nav logo and default icon", "impacts": ["Branding"]},
+    {"hash": "72d4092", "subject": "fix(frontend): responsive Schedule thumbnail; update Hero, ResponsiveImage and image variants", "impacts": ["Responsive Images"]},
+    {"hash": "388092c", "subject": "fix(backend): small image utils and bootstrap fixes", "impacts": ["Image Pipeline", "Bootstrap"]}
+  ],
+  "operatorChecklist": [
+    "Keep backend/uploads and .env files untracked and confirm .gitignore exclusions before committing.",
+    "Run npm run lint, npm run build, and php -l backend/index.php before packaging (DEPLOYMENT_GUIDE §2).",
+    "Generate deploy zips with bash scripts/make-deploy-zips.sh.",
+    "Validate zips with bash scripts/check-deploy-zips.sh to ensure required files are present/absent.",
+    "Upload deploy-frontend.zip contents plus root .htaccess to public_html/midwaymusichall.net/.",
+    "Upload deploy-backend.zip into public_html/midwaymusichall.net/api/ without overwriting api/uploads/ or .env.",
+    "Confirm Cloudflare runs in Full/Strict SSL and purge cache after deploy (DEPLOYMENT_GUIDE §7).",
+    "Smoke test the public SPA (hero, schedule, seating modal) and admin portal per DEPLOYMENT_GUIDE §9.",
+    "Call /api/health or /api/site-content to verify API status before toggling SEND_EMAILS to true.",
+    "Log deployment details in DEPLOYMENT_STATUS.md and archive the generated zips for rollback."
+  ],
+  "nextImprovements": [
+    "Expose a cron-safe endpoint to trigger expire_stale_holds so seat reclamation doesn’t depend on user traffic.",
+    "Enhance scripts/check-deploy-zips.sh to emit checksums/signatures for deploy artifacts.",
+    "Provide an admin UI for previewing/replacing brand icons that ultimately write to frontend/public/iconslogos before rebuilds.",
+    "Add automated tests that validate robots.txt and sitemap.xml whenever routes change.",
+    "Instrument /api/seating* and seat request routes with structured logging for hold expirations and layout snapshots.",
+    "Add a helper script to call the Cloudflare cache purge API immediately after deploy.",
+    "Support optional uploading of source maps to private storage so Lighthouse warnings can be addressed without serving them publicly.",
+    "Add filtering/export controls to the admin audit log view for faster investigations.",
+    "Poll /api/media after uploads to display processing_notes and highlight failed conversions in MediaManager.",
+    "Document the debugSeats workflow in SEATING_LAYOUT_SYSTEM.md for faster on-call debugging."
+  ]
+}
