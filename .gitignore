@@ -44,3 +44,6 @@ deploy-backend.zip
 
 # Do not commit copilot instructions
 copilot-instructions/
+
+# Project init docs (local-only)
+_project-init/
