@@ -43,6 +43,8 @@ deploy-frontend.zip
 deploy-backend.zip
 # PID files and logs for local dev runner scripts
 .dev/
+# Local dev configuration
+.dev/dev-config.sh
 
 # Do not commit copilot instructions
 copilot-instructions/
