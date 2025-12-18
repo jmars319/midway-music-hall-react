@@ -37,6 +37,10 @@ frontend-deploy.zip
 frontend-build.zip
 backend-deploy-*.zip
 frontend-deploy-*.zip
+deploy-frontend-*.zip
+deploy-backend-*.zip
+deploy-frontend.zip
+deploy-backend.zip
 
 # Do not commit copilot instructions
 copilot-instructions/
