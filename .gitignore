@@ -7,15 +7,17 @@ yarn-error.log
 .env
 .env.local
 .env.*.local
+.env*
 # macOS
 .DS_Store
 # Editor
 .vscode/
 .idea/
-# Build
+# Build / frontend production output
 dist/
 build/
-*.zip
+frontend/build/
+frontend/build/static/
 # Editor temp
 *~
 # PID and temp files
@@ -27,5 +29,12 @@ backend/uploads/
 logs/
 *.log
 *.pid
+# Ignore deployment archives (explicit)
+backend-deploy.zip
+frontend-deploy.zip
+frontend-build.zip
+backend-deploy-*.zip
+frontend-deploy-*.zip
+
 # Do not commit copilot instructions
 copilot-instructions/
