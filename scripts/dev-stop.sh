@@ -2,11 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-# Stop frontend first, then backend
+# shellcheck disable=SC1090
+. "$ROOT_DIR/scripts/dev-common.sh"
+
 "$ROOT_DIR/scripts/dev-frontend-stop.sh"
 "$ROOT_DIR/scripts/dev-backend-stop.sh"
 
-# verify both stopped: PID files removed and ports closed when possible
 DEV_DIR="$ROOT_DIR/.dev"
 ok=1
 for f in "$DEV_DIR/frontend.pid" "$DEV_DIR/backend.pid"; do
@@ -14,16 +15,15 @@ for f in "$DEV_DIR/frontend.pid" "$DEV_DIR/backend.pid"; do
 		echo "ERROR: $f still exists"
 		ok=0
 	fi
+done
 
-
-# check ports if lsof available
 if command -v lsof >/dev/null 2>&1; then
-	if lsof -nP -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
-		echo "ERROR: port 3000 still listening"
+	if lsof -nP -iTCP:${DEV_FRONTEND_PORT} -sTCP:LISTEN >/dev/null 2>&1; then
+		echo "ERROR: port ${DEV_FRONTEND_PORT} still listening"
 		ok=0
 	fi
-	if lsof -nP -iTCP:8080 -sTCP:LISTEN >/dev/null 2>&1; then
-		echo "ERROR: port 8080 still listening"
+	if lsof -nP -iTCP:${DEV_BACKEND_PORT} -sTCP:LISTEN >/dev/null 2>&1; then
+		echo "ERROR: port ${DEV_BACKEND_PORT} still listening"
 		ok=0
 	fi
 fi
