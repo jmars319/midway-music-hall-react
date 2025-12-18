@@ -41,6 +41,8 @@ deploy-frontend-*.zip
 deploy-backend-*.zip
 deploy-frontend.zip
 deploy-backend.zip
+# PID files and logs for local dev runner scripts
+.dev/
 
 # Do not commit copilot instructions
 copilot-instructions/
