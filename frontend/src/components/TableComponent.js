@@ -7,6 +7,19 @@ const shapeAliases = {
   'table-8-rect': 'table-8',
 };
 
+const resolveTableSurfaceLabel = (row = {}, fallback = 'Table') => {
+  const raw =
+    row?.table_label ||
+    row?.display_label ||
+    row?.row_label ||
+    row?.row ||
+    row?.label ||
+    '';
+  if (!raw) return fallback;
+  const trimmed = String(raw).replace(/^table\s*/i, '').trim();
+  return trimmed || fallback;
+};
+
 // Helper to get seat styling based on type
 const seatTypeClass = (type) => {
   switch ((type || '').toLowerCase()) {
@@ -83,12 +96,16 @@ export default function TableComponent({
     const seatLabel = formatSeatLabel(buildSeatLabel(row, seatNum));
     const displayLabel = seatLabel.length > 4 ? seatLabel.slice(0, 4) : seatLabel;
     const classes = getSeatClasses(seatId);
+    const pointerEventsValue = interactive ? 'auto' : 'none';
     const style = { 
       left: x, 
       top: y, 
       transform: 'translate(-50%, -50%)', 
       width: seatSize, 
       height: seatSize,
+      pointerEvents: pointerEventsValue,
+      zIndex: 5,
+      touchAction: 'manipulation',
     };
     const seatStatus = getSeatStatus(seatId);
     const disabledReason = seatStatus.isReserved ? 'reserved' : (seatStatus.isPending ? 'pending' : null);
@@ -148,6 +165,7 @@ export default function TableComponent({
 
   // Render table center
   const renderTableCenter = (width, height, label = 'Table', isRound = false) => {
+    const labelText = label === 'Table' ? resolveTableSurfaceLabel(row) : label;
     return (
       <div style={{
         position: 'absolute',
@@ -163,9 +181,11 @@ export default function TableComponent({
         justifyContent: 'center',
         color: '#fff',
         fontSize: 12,
-        fontWeight: 500
+        fontWeight: 500,
+        pointerEvents: 'none',
+        zIndex: 1,
       }}>
-        {label}
+        {labelText}
       </div>
     );
   };
@@ -405,7 +425,10 @@ export default function TableComponent({
             transform: 'translate(-50%, -50%)',
             width: iconSize,
             height: iconSize,
-            cursor: interactive ? 'pointer' : 'default'
+            cursor: interactive ? 'pointer' : 'default',
+            pointerEvents: interactive ? 'auto' : 'none',
+            touchAction: 'manipulation',
+            zIndex: 5,
           };
 
           if (interactive) {

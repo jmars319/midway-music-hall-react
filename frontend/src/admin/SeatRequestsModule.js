@@ -7,6 +7,7 @@ import useFocusTrap from '../utils/useFocusTrap';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/seatLabelUtils';
 import { getSeatReasonMessage, getAdminReservationFailureMessage } from '../utils/reservationReasonMessages';
 import { filterUnavailableSeats } from '../utils/seatAvailability';
+import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
 
 const OPEN_STATUSES = ['new', 'contacted', 'waiting'];
 const FINAL_STATUSES = ['confirmed', 'declined', 'closed', 'spam'];
@@ -1017,6 +1018,9 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
   const canvasHeight = canvasSettings?.height || 800;
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
+  const seatMapRef = useRef(null);
+  const adminSeatDebug = useSeatDebugLogger('admin-seat-requests');
+  useSeatDebugProbe(seatMapRef, adminSeatDebug);
   const titleId = 'manual-reservation-title';
   useFocusTrap(dialogRef, { onClose, enabled: true, initialFocusRef: closeButtonRef });
 
@@ -1248,7 +1252,11 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="space-y-4">
-              <div className="relative h-[420px] bg-gray-100 dark:bg-gray-900 rounded-xl overflow-auto border border-purple-500/20">
+              <div
+                ref={seatMapRef}
+                className="relative h-[420px] bg-gray-100 dark:bg-gray-900 rounded-xl overflow-auto border border-purple-500/20"
+                style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
+              >
                 {(!selectedEventId || loadingLayout) && (
                   <div className="absolute inset-0 flex items-center justify-center text-gray-500">
                     {loadingLayout ? 'Loading layout…' : 'Select an event to see seats'}
@@ -1302,12 +1310,13 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                             padding: '20px',
                             minWidth: `${row.width || 120}px`,
                             minHeight: `${row.height || 120}px`,
+                            pointerEvents: 'none',
                           }}
                         >
-                          <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-xs font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap z-20">
+                          <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-xs font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap z-20 pointer-events-none">
                             {row.section_name} - {row.row_label}
                           </div>
-                          <div className="flex items-center justify-center" style={{ minHeight: '60px' }}>
+                          <div className="flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
                             <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
                               <TableComponent
                                 row={row}

@@ -7,7 +7,7 @@ import useFocusTrap from '../utils/useFocusTrap';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/seatLabelUtils';
 import { CONTACT_LINK_CLASSES, formatPhoneHref } from '../utils/contactLinks';
 import { filterUnavailableSeats, resolveSeatDisableReason } from '../utils/seatAvailability';
-import { useSeatDebugLogger } from '../hooks/useSeatDebug';
+import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
 
 const publicSeatLabel = (label = '') => {
   const safe = String(label || '').trim();
@@ -34,7 +34,9 @@ export default function EventSeatingModal({ event, onClose }) {
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const errorResetTimer = useRef(null);
-  const { log: seatDebugLog } = useSeatDebugLogger('event-modal');
+  const seatDebug = useSeatDebugLogger('event-modal');
+  const { log: seatDebugLog } = seatDebug;
+  useSeatDebugProbe(canvasContainerRef, seatDebug);
   const titleId = `event-seating-title-${event.id}`;
   const nameInputId = `${titleId}-customer-name`;
   const emailInputId = `${titleId}-customer-email`;
@@ -530,83 +532,85 @@ export default function EventSeatingModal({ event, onClose }) {
                 </div>
               </div>
             ) : (
-              <div
-                className="relative h-full bg-gray-100 dark:bg-gray-900 rounded-xl overflow-auto border border-purple-500/20"
-                ref={canvasContainerRef}
-              >
-                <div
-                  className="relative mx-auto"
-                  style={{
-                    width: canvasWidth,
-                    height: canvasHeight,
-                    minWidth: canvasWidth,
-                    minHeight: canvasHeight
-                  }}
-                >
-                  {/* Stage */}
-                  <div 
-                    className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
-                    style={{
-                      left: `${stagePosition.x}%`,
-                      top: `${stagePosition.y}%`,
-                      transform: 'translate(-50%, -50%)',
-                      width: `${stageSize.width || 200}px`,
-                      height: `${stageSize.height || 80}px`
-                    }}
+              <div className="flex flex-col xl:flex-row gap-4 h-full">
+                <div className="relative flex-1 min-h-[360px]">
+                  <div
+                    className="relative h-full bg-gray-100 dark:bg-gray-900 rounded-xl overflow-auto border border-purple-500/20"
+                    ref={canvasContainerRef}
+                    style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
                   >
-                    STAGE
-                  </div>
-
-                  {/* Tables */}
-                  {activeRows.map(row => {
-                    if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
-                    
-                    const reservedForRow = reservedSeats.filter(s => s.startsWith(`${row.section_name || row.section}-${row.row_label}-`));
-                    const pendingForRow = pendingSeats.filter(s => s.startsWith(`${row.section_name || row.section}-${row.row_label}-`));
-                    
-                    return (
-                      <div
-                        key={row.id}
-                        className="absolute"
+                    <div
+                      className="relative mx-auto"
+                      style={{
+                        width: canvasWidth,
+                        height: canvasHeight,
+                        minWidth: canvasWidth,
+                        minHeight: canvasHeight
+                      }}
+                    >
+                      {/* Stage */}
+                      <div 
+                        className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
                         style={{
-                          left: `${row.pos_x}%`,
-                          top: `${row.pos_y}%`,
-                          transform: `translate(-50%, -50%)`,
-                          padding: '20px',
-                          minWidth: `${row.width || 120}px`,
-                          minHeight: `${row.height || 120}px`
+                          left: `${stagePosition.x}%`,
+                          top: `${stagePosition.y}%`,
+                          transform: 'translate(-50%, -50%)',
+                          width: `${stageSize.width || 200}px`,
+                          height: `${stageSize.height || 80}px`,
+                          pointerEvents: 'none'
                         }}
                       >
-                        <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-xs font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap z-20">
-                          {row.section_name} - {row.row_label}
-                        </div>
-                        <div className="flex items-center justify-center" style={{ minHeight: '60px' }}>
-                          <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
-                            <TableComponent
-                              row={row}
-                              tableShape={row.table_shape || 'table-6'}
-                              selectedSeats={selectedSeats}
-                              pendingSeats={pendingForRow}
-                              reservedSeats={reservedForRow}
-                              onToggleSeat={(seatId) =>
-                                handleSeatInteraction(seatId, {
-                                  tableId: row?.id || `${row.section_name}-${row.row_label}`,
-                                  rowLabel: row.row_label,
-                                  section: row.section_name || row.section,
-                                })
-                              }
-                              interactive={true}
-                              labelFormatter={publicSeatLabel}
-                            />
-                          </div>
-                        </div>
+                        STAGE
                       </div>
-                    );
-                  })}
-                </div>
 
-                {/* Legend */}
-                <div className="absolute right-4 top-4 bg-gray-900/90 p-4 rounded-lg border border-purple-500/30 text-sm text-gray-200">
+                      {/* Tables */}
+                      {activeRows.map(row => {
+                        if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
+                        
+                        const reservedForRow = reservedSeats.filter(s => s.startsWith(`${row.section_name || row.section}-${row.row_label}-`));
+                        const pendingForRow = pendingSeats.filter(s => s.startsWith(`${row.section_name || row.section}-${row.row_label}-`));
+                        
+                        return (
+                          <div
+                            key={row.id}
+                            className="absolute"
+                            style={{
+                              left: `${row.pos_x}%`,
+                              top: `${row.pos_y}%`,
+                              transform: `translate(-50%, -50%)`,
+                              padding: '20px',
+                              minWidth: `${row.width || 120}px`,
+                              minHeight: `${row.height || 120}px`,
+                              pointerEvents: 'none'
+                            }}
+                          >
+                            <div className="flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
+                              <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
+                                <TableComponent
+                                  row={row}
+                                  tableShape={row.table_shape || 'table-6'}
+                                  selectedSeats={selectedSeats}
+                                  pendingSeats={pendingForRow}
+                                  reservedSeats={reservedForRow}
+                                  onToggleSeat={(seatId) =>
+                                    handleSeatInteraction(seatId, {
+                                      tableId: row?.id || `${row.section_name}-${row.row_label}`,
+                                      rowLabel: row.row_label,
+                                      section: row.section_name || row.section,
+                                    })
+                                  }
+                                  interactive={true}
+                                  labelFormatter={publicSeatLabel}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+                <aside className="bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-64 flex-shrink-0">
                   <div className="font-semibold mb-3 text-white">Legend</div>
                   {legendItems.map((item) => (
                     <div className="flex items-center gap-2 mb-2 last:mb-0" key={item.key}>
@@ -614,7 +618,7 @@ export default function EventSeatingModal({ event, onClose }) {
                       <span>{item.label}</span>
                     </div>
                   ))}
-                </div>
+                </aside>
               </div>
             )}
           </div>

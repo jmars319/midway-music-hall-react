@@ -3,13 +3,12 @@ const resolveDefaultApiBase = () => {
     return process.env.REACT_APP_API_BASE;
   }
   if (typeof window !== 'undefined' && window.location) {
-    const { origin, protocol, hostname } = window.location;
-    const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
-    if (origin && origin !== 'null' && protocol !== 'file:' && !isLocalHost) {
+    const { origin } = window.location;
+    if (origin && origin !== 'null') {
       return `${origin.replace(/\/$/, '')}/api`;
     }
   }
-  return 'http://localhost:5001/api';
+  return '/api';
 };
 
 const normalizeApiBase = (value) => {

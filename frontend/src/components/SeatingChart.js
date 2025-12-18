@@ -4,7 +4,7 @@ import TableComponent from './TableComponent';
 import { API_BASE } from '../apiConfig';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow, seatIdsForRow, resolveRowHeaderLabels } from '../utils/seatLabelUtils';
 import { filterUnavailableSeats, resolveSeatDisableReason } from '../utils/seatAvailability';
-import { useSeatDebugLogger } from '../hooks/useSeatDebug';
+import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
 
 const DEFAULT_STAGE_POSITION = { x: 50, y: 8 };
 const DEFAULT_STAGE_SIZE = { width: 200, height: 80 };
@@ -67,7 +67,10 @@ export default function SeatingChart({
     providedCanvasSettings || DEFAULT_CANVAS
   );
   const errorResetTimer = useRef(null);
-  const { log: seatDebugLog } = useSeatDebugLogger('public');
+  const seatingSurfaceRef = useRef(null);
+  const seatDebug = useSeatDebugLogger('public');
+  const { log: seatDebugLog } = seatDebug;
+  useSeatDebugProbe(seatingSurfaceRef, seatDebug);
 
   const clearTransientErrorTimer = useCallback(() => {
     if (errorResetTimer.current) {
@@ -445,145 +448,157 @@ export default function SeatingChart({
     }
 
     return (
-      <div className="relative bg-gray-900 rounded-xl p-6 border border-purple-500/20 overflow-auto">
-        <div
-          className="relative mx-auto"
-          style={{
-            width: canvasSettings.width,
-            height: canvasSettings.height,
-            minWidth: canvasSettings.width,
-            minHeight: canvasSettings.height,
-          }}
-        >
+      <div className="flex flex-col xl:flex-row gap-4">
+        <div className="relative flex-1">
           <div
-            className="absolute inset-0 rounded-[32px] border border-gray-700/60 pointer-events-none"
-            style={{
-              boxShadow: 'inset 0 0 35px rgba(0,0,0,0.55)',
-            }}
-            aria-hidden="true"
-          />
-          <div
-            className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
-            style={{
-              left: `${stagePosition.x}%`,
-              top: `${stagePosition.y}%`,
-              transform: 'translate(-50%, -50%)',
-              width: `${stageSize.width || DEFAULT_STAGE_SIZE.width}px`,
-              height: `${stageSize.height || DEFAULT_STAGE_SIZE.height}px`,
-            }}
+            ref={seatingSurfaceRef}
+            className="relative bg-gray-900 rounded-xl p-6 border border-purple-500/20 overflow-auto min-h-[360px]"
+            style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
           >
-            STAGE
-          </div>
-
-          {activeRows.map((row) => {
-            if (
-              row.pos_x === null ||
-              row.pos_y === null ||
-              row.pos_x === undefined ||
-              row.pos_y === undefined
-            ) {
-              return null;
-            }
-
-            const rowKey = row.id || `${row.section_name}-${row.row_label}`;
-            const rotation = row.rotation || 0;
-            const elementType = (row.element_type || 'table').toLowerCase();
-            const baseWidth = row.width || (elementType === 'chair' ? 56 : 140);
-            const baseHeight = row.height || (elementType === 'chair' ? 56 : 120);
-            const minDimension = elementType === 'chair' ? 48 : 100;
-            const width = Math.max(baseWidth, minDimension);
-            const height = Math.max(baseHeight, minDimension);
-            const seatIds = seatIdsForRow(row);
-            const reservedForRow = seatIds.filter((seatId) => reservedSeatSet.has(seatId));
-            const pendingForRow = seatIds.filter((seatId) => pendingSeatSet.has(seatId));
-            const labels = resolveRowHeaderLabels(row);
-            const paddingValue = elementType === 'chair' ? '8px 6px' : '14px 10px';
-
-            return (
+            <div
+              className="relative mx-auto"
+              style={{
+                width: canvasSettings.width,
+                height: canvasSettings.height,
+                minWidth: canvasSettings.width,
+                minHeight: canvasSettings.height,
+              }}
+            >
               <div
-                key={rowKey}
-                className="absolute"
+                className="absolute inset-0 rounded-[32px] border border-gray-700/60 pointer-events-none"
                 style={{
-                  left: `${row.pos_x}%`,
-                  top: `${row.pos_y}%`,
+                  boxShadow: 'inset 0 0 35px rgba(0,0,0,0.55)',
+                }}
+                aria-hidden="true"
+              />
+              <div
+                className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
+                style={{
+                  left: `${stagePosition.x}%`,
+                  top: `${stagePosition.y}%`,
                   transform: 'translate(-50%, -50%)',
-                  minWidth: `${width}px`,
-                  minHeight: `${height}px`,
-                  padding: paddingValue,
+                  width: `${stageSize.width || DEFAULT_STAGE_SIZE.width}px`,
+                  height: `${stageSize.height || DEFAULT_STAGE_SIZE.height}px`,
+                  pointerEvents: 'none',
                 }}
               >
-                {(labels.sectionLabel || labels.rowLabel) && (
-                  <div className="absolute -top-6 left-1/2 flex flex-col items-center gap-0.5 -translate-x-1/2 text-center text-white pointer-events-none">
-                    {labels.sectionLabel && (
-                      <span className="text-[10px] tracking-[0.2em] text-gray-300 bg-black/30 px-2 py-0.5 rounded-full">
-                        {labels.sectionLabel.toUpperCase()}
-                      </span>
-                    )}
-                    {labels.rowLabel && (
-                      <span className="text-xs font-semibold bg-black/70 px-2 py-0.5 rounded-full shadow">
-                        {labels.rowLabel}
-                      </span>
-                    )}
-                  </div>
-                )}
-                <div className="flex items-center justify-center" style={{ minHeight: `${height - 20}px` }}>
-                  <div style={{ transform: `rotate(${rotation}deg)` }}>
-                    <TableComponent
-                      row={row}
-                      tableShape={row.table_shape || row.seat_type || 'table-6'}
-                      selectedSeats={selectedSeats}
-                      pendingSeats={pendingForRow}
-                      reservedSeats={reservedForRow}
-                      onToggleSeat={(seatId) =>
-                        handleSeatInteraction(seatId, {
-                          tableId: rowKey,
-                          rowLabel: row.row_label,
-                          section: row.section_name || row.section,
-                        })
-                      }
-                      interactive={interactive}
-                    />
-                  </div>
-                </div>
+                STAGE
               </div>
-            );
-          })}
-        </div>
 
-        <div className="absolute left-4 bottom-4 text-gray-300 bg-gray-800/70 px-3 py-1 rounded-lg">
-          Selected seats: <span className="font-semibold text-white">{selectedSeats.length}</span>
-        </div>
+              {activeRows.map((row) => {
+                if (
+                  row.pos_x === null ||
+                  row.pos_y === null ||
+                  row.pos_x === undefined ||
+                  row.pos_y === undefined
+                ) {
+                  return null;
+                }
 
+                const rowKey = row.id || `${row.section_name}-${row.row_label}`;
+                const rotation = row.rotation || 0;
+                const elementType = (row.element_type || 'table').toLowerCase();
+                const baseWidth = row.width || (elementType === 'chair' ? 56 : 140);
+                const baseHeight = row.height || (elementType === 'chair' ? 56 : 120);
+                const minDimension = elementType === 'chair' ? 48 : 100;
+                const width = Math.max(baseWidth, minDimension);
+                const height = Math.max(baseHeight, minDimension);
+                const seatIds = seatIdsForRow(row);
+                const reservedForRow = seatIds.filter((seatId) => reservedSeatSet.has(seatId));
+                const pendingForRow = seatIds.filter((seatId) => pendingSeatSet.has(seatId));
+                const labels = resolveRowHeaderLabels(row);
+                const paddingValue = elementType === 'chair' ? '8px 6px' : '14px 10px';
+
+                return (
+                  <div
+                    key={rowKey}
+                    className="absolute"
+                    style={{
+                      left: `${row.pos_x}%`,
+                      top: `${row.pos_y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      minWidth: `${width}px`,
+                      minHeight: `${height}px`,
+                      padding: paddingValue,
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    {(labels.sectionLabel || labels.rowLabel) && (
+                      <div className="absolute -top-6 left-1/2 flex flex-col items-center gap-0.5 -translate-x-1/2 text-center text-white pointer-events-none">
+                        {labels.sectionLabel && (
+                          <span className="text-[10px] tracking-[0.2em] text-gray-300 bg-black/30 px-2 py-0.5 rounded-full">
+                            {labels.sectionLabel.toUpperCase()}
+                          </span>
+                        )}
+                        {labels.rowLabel && (
+                          <span className="text-xs font-semibold bg-black/70 px-2 py-0.5 rounded-full shadow">
+                            {labels.rowLabel}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <div
+                      className="flex items-center justify-center"
+                      style={{ minHeight: `${height - 20}px`, pointerEvents: 'auto' }}
+                    >
+                      <div style={{ transform: `rotate(${rotation}deg)` }}>
+                        <TableComponent
+                          row={row}
+                          tableShape={row.table_shape || row.seat_type || 'table-6'}
+                          selectedSeats={selectedSeats}
+                          pendingSeats={pendingForRow}
+                          reservedSeats={reservedForRow}
+                          onToggleSeat={(seatId) =>
+                            handleSeatInteraction(seatId, {
+                              tableId: rowKey,
+                              rowLabel: row.row_label,
+                              section: row.section_name || row.section,
+                            })
+                          }
+                          interactive={interactive}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="absolute left-4 bottom-4 text-gray-300 bg-gray-800/70 px-3 py-1 rounded-lg pointer-events-none">
+              Selected seats: <span className="font-semibold text-white">{selectedSeats.length}</span>
+            </div>
+
+            {interactive && (
+              <div className="absolute right-4 bottom-4 flex flex-col sm:flex-row gap-3 items-center">
+                {errorMessage && <div className="text-sm text-red-400">{errorMessage}</div>}
+                <button
+                  onClick={openRequestModal}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-2 transition"
+                >
+                  <Send className="h-4 w-4" /> Request Seats
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
         {showLegend && (
-          <div className="absolute right-4 top-4 bg-gray-800/80 p-3 rounded-lg border border-purple-500/20 text-sm text-gray-200 space-y-2">
-            <div className="font-semibold">Legend</div>
-            <div className="flex items-center gap-2">
+          <aside className="bg-gray-900/80 border border-purple-500/20 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-64 flex-shrink-0">
+            <div className="font-semibold mb-3">Legend</div>
+            <div className="flex items-center gap-2 mb-2">
               <span className="w-5 h-5 rounded bg-gray-500" /> <span>Available</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 mb-2">
               <span className="w-5 h-5 rounded bg-purple-700 ring-2 ring-purple-400" />{' '}
               <span>Your Selection</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 mb-2">
               <span className="w-5 h-5 rounded bg-purple-500/80 border-2 border-dashed border-purple-300" />{' '}
               <span>Pending</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-5 h-5 rounded bg-red-600 ring-2 ring-red-400" /> <span>Reserved</span>
             </div>
-          </div>
-        )}
-
-        {interactive && (
-          <div className="absolute right-4 bottom-4 flex flex-col sm:flex-row gap-3 items-center">
-            {errorMessage && <div className="text-sm text-red-400">{errorMessage}</div>}
-            <button
-              onClick={openRequestModal}
-              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-2 transition"
-            >
-              <Send className="h-4 w-4" /> Request Seats
-            </button>
-          </div>
+          </aside>
         )}
       </div>
     );
