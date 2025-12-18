@@ -21,6 +21,17 @@ else
 fi
 
 # Start frontend
-"$ROOT_DIR/scripts/dev-frontend-start.sh"
+if ! "$ROOT_DIR/scripts/dev-frontend-start.sh"; then
+  echo "ERROR: frontend failed to start; stopping backend"
+  "$ROOT_DIR/scripts/dev-backend-stop.sh"
+  exit 1
+fi
 
-echo "dev servers started"
+# Only report success if both PID files exist
+if [ -f "$ROOT_DIR/.dev/backend.pid" ] && [ -f "$ROOT_DIR/.dev/frontend.pid" ]; then
+  echo "dev servers started"
+else
+  echo "ERROR: one or more PID files missing after startup; stopping backend"
+  "$ROOT_DIR/scripts/dev-backend-stop.sh"
+  exit 2
+fi

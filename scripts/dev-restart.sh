@@ -14,19 +14,21 @@ if [ -f "$DEV_DIR/frontend.pid" ] || [ -f "$DEV_DIR/backend.pid" ]; then
 fi
 
 "$ROOT_DIR/scripts/dev-backend-start.sh"
+"$ROOT_DIR/scripts/dev-backend-start.sh"
 
-# wait for backend readiness
-if command -v curl >/dev/null 2>&1; then
-  for i in {1..8}; do
-    if curl -sSf --connect-timeout 1 http://localhost:8080/api/health >/dev/null 2>&1; then
-      break
-    fi
-    sleep 1
-  done
-else
-  sleep 1
+# backend-start will perform readiness; now start frontend and ensure transactional behavior
+if ! "$ROOT_DIR/scripts/dev-frontend-start.sh"; then
+  echo "ERROR: frontend failed to start during restart; stopping backend"
+  "$ROOT_DIR/scripts/dev-backend-stop.sh"
+  exit 1
 fi
 
-"$ROOT_DIR/scripts/dev-frontend-start.sh"
-
-echo "dev servers restarted"
+# confirm both pid files exist
+DEV_DIR="$ROOT_DIR/.dev"
+if [ -f "$DEV_DIR/backend.pid" ] && [ -f "$DEV_DIR/frontend.pid" ]; then
+  echo "dev servers restarted"
+else
+  echo "ERROR: one or more PID files missing after restart; stopping backend"
+  "$ROOT_DIR/scripts/dev-backend-stop.sh"
+  exit 2
+fi
