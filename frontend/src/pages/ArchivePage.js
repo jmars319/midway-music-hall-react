@@ -7,6 +7,7 @@ import ResponsiveImage from '../components/ResponsiveImage';
 import { API_BASE } from '../apiConfig';
 import { formatEventDateTimeLabel } from '../utils/eventFormat';
 import { getCategoryBadge } from '../utils/categoryLabels';
+import { hasRenderableImageVariant } from '../utils/imageVariants';
 
 const PAGE_LIMIT = 20;
 
@@ -119,13 +120,14 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
                   <div className="space-y-4">
                     {monthEvents.map((event) => {
                       const readableTitle = event.artist_name || event.title || 'Midway Music Hall Event';
+                      const hasPoster = hasRenderableImageVariant(event.image_variants);
                       return (
                       <article
                         key={event.id || `${label}-${event.artist_name}`}
                         className="bg-gray-800 rounded-xl border border-purple-500/20 p-4 flex flex-col md:flex-row gap-4"
                       >
                         <div className="w-full md:w-60 flex-shrink-0">
-                          {event.image_variants ? (
+                          {hasPoster ? (
                             <ResponsiveImage
                               image={event.image_variants}
                               alt={event.artist_name || event.title || 'Event poster'}

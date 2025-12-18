@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Music2, Calendar, MapPin } from 'lucide-react';
 import { API_BASE } from '../apiConfig';
 import ResponsiveImage from './ResponsiveImage';
+import { hasRenderableImageVariant } from '../utils/imageVariants';
 
 const HERO_VARIANTS = {
   main: {
@@ -129,13 +130,15 @@ const normalizeVariantEntries = (entries) => {
     .filter(Boolean);
 };
 
+const filterRenderableImages = (entries = []) => entries.filter((entry) => hasRenderableImageVariant(entry));
+
 const resolveHeroImagesFromSettings = (settings, config) => {
   if (!settings) return [];
   const variantCandidates = config.variantsKey ? normalizeVariantEntries(settings[config.variantsKey]) : [];
   if (variantCandidates.length > 0) {
-    return variantCandidates;
+    return filterRenderableImages(variantCandidates);
   }
-  const fallbackList = normalizeVariantEntries(settings[config.imagesKey]);
+  const fallbackList = filterRenderableImages(normalizeVariantEntries(settings[config.imagesKey]));
   return fallbackList.length > 0 ? fallbackList : [];
 };
 

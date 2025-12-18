@@ -7,6 +7,7 @@ import BrandImage from './BrandImage';
 import { API_BASE } from '../apiConfig';
 import { formatEventDateTimeLabel, formatDoorsLabel, formatEventPriceDisplay, eventHasSeating, getEventStartDate, isRecurringEvent } from '../utils/eventFormat';
 import { getCategoryBadge } from '../utils/categoryLabels';
+import { hasRenderableImageVariant } from '../utils/imageVariants';
 
 const EVENTS_PER_PAGE = 6;
 
@@ -171,6 +172,7 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 min-h-[360px]">
                 {pagedEvents.map((event) => {
                   const readableTitle = event.artist_name || event.title || event.name || 'Untitled event';
+                  const hasPoster = hasRenderableImageVariant(event.image_variants);
                   return (
                   <div
                     key={event.id || event.slug || event.title}
@@ -190,7 +192,7 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                         Do NOT add width/height or aspect logic back to the image itself.
                     */}
                     <div className="w-24 sm:w-28 md:w-32 lg:w-36 aspect-square rounded-lg overflow-hidden bg-gray-800 flex-shrink-0 relative">
-                      {event.image_variants ? (
+                      {hasPoster ? (
                         <ResponsiveImage
                           image={event.image_variants}
                           alt={event.artist_name || 'Event'}

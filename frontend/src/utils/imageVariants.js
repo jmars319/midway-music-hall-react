@@ -177,6 +177,53 @@ const normalizeEntryObject = (entry) => {
   return entry;
 };
 
+const stripUrlOrigin = (value = '') => {
+  if (!value || typeof value !== 'string') return '';
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      return url.pathname || '';
+    } catch (err) {
+      return value;
+    }
+  }
+  return value;
+};
+
+const isLegacyEventUploadPath = (value = '') => {
+  const path = stripUrlOrigin(value);
+  return /^\/uploads\/event-[^/]+/i.test(path);
+};
+
+const hasVariantPayload = (entry = {}) => Boolean(
+  entry.optimized
+  || entry.optimized_path
+  || entry.optimized_variants
+  || entry.optimized_srcset
+  || entry.webp
+  || entry.webp_path
+  || entry.webp_variants
+  || entry.webp_srcset,
+);
+
+export const hasRenderableImageVariant = (entry) => {
+  if (!entry) return false;
+  const normalized = normalizeEntryObject(entry);
+  if (!normalized || typeof normalized !== 'object') {
+    return false;
+  }
+  const original = normalized.original || normalized.file_url || normalized.url || null;
+  const hasResponsiveSources = hasVariantPayload(normalized);
+  if (!original && !hasResponsiveSources) {
+    return false;
+  }
+  if (!hasResponsiveSources && original && isLegacyEventUploadPath(original)) {
+    return false;
+  }
+  // At this point we’ve filtered all non-renderable cases
+  return true;
+};
+
 export const buildImageVariant = (entry, fallbackUrl = null) => {
   const normalized = normalizeEntryObject(entry);
   const original = prefixAssetUrl(normalized.original || normalized.file_url || normalized.url || null);

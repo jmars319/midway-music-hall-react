@@ -2,6 +2,7 @@ import React from 'react';
 import { Sparkles } from 'lucide-react';
 import { formatEventDateTimeLabel, formatDoorsLabel } from '../utils/eventFormat';
 import { getCategoryBadge } from '../utils/categoryLabels';
+import { hasRenderableImageVariant } from '../utils/imageVariants';
 import ResponsiveImage from './ResponsiveImage';
 import BrandImage from './BrandImage';
 
@@ -35,13 +36,15 @@ export default function FeaturedEvents({ events = [], loading = false }) {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {events.map((event) => (
-            <article
-              key={event.id}
-              className="bg-gray-900 rounded-2xl border border-purple-500/30 shadow-xl overflow-hidden flex flex-col"
-            >
+          {events.map((event) => {
+            const hasPoster = hasRenderableImageVariant(event.image_variants);
+            return (
+              <article
+                key={event.id}
+                className="bg-gray-900 rounded-2xl border border-purple-500/30 shadow-xl overflow-hidden flex flex-col"
+              >
               <div className="bg-gray-800 overflow-hidden">
-                {event.image_variants ? (
+                {hasPoster ? (
                   <ResponsiveImage
                     image={event.image_variants}
                     alt={event.artist_name || event.title || 'Featured event'}
@@ -84,8 +87,9 @@ export default function FeaturedEvents({ events = [], loading = false }) {
                   </div>
                 )}
               </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       </div>
     </section>
