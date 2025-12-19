@@ -9,13 +9,15 @@ const shapeAliases = {
 
 const resolveTableSurfaceLabel = (row = {}, fallback = 'Table') => {
   const raw =
-    row?.table_label ||
-    row?.display_label ||
-    row?.row_label ||
-    row?.row ||
-    row?.label ||
+    row?.table_number ??
+    row?.tableNumber ??
+    row?.table_label ??
+    row?.display_label ??
+    row?.row_label ??
+    row?.row ??
+    row?.label ??
     '';
-  if (!raw) return fallback;
+  if (raw === '' || raw === null || raw === undefined) return fallback;
   const trimmed = String(raw).replace(/^table\s*/i, '').trim();
   return trimmed || fallback;
 };
@@ -60,6 +62,7 @@ export default function TableComponent({
 }) {
   const shape = tableShape || row.table_shape || row.seat_type || 'table-6';
   const normalizedShape = shapeAliases[shape] || shape;
+  const surfaceLabel = resolveTableSurfaceLabel(row);
   const formatSeatLabel = (value) => (typeof labelFormatter === 'function' ? labelFormatter(value) : value);
   
   // Parse reserved seats from DB
@@ -106,6 +109,7 @@ export default function TableComponent({
       pointerEvents: pointerEventsValue,
       zIndex: 5,
       touchAction: 'manipulation',
+      WebkitTapHighlightColor: 'transparent',
     };
     const seatStatus = getSeatStatus(seatId);
     const disabledReason = seatStatus.isReserved ? 'reserved' : (seatStatus.isPending ? 'pending' : null);
@@ -165,7 +169,7 @@ export default function TableComponent({
 
   // Render table center
   const renderTableCenter = (width, height, label = 'Table', isRound = false) => {
-    const labelText = label === 'Table' ? resolveTableSurfaceLabel(row) : label;
+    const labelText = label === 'Table' ? surfaceLabel : label;
     return (
       <div style={{
         position: 'absolute',
@@ -192,11 +196,11 @@ export default function TableComponent({
 
   // TABLE-2: Two seats opposite each other
   if (normalizedShape === 'table-2') {
-    const seatSize = Math.floor(size * 0.32);
+    const seatSize = Math.max(30, Math.floor(size * 0.36));
     const gap = Math.floor(size * 0.05);
     return (
       <div style={{ width: size, height: size, position: 'relative' }}>
-        {renderTableCenter(size * 0.5, size * 0.35, 'Table')}
+        {renderTableCenter(size * 0.5, size * 0.35, surfaceLabel || 'Table')}
         {renderSeat(1, size / 2, gap + seatSize / 2, seatSize)}
         {renderSeat(2, size / 2, size - gap - seatSize / 2, seatSize)}
       </div>
@@ -211,31 +215,10 @@ export default function TableComponent({
     const startX = (size - (2 * seatSize) - gap) / 2 + seatSize / 2;
     const tableWidth = size * 0.65;
     const tableHeight = Math.max(18, Math.floor(size * 0.22));
-    const tableTop = size * 0.28;
 
     return (
       <div style={{ width: size, height: size, position: 'relative' }}>
-        <div
-          style={{
-            position: 'absolute',
-            left: '50%',
-            top: tableTop,
-            transform: 'translate(-50%, -50%)',
-            width: tableWidth,
-            height: tableHeight,
-            borderRadius: 9999,
-            background: '#4b5563',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#fff',
-            fontSize: 11,
-            fontWeight: 500,
-            textTransform: 'uppercase',
-          }}
-        >
-          High-Top
-        </div>
+        {renderTableCenter(tableWidth, tableHeight, surfaceLabel || 'High-Top')}
         {[0, 1].map((i) => renderSeat(i + 1, startX + i * (seatSize + gap), seatY, seatSize))}
       </div>
     );
@@ -252,7 +235,7 @@ export default function TableComponent({
     
     return (
       <div style={{ width: size, height: size, position: 'relative' }}>
-        {renderTableCenter(size * 0.5, size * 0.4, 'Table')}
+        {renderTableCenter(size * 0.5, size * 0.4, surfaceLabel || 'Table')}
         {renderSeat(1, leftX, size / 2, seatSize)}
         {renderSeat(2, size / 2, topY, seatSize)}
         {renderSeat(3, rightX, size / 2, seatSize)}
@@ -271,7 +254,7 @@ export default function TableComponent({
 
     return (
       <div style={{ width: size, height: size, position: 'relative' }}>
-        {renderTableCenter(size * 0.6, size * 0.4, 'Table')}
+        {renderTableCenter(size * 0.6, size * 0.4, surfaceLabel || 'Table')}
         {[0, 1, 2].map(i => renderSeat(i + 1, startX + i * (seatSize + gap), topY, seatSize))}
         {[0, 1, 2].map(i => renderSeat(i + 4, startX + i * (seatSize + gap), bottomY, seatSize))}
       </div>
@@ -291,7 +274,7 @@ export default function TableComponent({
 
     return (
       <div style={{ width: tableWidth, height: size, position: 'relative' }}>
-        {renderTableCenter(tableWidth * 0.6, size * 0.35, 'Table')}
+        {renderTableCenter(tableWidth * 0.6, size * 0.35, surfaceLabel || 'Table')}
         {[0, 1, 2, 3].map((i) => renderSeat(i + 1, startX + i * (seatSize + gap), topY, seatSize))}
         {[0, 1, 2, 3].map((i) => renderSeat(i + 5, startX + i * (seatSize + gap), bottomY, seatSize))}
       </div>
@@ -316,7 +299,7 @@ export default function TableComponent({
 
     return (
       <div style={{ width: size, height: size, position: 'relative' }}>
-        {renderTableCenter(size * 0.45, size * 0.45, 'Table', true)}
+        {renderTableCenter(size * 0.45, size * 0.45, surfaceLabel || 'Table', true)}
         {angles.map((ang, i) => {
           const rad = (ang * Math.PI) / 180;
           const x = center + Math.cos(rad) * radius;
@@ -336,7 +319,7 @@ export default function TableComponent({
 
     return (
       <div style={{ width: size, height: size, position: 'relative' }}>
-        {renderTableCenter(size * 0.48, size * 0.48, 'Table', true)}
+        {renderTableCenter(size * 0.48, size * 0.48, surfaceLabel || 'Table', true)}
         {angles.map((ang, i) => {
           const rad = (ang * Math.PI) / 180;
           const x = center + Math.cos(rad) * radius;
@@ -369,9 +352,10 @@ export default function TableComponent({
           alignItems: 'center',
           justifyContent: 'center',
           color: '#fff',
-          fontSize: 12
+          fontSize: 12,
+          pointerEvents: 'none'
         }}>
-          Bar
+          {surfaceLabel || 'Bar'}
         </div>
         {[0, 1, 2, 3, 4, 5].map(i => renderSeat(i + 1, startX + i * (seatSize + gap), y, seatSize))}
       </div>
@@ -406,11 +390,12 @@ export default function TableComponent({
     const iconSize = Math.floor(size / Math.max(cols, rows) * 0.7);
     const gapX = (size - cols * iconSize) / (cols + 1);
     const gapY = (size - rows * iconSize) / (rows + 1);
+    const standingLabel = surfaceLabel || `Standing (${count})`;
 
     return (
       <div style={{ width: size, height: size, position: 'relative', background: '#10b981', borderRadius: 8, border: '2px dashed #059669' }}>
-        <div style={{ position: 'absolute', top: 4, left: 4, fontSize: 10, color: '#fff', fontWeight: 'bold' }}>
-          Standing ({count})
+        <div style={{ position: 'absolute', top: 4, left: 4, fontSize: 10, color: '#fff', fontWeight: 'bold', pointerEvents: 'none' }}>
+          {standingLabel}
         </div>
         {Array.from({ length: count }).map((_, i) => {
           const col = i % cols;
@@ -458,7 +443,7 @@ export default function TableComponent({
   // FALLBACK: Render as simple generic table
   return (
     <div style={{ width: size, height: size, position: 'relative' }}>
-      {renderTableCenter(size * 0.6, size * 0.6, shape, true)}
+      {renderTableCenter(size * 0.6, size * 0.6, surfaceLabel || shape, true)}
     </div>
   );
 }

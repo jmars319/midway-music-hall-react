@@ -69,6 +69,7 @@ export default function LayoutsModule() {
   const [showEditor, setShowEditor] = useState(false);
   const [editingLayout, setEditingLayout] = useState(null);
   const [layoutRows, setLayoutRows] = useState([]);
+  const [editingMeta, setEditingMeta] = useState({ name: '', description: '' });
   const [showAddRow, setShowAddRow] = useState(false);
   const [rowForm, setRowForm] = useState({
     section_name: '',
@@ -159,6 +160,10 @@ export default function LayoutsModule() {
         }))
       : [];
     setLayoutRows(rows);
+    setEditingMeta({
+      name: layout.name || '',
+      description: layout.description || '',
+    });
     const incomingStagePosition = layout.stage_position ? layout.stage_position : { x: 50, y: 10 };
     const incomingStageSize = layout.stage_size ? layout.stage_size : { width: 200, height: 80 };
     setStagePosition(incomingStagePosition);
@@ -496,25 +501,32 @@ export default function LayoutsModule() {
 
   const handleSaveLayout = async () => {
     if (!editingLayout) return;
-    
+    if (!editingMeta.name || editingMeta.name.trim() === '') {
+      alert('Layout name is required before saving.');
+      return;
+    }
     setSubmitting(true);
     try {
+      const payload = {
+        name: editingMeta.name.trim(),
+        description: editingMeta.description || '',
+        is_default: editingLayout.is_default ? 1 : 0,
+        layout_data: layoutRows,
+        stage_position: stagePosition,
+        stage_size: stageSize,
+        canvas_settings: canvasSettings,
+      };
       const res = await fetch(`${API_BASE}/seating-layouts/${editingLayout.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...editingLayout,
-          layout_data: layoutRows,
-          stage_position: stagePosition,
-          stage_size: stageSize,
-          canvas_settings: canvasSettings
-        }),
+        body: JSON.stringify(payload),
       });
       
       const data = await res.json();
       if (data && data.success) {
         setShowEditor(false);
         setEditingLayout(null);
+        setEditingMeta({ name: '', description: '' });
         fetchLayouts();
       } else {
         alert(data.message || 'Failed to save layout');
@@ -877,10 +889,28 @@ export default function LayoutsModule() {
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-7xl h-[90vh] flex flex-col">
             {/* Header */}
-            <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
-              <div>
-                <h3 className="text-2xl font-bold">{editingLayout.name}</h3>
-                <p className="text-gray-500 dark:text-gray-400">Drag tables to position them</p>
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 p-6 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex-1 flex flex-col gap-3">
+                <div>
+                  <label className="block text-sm font-semibold mb-1">Layout name</label>
+                  <input
+                    value={editingMeta.name}
+                    onChange={(e) => setEditingMeta((prev) => ({ ...prev, name: e.target.value }))}
+                    className="w-full px-3 py-2 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 focus:ring-2 focus:ring-purple-500"
+                    placeholder="Main Floor Layout"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-1">Description</label>
+                  <textarea
+                    value={editingMeta.description}
+                    onChange={(e) => setEditingMeta((prev) => ({ ...prev, description: e.target.value }))}
+                    className="w-full px-3 py-2 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 focus:ring-2 focus:ring-purple-500 resize-none"
+                    rows={2}
+                    placeholder="Visible in admin lists to differentiate templates"
+                  />
+                </div>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Drag tables and markers to the correct positions, then save to update this layout everywhere.</p>
               </div>
               <div className="flex gap-2">
                 <button
@@ -891,7 +921,11 @@ export default function LayoutsModule() {
                   <Save className="h-4 w-4" /> {submitting ? 'Saving...' : 'Save Layout'}
                 </button>
                 <button
-                  onClick={() => setShowEditor(false)}
+                  onClick={() => {
+                    setShowEditor(false);
+                    setEditingLayout(null);
+                    setEditingMeta({ name: '', description: '' });
+                  }}
                   className="px-4 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
                 >
                   <X className="h-4 w-4" />

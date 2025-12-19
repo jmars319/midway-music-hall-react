@@ -1671,6 +1671,7 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
     $defaultStatus = normalize_seat_request_status($options['default_status'] ?? 'new');
     $allowOverride = !empty($options['allow_status_override']);
     $forcedStatus = $options['forced_status'] ?? null;
+    $sendNotifications = array_key_exists('send_notifications', $options) ? (bool) $options['send_notifications'] : true;
     $statusInput = $forcedStatus ?? ($allowOverride ? ($payload['status'] ?? null) : null);
     $status = $statusInput ? normalize_seat_request_status($statusInput) : $defaultStatus;
     if (!in_array($status, canonical_seat_request_statuses(), true)) {
@@ -1819,7 +1820,7 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
         throw $error;
     }
 
-    if ($created && $event) {
+    if ($sendNotifications && $created && $event) {
         try {
             notify_seat_request_emails($created, $event);
         } catch (Throwable $notifyError) {
@@ -3608,6 +3609,7 @@ $router->add('POST', '/api/admin/seat-requests', function (Request $request) {
             'default_status' => 'confirmed',
             'allow_status_override' => true,
             'forced_status' => $statusOverride,
+            'send_notifications' => false,
         ]);
         $seatId = (int) ($result['seat_request']['id'] ?? 0);
         if ($seatId > 0) {

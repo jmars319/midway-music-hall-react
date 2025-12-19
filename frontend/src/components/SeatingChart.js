@@ -69,7 +69,7 @@ export default function SeatingChart({
   const errorResetTimer = useRef(null);
   const seatingSurfaceRef = useRef(null);
   const seatDebug = useSeatDebugLogger('public');
-  const { log: seatDebugLog } = seatDebug;
+  const { log: seatDebugLog, enabled: seatDebugEnabled } = seatDebug;
   useSeatDebugProbe(seatingSurfaceRef, seatDebug);
 
   const clearTransientErrorTimer = useCallback(() => {
@@ -262,11 +262,12 @@ export default function SeatingChart({
   }, [eventId, events]);
 
   const activeRows = useMemo(
-    () => (layoutRows || []).filter((row) => row && row.is_active !== false && isSeatRow(row)),
+    () => (layoutRows || []).filter((row) => row && row.is_active !== false),
     [layoutRows]
   );
-
-  const seatLabelMap = useMemo(() => buildSeatLookupMap(activeRows), [activeRows]);
+  const seatRows = useMemo(() => activeRows.filter((row) => isSeatRow(row)), [activeRows]);
+  const decorRows = useMemo(() => activeRows.filter((row) => !isSeatRow(row)), [activeRows]);
+  const seatLabelMap = useMemo(() => buildSeatLookupMap(seatRows), [seatRows]);
   const reservedSeatSet = useMemo(() => new Set(reservedSeatIds || []), [reservedSeatIds]);
   const pendingSeatSet = useMemo(() => new Set(pendingSeatIds || []), [pendingSeatIds]);
 
@@ -281,14 +282,55 @@ export default function SeatingChart({
     setSelectedSeats((prev) => (prev.length ? [] : prev));
   }, [eventId, formEventId]);
 
-  const hasPositions = activeRows.some(
+  const rowHasPosition = useCallback(
     (row) =>
       row &&
       row.pos_x !== null &&
       row.pos_y !== null &&
       row.pos_x !== undefined &&
-      row.pos_y !== undefined
+      row.pos_y !== undefined,
+    []
   );
+  const positionedSeatRows = useMemo(() => seatRows.filter((row) => rowHasPosition(row)), [rowHasPosition, seatRows]);
+  const positionedDecorRows = useMemo(() => decorRows.filter((row) => rowHasPosition(row)), [decorRows, rowHasPosition]);
+  const hasPositions = positionedSeatRows.length > 0;
+
+  useEffect(() => {
+    if (!seatDebugEnabled) return;
+    const sample = positionedSeatRows.slice(0, 6).map((row) => {
+      const [firstSeat] = seatIdsForRow(row);
+      if (!firstSeat) return null;
+      return {
+        seatId: firstSeat,
+        reserved: reservedSeatSet.has(firstSeat),
+        pending: pendingSeatSet.has(firstSeat),
+      };
+    }).filter(Boolean);
+    seatDebugLog('seat-status-snapshot', {
+      layoutRows: layoutRows?.length || 0,
+      seatRows: seatRows.length,
+      decorRows: decorRows.length,
+      reservedCount: reservedSeatSet.size,
+      pendingCount: pendingSeatSet.size,
+      sample,
+    });
+  }, [decorRows.length, layoutRows, pendingSeatSet, positionedSeatRows, reservedSeatSet, seatDebugEnabled, seatDebugLog, seatRows.length]);
+
+  useEffect(() => {
+    if (!seatDebugEnabled) return;
+    if (decorRows.length > 0 && positionedDecorRows.length === 0) {
+      seatDebugLog('guard-non-seat-missing', {
+        totalDecor: decorRows.length,
+        note: 'Layout contains markers/areas but none render with positions.',
+      });
+    }
+    if (seatRows.length === 0 && layoutRows?.length) {
+      seatDebugLog('guard-no-seat-rows', {
+        message: 'Layout payload loaded without tables/chairs; verify data.',
+        layoutRows: layoutRows.length,
+      });
+    }
+  }, [decorRows.length, layoutRows, positionedDecorRows.length, seatDebugEnabled, seatDebugLog, seatRows.length]);
 
   const resolvedEventId = eventId || formEventId || (events[0]?.id ?? null);
 
@@ -448,8 +490,8 @@ export default function SeatingChart({
     }
 
     return (
-      <div className="flex flex-col xl:flex-row gap-4">
-        <div className="relative flex-1">
+      <div className="flex flex-col xl:flex-row gap-6 items-start">
+        <div className="relative flex-1 w-full">
           <div
             ref={seatingSurfaceRef}
             className="relative bg-gray-900 rounded-xl p-6 border border-purple-500/20 overflow-auto min-h-[360px]"
@@ -485,16 +527,42 @@ export default function SeatingChart({
                 STAGE
               </div>
 
-              {activeRows.map((row) => {
-                if (
-                  row.pos_x === null ||
-                  row.pos_y === null ||
-                  row.pos_x === undefined ||
-                  row.pos_y === undefined
-                ) {
-                  return null;
-                }
+              {positionedDecorRows.map((row) => {
+                const decorKey = row.id || `${row.element_type || 'marker'}-${row.pos_x}-${row.pos_y}`;
+                const rotation = row.rotation || 0;
+                const width = row.width || 160;
+                const height = row.height || 120;
+                const label = row.label || row.marker_label || row.section_name || row.row_label || 'Marker';
+                const color = row.color || (row.element_type === 'area' ? '#4b5563' : '#6b7280');
+                const opacity = row.element_type === 'area' ? 0.3 : 0.9;
+                return (
+                  <div
+                    key={decorKey}
+                    className="absolute"
+                    style={{
+                      left: `${row.pos_x}%`,
+                      top: `${row.pos_y}%`,
+                      transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+                      zIndex: row.element_type === 'area' ? 2 : 3,
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    <div
+                      className="rounded-lg shadow-lg flex items-center justify-center text-xs font-semibold text-gray-900 dark:text-white px-2 py-1"
+                      style={{
+                        width,
+                        height,
+                        backgroundColor: color,
+                        opacity,
+                      }}
+                    >
+                      <span className="text-center px-1">{label}</span>
+                    </div>
+                  </div>
+                );
+              })}
 
+              {positionedSeatRows.map((row) => {
                 const rowKey = row.id || `${row.section_name}-${row.row_label}`;
                 const rotation = row.rotation || 0;
                 const elementType = (row.element_type || 'table').toLowerCase();
@@ -508,6 +576,7 @@ export default function SeatingChart({
                 const pendingForRow = seatIds.filter((seatId) => pendingSeatSet.has(seatId));
                 const labels = resolveRowHeaderLabels(row);
                 const paddingValue = elementType === 'chair' ? '8px 6px' : '14px 10px';
+                const showFloatingLabel = !interactive && (labels.sectionLabel || labels.rowLabel);
 
                 return (
                   <div
@@ -521,9 +590,10 @@ export default function SeatingChart({
                       minHeight: `${height}px`,
                       padding: paddingValue,
                       pointerEvents: 'none',
+                      zIndex: 10,
                     }}
                   >
-                    {(labels.sectionLabel || labels.rowLabel) && (
+                    {showFloatingLabel && (
                       <div className="absolute -top-6 left-1/2 flex flex-col items-center gap-0.5 -translate-x-1/2 text-center text-white pointer-events-none">
                         {labels.sectionLabel && (
                           <span className="text-[10px] tracking-[0.2em] text-gray-300 bg-black/30 px-2 py-0.5 rounded-full">
@@ -567,22 +637,22 @@ export default function SeatingChart({
             <div className="absolute left-4 bottom-4 text-gray-300 bg-gray-800/70 px-3 py-1 rounded-lg pointer-events-none">
               Selected seats: <span className="font-semibold text-white">{selectedSeats.length}</span>
             </div>
-
-            {interactive && (
-              <div className="absolute right-4 bottom-4 flex flex-col sm:flex-row gap-3 items-center">
-                {errorMessage && <div className="text-sm text-red-400">{errorMessage}</div>}
-                <button
-                  onClick={openRequestModal}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-2 transition"
-                >
-                  <Send className="h-4 w-4" /> Request Seats
-                </button>
-              </div>
-            )}
           </div>
+          {interactive && (
+            <div className="mt-4 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+              {errorMessage && <div className="text-sm text-red-400">{errorMessage}</div>}
+              <div className="flex-1" />
+              <button
+                onClick={openRequestModal}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-2 transition self-stretch sm:self-auto"
+              >
+                <Send className="h-4 w-4" /> Request Seats
+              </button>
+            </div>
+          )}
         </div>
         {showLegend && (
-          <aside className="bg-gray-900/80 border border-purple-500/20 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-64 flex-shrink-0">
+          <aside className="bg-gray-900/80 border border-purple-500/20 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-64 flex-shrink-0 xl:sticky xl:top-6 self-start">
             <div className="font-semibold mb-3">Legend</div>
             <div className="flex items-center gap-2 mb-2">
               <span className="w-5 h-5 rounded bg-gray-500" /> <span>Available</span>
@@ -695,6 +765,7 @@ export default function SeatingChart({
                   value={form.customerPhone}
                   onChange={handleChange}
                   className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg"
+                  required
                 />
               </div>
 

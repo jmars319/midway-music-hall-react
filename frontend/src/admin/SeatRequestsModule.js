@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { CheckCircle, XCircle, Trash2, Edit3, RefreshCw, X, Clock, ChevronDown, ChevronRight, Plus, Info } from 'lucide-react';
 import { API_BASE } from '../apiConfig';
 import TableComponent from '../components/TableComponent';
 import { seatingLegendSwatches, seatingStatusLabels } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
-import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/seatLabelUtils';
+import { buildSeatLookupMap, describeSeatSelection, isSeatRow, seatIdsForRow } from '../utils/seatLabelUtils';
 import { getSeatReasonMessage, getAdminReservationFailureMessage } from '../utils/reservationReasonMessages';
 import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
@@ -1025,14 +1025,24 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
   useFocusTrap(dialogRef, { onClose, enabled: true, initialFocusRef: closeButtonRef });
 
   const activeRows = useMemo(
-    () => layoutRows.filter((r) => {
-      const type = r.element_type || 'table';
-      return r.is_active !== false && type !== 'marker' && type !== 'area';
-    }),
+    () => layoutRows.filter((r) => r && r.is_active !== false),
     [layoutRows]
   );
+  const seatRows = useMemo(() => activeRows.filter((row) => isSeatRow(row)), [activeRows]);
+  const decorRows = useMemo(() => activeRows.filter((row) => !isSeatRow(row)), [activeRows]);
   const reservedSeatSet = useMemo(() => new Set(reservedSeats || []), [reservedSeats]);
   const pendingSeatSet = useMemo(() => new Set(pendingSeats || []), [pendingSeats]);
+  const rowHasPosition = useCallback(
+    (row) =>
+      row &&
+      row.pos_x !== null &&
+      row.pos_y !== null &&
+      row.pos_x !== undefined &&
+      row.pos_y !== undefined,
+    []
+  );
+  const positionedSeatRows = useMemo(() => seatRows.filter((row) => rowHasPosition(row)), [rowHasPosition, seatRows]);
+  const positionedDecorRows = useMemo(() => decorRows.filter((row) => rowHasPosition(row)), [decorRows, rowHasPosition]);
 
   useEffect(() => {
     setSelectedSeats((prev) => {
@@ -1157,7 +1167,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
   ];
 
   const selectedEvent = events.find((ev) => String(ev.id) === String(selectedEventId));
-  const hasPositions = activeRows.some((r) => r.pos_x !== null && r.pos_y !== null && r.pos_x !== undefined && r.pos_y !== undefined);
+  const hasPositions = positionedSeatRows.length > 0;
 
   return (
     <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" role="presentation">
@@ -1289,16 +1299,44 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                     >
                       STAGE
                     </div>
-                    {activeRows.map((row) => {
-                      if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) {
-                        return null;
-                      }
-                      const reservedForRow = reservedSeats.filter((seatId) =>
-                        seatId.startsWith(`${row.section_name || row.section}-${row.row_label}-`)
+                    {positionedDecorRows.map((row) => {
+                      const decorKey = row.id || `${row.element_type || 'marker'}-${row.pos_x}-${row.pos_y}`;
+                      const width = row.width || 160;
+                      const height = row.height || 120;
+                      const rotation = row.rotation || 0;
+                      const label = row.label || row.marker_label || row.section_name || row.row_label || 'Marker';
+                      const color = row.color || (row.element_type === 'area' ? '#4b5563' : '#6b7280');
+                      const opacity = row.element_type === 'area' ? 0.3 : 0.9;
+                      return (
+                        <div
+                          key={decorKey}
+                          className="absolute"
+                          style={{
+                            left: `${row.pos_x}%`,
+                            top: `${row.pos_y}%`,
+                            transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+                            pointerEvents: 'none',
+                            zIndex: row.element_type === 'area' ? 2 : 3,
+                          }}
+                        >
+                          <div
+                            className="rounded-lg shadow-lg flex items-center justify-center text-xs font-semibold text-gray-900 dark:text-white px-2 py-1"
+                            style={{
+                              width,
+                              height,
+                              backgroundColor: color,
+                              opacity,
+                            }}
+                          >
+                            <span className="text-center px-1">{label}</span>
+                          </div>
+                        </div>
                       );
-                      const pendingForRow = pendingSeats.filter((seatId) =>
-                        seatId.startsWith(`${row.section_name || row.section}-${row.row_label}-`)
-                      );
+                    })}
+                    {positionedSeatRows.map((row) => {
+                      const seatIds = seatIdsForRow(row);
+                      const reservedForRow = seatIds.filter((seatId) => reservedSeatSet.has(seatId));
+                      const pendingForRow = seatIds.filter((seatId) => pendingSeatSet.has(seatId));
                       return (
                         <div
                           key={`${row.id}-${row.row_label}`}

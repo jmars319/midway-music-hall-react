@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 const QUERY_FLAG = 'debugSeats';
 const STORAGE_FLAG = 'SEAT_DEBUG';
@@ -65,13 +65,12 @@ export function enableSeatDebugSession() {
 export function useSeatDebugProbe(ref, logger, options = {}) {
   const highlightDuration = options.highlightDuration ?? 900;
   const enabled = Boolean(logger?.enabled);
+  const logFn = useMemo(() => (typeof logger?.log === 'function' ? logger.log : null), [logger]);
 
   useEffect(() => {
     if (!enabled || typeof window === 'undefined') return () => {};
     const node = ref?.current;
     if (!node) return () => {};
-    const logFn = typeof logger?.log === 'function' ? logger.log : null;
-
     const handlePointerDown = (event) => {
       const seatTarget = event.target?.closest?.('[data-seat-id]');
       if (seatTarget) return;
@@ -117,5 +116,5 @@ export function useSeatDebugProbe(ref, logger, options = {}) {
       node.removeEventListener('pointerdown', handlePointerDown, true);
       node.removeEventListener('touchstart', handlePointerDown, true);
     };
-  }, [enabled, highlightDuration, logger, ref]);
+  }, [enabled, highlightDuration, logFn, ref]);
 }
