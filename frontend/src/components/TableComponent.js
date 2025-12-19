@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Users } from 'lucide-react';
 import { resolveSeatVisualState } from '../utils/seatingTheme';
 import { buildSeatId, buildSeatLabel } from '../utils/seatLabelUtils';
@@ -78,6 +78,7 @@ export default function TableComponent({
   holdSeats = [],
   labelFormatter = null,
   seatReasonResolver = null,
+  seatStatusMap = null,
 }) {
   const shape = tableShape || row.table_shape || row.seat_type || 'table-6';
   const normalizedShape = shapeAliases[shape] || shape;
@@ -94,13 +95,34 @@ export default function TableComponent({
   const holdSeatSet = useMemo(() => toSeatSet(holdSeats), [holdSeats]);
   const selectedSeatSet = useMemo(() => toSeatSet(selectedSeats), [selectedSeats]);
 
-  // Check seat status
+  const readSeatStatusFromMap = useCallback(
+    (seatId) => {
+      if (!seatStatusMap) return null;
+      if (seatStatusMap instanceof Map) {
+        return seatStatusMap.get(seatId) || null;
+      }
+      if (typeof seatStatusMap === 'object') {
+        return seatStatusMap[seatId] || null;
+      }
+      return null;
+    },
+    [seatStatusMap]
+  );
+
   const getSeatStatus = (seatId) => {
-    const isReserved = reservedSeatSet.has(seatId);
-    const isHold = !isReserved && holdSeatSet.has(seatId);
-    const isPending = !isReserved && !isHold && pendingSeatSet.has(seatId);
-    const isSelected = !isReserved && !isHold && !isPending && selectedSeatSet.has(seatId);
-    return { isReserved, isHold, isPending, isSelected };
+    const mappedStatus = readSeatStatusFromMap(seatId);
+    const isReserved = mappedStatus === 'reserved' || reservedSeatSet.has(seatId);
+    const isPending =
+      mappedStatus === 'pending' || (!isReserved && pendingSeatSet.has(seatId));
+    const isHold =
+      mappedStatus === 'hold' || (!isReserved && !isPending && holdSeatSet.has(seatId));
+    const isSelected =
+      mappedStatus === 'selected' ||
+      (!isReserved && !isPending && !isHold && selectedSeatSet.has(seatId));
+    const statusKey =
+      mappedStatus ||
+      (isReserved ? 'reserved' : isPending ? 'pending' : isHold ? 'hold' : 'available');
+    return { isReserved, isHold, isPending, isSelected, statusKey };
   };
 
   // Generate seat classes
@@ -113,8 +135,9 @@ export default function TableComponent({
     } else if (status.isReserved || status.isHold || status.isPending) {
       cursor = 'cursor-not-allowed';
     }
-    const visualClass = visual.statusKey === 'available' ? seatTypeClass(row.seat_type) : visual.className;
-    return `absolute flex items-center justify-center rounded-full ${cursor} ${visualClass}`;
+    const visualClass =
+      visual.statusKey === 'available' ? seatTypeClass(row.seat_type) : visual.className;
+    return { className: `absolute flex items-center justify-center rounded-full ${cursor} ${visualClass}`, status, visual };
   };
 
   // Render individual seat
@@ -122,7 +145,7 @@ export default function TableComponent({
     const seatId = buildSeatId(row, seatNum);
     const seatLabel = formatSeatLabel(buildSeatLabel(row, seatNum));
     const displayLabel = seatLabel.length > 4 ? seatLabel.slice(0, 4) : seatLabel;
-    const classes = getSeatClasses(seatId);
+    const { className, status, visual } = getSeatClasses(seatId);
     const pointerEventsValue = interactive ? 'auto' : 'none';
     const style = { 
       left: x, 
@@ -135,14 +158,12 @@ export default function TableComponent({
       touchAction: 'manipulation',
       WebkitTapHighlightColor: 'transparent',
     };
-    const seatStatus = getSeatStatus(seatId);
-    const visual = resolveSeatVisualState(seatStatus);
-    const disabledReason = seatStatus.isReserved
+    const disabledReason = status.isReserved
       ? 'reserved'
-      : seatStatus.isHold
-        ? 'hold'
-        : seatStatus.isPending
-          ? 'pending'
+      : status.isPending
+        ? 'pending'
+        : status.isHold
+          ? 'hold'
           : null;
     const resolvedReason = disabledReason && typeof seatReasonResolver === 'function'
       ? seatReasonResolver(disabledReason)
@@ -154,11 +175,18 @@ export default function TableComponent({
     const titleText = titleParts.filter(Boolean).join(' – ');
 
     if (interactive) {
+      const handleClick = (event) => {
+        const dataSeatState = event?.currentTarget?.dataset?.seatState || visual.statusKey;
+        onToggleSeat?.(seatId, {
+          dataSeatState,
+          seatStatus: status.statusKey,
+        });
+      };
       return (
         <button 
           key={seatId} 
-          onClick={() => onToggleSeat && onToggleSeat(seatId)} 
-          className={classes} 
+          onClick={handleClick} 
+          className={className} 
           style={style}
           disabled={Boolean(disabledReason)}
           type="button"
@@ -177,7 +205,7 @@ export default function TableComponent({
     return (
       <div
         key={seatId}
-        className={classes}
+        className={className}
         style={style}
         title={titleText}
         data-seat-id={seatId}

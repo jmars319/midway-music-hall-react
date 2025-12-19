@@ -2,11 +2,11 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { X, Send, AlertCircle, Phone, Mail } from 'lucide-react';
 import TableComponent from './TableComponent';
 import { API_BASE } from '../apiConfig';
-import { buildSeatLegendItems } from '../utils/seatingTheme';
+import { buildSeatLegendItems, buildSeatStatusMap } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/seatLabelUtils';
 import { CONTACT_LINK_CLASSES, formatPhoneHref } from '../utils/contactLinks';
-import { filterUnavailableSeats, resolveSeatDisableReason } from '../utils/seatAvailability';
+import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
 
 const publicSeatLabel = (label = '') => {
@@ -36,7 +36,7 @@ export default function EventSeatingModal({ event, onClose }) {
   const closeButtonRef = useRef(null);
   const errorResetTimer = useRef(null);
   const seatDebug = useSeatDebugLogger('event-modal');
-  const { log: seatDebugLog } = seatDebug;
+  const { log: seatDebugLog, enabled: seatDebugEnabled } = seatDebug;
   useSeatDebugProbe(canvasContainerRef, seatDebug);
   const titleId = `event-seating-title-${event.id}`;
   const nameInputId = `${titleId}-customer-name`;
@@ -60,6 +60,10 @@ export default function EventSeatingModal({ event, onClose }) {
   const reservedSet = useMemo(() => new Set(reservedSeats || []), [reservedSeats]);
   const pendingSet = useMemo(() => new Set(pendingSeats || []), [pendingSeats]);
   const holdSet = useMemo(() => new Set(holdSeats || []), [holdSeats]);
+  const seatStatusMap = useMemo(
+    () => buildSeatStatusMap({ reserved: reservedSeats, pending: pendingSeats, hold: holdSeats }),
+    [holdSeats, pendingSeats, reservedSeats]
+  );
   const legendItems = useMemo(() => buildSeatLegendItems(), []);
   const clearTransientErrorTimer = useCallback(() => {
     if (errorResetTimer.current) {
@@ -175,19 +179,32 @@ export default function EventSeatingModal({ event, onClose }) {
 
   const handleSeatInteraction = useCallback(
     (seatId, meta = {}) => {
-      const reason = resolveSeatDisableReason(seatId, reservedSet, pendingSet, holdSet);
+      const seatStatus = seatStatusMap.get(seatId) || 'available';
+      const isBlocked = seatStatus === 'reserved' || seatStatus === 'pending' || seatStatus === 'hold';
       seatDebugLog('seat-click', {
         eventId: event.id,
         seatId,
         tableId: meta.tableId || null,
-        disabled: Boolean(reason),
-        reason: reason || 'available',
+        disabled: isBlocked,
+        reason: seatStatus,
       });
-      if (reason) {
+      if (isBlocked) {
+        if (
+          seatDebugEnabled &&
+          meta?.dataSeatState &&
+          meta.dataSeatState !== seatStatus
+        ) {
+          seatDebugLog('status-mismatch', {
+            seatId,
+            renderedState: meta.dataSeatState,
+            computedState: seatStatus,
+            surface: 'event-modal',
+          });
+        }
         const message =
-          reason === 'reserved'
+          seatStatus === 'reserved'
             ? 'Seat already reserved.'
-            : reason === 'hold'
+            : seatStatus === 'hold'
               ? 'Seat currently on a temporary hold.'
               : 'Seat currently pending confirmation.';
         showTransientError(message);
@@ -206,7 +223,7 @@ export default function EventSeatingModal({ event, onClose }) {
         return next;
       });
     },
-    [event.id, holdSet, pendingSet, reservedSet, seatDebugLog, showTransientError]
+    [event.id, seatDebugEnabled, seatDebugLog, seatStatusMap, showTransientError]
   );
 
   const handleCancel = () => {
@@ -570,12 +587,6 @@ export default function EventSeatingModal({ event, onClose }) {
                       {/* Tables */}
                       {activeRows.map(row => {
                         if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
-                        
-                        const seatPrefix = `${row.section_name || row.section}-${row.row_label}-`;
-                        const reservedForRow = reservedSeats.filter((s) => s.startsWith(seatPrefix));
-                        const pendingForRow = pendingSeats.filter((s) => s.startsWith(seatPrefix));
-                        const holdForRow = holdSeats.filter((s) => s.startsWith(seatPrefix));
-                        
                         return (
                           <div
                             key={row.id}
@@ -596,17 +607,19 @@ export default function EventSeatingModal({ event, onClose }) {
                                   row={row}
                                   tableShape={row.table_shape || 'table-6'}
                                   selectedSeats={selectedSeats}
-                                  pendingSeats={pendingForRow}
-                                  holdSeats={holdForRow}
-                                  reservedSeats={reservedForRow}
-                                  onToggleSeat={(seatId) =>
+                                  pendingSeats={pendingSeats}
+                                  holdSeats={holdSeats}
+                                  reservedSeats={reservedSeats}
+                                  seatStatusMap={seatStatusMap}
+                                  onToggleSeat={(seatId, meta = {}) =>
                                     handleSeatInteraction(seatId, {
+                                      ...meta,
                                       tableId: row?.id || `${row.section_name}-${row.row_label}`,
                                       rowLabel: row.row_label,
                                       section: row.section_name || row.section,
                                     })
                                   }
-                                  interactive={true}
+                                  interactive
                                   labelFormatter={publicSeatLabel}
                                 />
                               </div>

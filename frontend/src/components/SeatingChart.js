@@ -3,8 +3,8 @@ import { Send, X, AlertCircle } from 'lucide-react';
 import TableComponent from './TableComponent';
 import { API_BASE } from '../apiConfig';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow, seatIdsForRow, resolveRowHeaderLabels } from '../utils/seatLabelUtils';
-import { filterUnavailableSeats, resolveSeatDisableReason } from '../utils/seatAvailability';
-import { buildSeatLegendItems } from '../utils/seatingTheme';
+import { filterUnavailableSeats } from '../utils/seatAvailability';
+import { buildSeatLegendItems, buildSeatStatusMap } from '../utils/seatingTheme';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
 
 const DEFAULT_STAGE_POSITION = { x: 50, y: 8 };
@@ -220,6 +220,7 @@ export default function SeatingChart({
             rows: Array.isArray(data.layout.layout_data) ? data.layout.layout_data.length : 0,
             reserved: 0,
             pending: 0,
+            hold: 0,
           });
           if (data.layout.stage_position) {
             setStagePosition({
@@ -279,6 +280,15 @@ export default function SeatingChart({
   const reservedSeatSet = useMemo(() => new Set(reservedSeatIds || []), [reservedSeatIds]);
   const pendingSeatSet = useMemo(() => new Set(pendingSeatIds || []), [pendingSeatIds]);
   const holdSeatSet = useMemo(() => new Set(holdSeatIds || []), [holdSeatIds]);
+  const seatStatusMap = useMemo(
+    () =>
+      buildSeatStatusMap({
+        reserved: reservedSeatIds,
+        pending: pendingSeatIds,
+        hold: holdSeatIds,
+      }),
+    [holdSeatIds, pendingSeatIds, reservedSeatIds]
+  );
 
   useEffect(() => {
     setSelectedSeats((prev) => {
@@ -348,19 +358,32 @@ export default function SeatingChart({
   const handleSeatInteraction = useCallback(
     (seatId, meta = {}) => {
       if (!interactive) return;
-      const reason = resolveSeatDisableReason(seatId, reservedSeatSet, pendingSeatSet, holdSeatSet);
+      const seatStatus = seatStatusMap.get(seatId) || 'available';
+      const isBlocked = seatStatus === 'reserved' || seatStatus === 'pending' || seatStatus === 'hold';
       seatDebugLog('seat-click', {
         eventId: resolvedEventId,
         seatId,
         tableId: meta.tableId || null,
-        disabled: Boolean(reason),
-        reason: reason || 'available',
+        disabled: isBlocked,
+        reason: seatStatus,
       });
-      if (reason) {
+      if (isBlocked) {
+        if (
+          seatDebugEnabled &&
+          meta?.dataSeatState &&
+          meta.dataSeatState !== seatStatus
+        ) {
+          seatDebugLog('status-mismatch', {
+            seatId,
+            renderedState: meta.dataSeatState,
+            computedState: seatStatus,
+            surface: 'seating-chart',
+          });
+        }
         const message =
-          reason === 'reserved'
+          seatStatus === 'reserved'
             ? 'That seat is already reserved.'
-            : reason === 'hold'
+            : seatStatus === 'hold'
               ? 'That seat is currently on a temporary hold.'
               : 'That seat currently has a pending request.';
         showTransientError(message);
@@ -379,7 +402,7 @@ export default function SeatingChart({
         return next;
       });
     },
-    [holdSeatSet, interactive, pendingSeatSet, reservedSeatSet, resolvedEventId, seatDebugLog, showTransientError]
+    [interactive, resolvedEventId, seatDebugEnabled, seatDebugLog, seatStatusMap, showTransientError]
   );
 
   const openRequestModal = () => {
@@ -584,10 +607,6 @@ export default function SeatingChart({
                 const minDimension = elementType === 'chair' ? 48 : 100;
                 const width = Math.max(baseWidth, minDimension);
                 const height = Math.max(baseHeight, minDimension);
-                const seatIds = seatIdsForRow(row);
-                    const reservedForRow = seatIds.filter((seatId) => reservedSeatSet.has(seatId));
-                    const pendingForRow = seatIds.filter((seatId) => pendingSeatSet.has(seatId));
-                    const holdForRow = seatIds.filter((seatId) => holdSeatSet.has(seatId));
                 const labels = resolveRowHeaderLabels(row);
                 const paddingValue = elementType === 'chair' ? '8px 6px' : '14px 10px';
                 const showFloatingLabel = !interactive && (labels.sectionLabel || labels.rowLabel);
@@ -630,11 +649,13 @@ export default function SeatingChart({
                           row={row}
                           tableShape={row.table_shape || row.seat_type || 'table-6'}
                           selectedSeats={selectedSeats}
-                          pendingSeats={pendingForRow}
-                          holdSeats={holdForRow}
-                          reservedSeats={reservedForRow}
-                          onToggleSeat={(seatId) =>
+                          pendingSeats={pendingSeatIds}
+                          holdSeats={holdSeatIds}
+                          reservedSeats={reservedSeatIds}
+                          seatStatusMap={seatStatusMap}
+                          onToggleSeat={(seatId, meta = {}) =>
                             handleSeatInteraction(seatId, {
+                              ...meta,
                               tableId: rowKey,
                               rowLabel: row.row_label,
                               section: row.section_name || row.section,

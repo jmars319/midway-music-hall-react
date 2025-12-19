@@ -54,17 +54,53 @@ export const buildSeatLegendItems = (keys = SEAT_STATUS_ORDER) =>
       className: seatingLegendSwatches[key],
     }));
 
+const STATUS_PRIORITY = {
+  available: 0,
+  hold: 1,
+  pending: 2,
+  reserved: 3,
+};
+
+const normalizeSeatList = (value = []) => {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((id) => (typeof id === 'string' || typeof id === 'number' ? String(id).trim() : ''))
+      .filter(Boolean);
+  }
+  if (value instanceof Set) {
+    return Array.from(value).map((id) => String(id)).filter(Boolean);
+  }
+  return [];
+};
+
+export function buildSeatStatusMap({ reserved = [], pending = [], hold = [] } = {}) {
+  const statusMap = new Map();
+  const applyStatus = (ids, status) => {
+    normalizeSeatList(ids).forEach((seatId) => {
+      const current = statusMap.get(seatId);
+      if (!current || STATUS_PRIORITY[status] >= STATUS_PRIORITY[current]) {
+        statusMap.set(seatId, status);
+      }
+    });
+  };
+  applyStatus(hold, 'hold');
+  applyStatus(pending, 'pending');
+  applyStatus(reserved, 'reserved');
+  return statusMap;
+}
+
 export function resolveSeatVisualState({
   isSelected = false,
   isReserved = false,
-  isHold = false,
   isPending = false,
+  isHold = false,
 } = {}) {
   let statusKey = 'available';
   if (isSelected) statusKey = 'selected';
   else if (isReserved) statusKey = 'reserved';
-  else if (isHold) statusKey = 'hold';
   else if (isPending) statusKey = 'pending';
+  else if (isHold) statusKey = 'hold';
 
   const visual = seatStatusVisualMap[statusKey] || seatStatusVisualMap.available;
   return {

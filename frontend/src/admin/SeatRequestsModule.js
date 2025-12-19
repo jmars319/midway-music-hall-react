@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { CheckCircle, XCircle, Trash2, Edit3, RefreshCw, X, Clock, ChevronDown, ChevronRight, Plus, Info } from 'lucide-react';
 import { API_BASE } from '../apiConfig';
 import TableComponent from '../components/TableComponent';
-import { buildSeatLegendItems } from '../utils/seatingTheme';
+import { buildSeatLegendItems, buildSeatStatusMap } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow, seatIdsForRow } from '../utils/seatLabelUtils';
 import { getSeatReasonMessage, getAdminReservationFailureMessage } from '../utils/reservationReasonMessages';
@@ -1034,6 +1034,15 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
   const reservedSeatSet = useMemo(() => new Set(reservedSeats || []), [reservedSeats]);
   const pendingSeatSet = useMemo(() => new Set(pendingSeats || []), [pendingSeats]);
   const holdSeatSet = useMemo(() => new Set(holdSeats || []), [holdSeats]);
+  const seatStatusMap = useMemo(
+    () =>
+      buildSeatStatusMap({
+        reserved: reservedSeats,
+        pending: pendingSeats,
+        hold: holdSeats,
+      }),
+    [holdSeats, pendingSeats, reservedSeats]
+  );
   const rowHasPosition = useCallback(
     (row) =>
       row &&
@@ -1335,7 +1344,6 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                       const seatIds = seatIdsForRow(row);
                       const reservedForRow = seatIds.filter((seatId) => reservedSeatSet.has(seatId));
                       const pendingForRow = seatIds.filter((seatId) => pendingSeatSet.has(seatId));
-                      const holdForRow = seatIds.filter((seatId) => holdSeatSet.has(seatId));
                       return (
                         <div
                           key={`${row.id}-${row.row_label}`}
@@ -1359,10 +1367,13 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                                 row={row}
                                 tableShape={row.table_shape || 'table-6'}
                                 selectedSeats={selectedSeats}
-                                pendingSeats={pendingForRow}
-                                holdSeats={holdForRow}
-                                reservedSeats={reservedForRow}
-                                onToggleSeat={(seatId) => toggleSeat(seatId, reservedForRow, pendingForRow)}
+                                pendingSeats={pendingSeats}
+                                holdSeats={holdSeats}
+                                reservedSeats={reservedSeats}
+                                seatStatusMap={seatStatusMap}
+                                onToggleSeat={(seatId, meta = {}) =>
+                                  toggleSeat(seatId, reservedForRow, pendingForRow, meta)
+                                }
                                 seatReasonResolver={getSeatReasonMessage}
                               />
                             </div>

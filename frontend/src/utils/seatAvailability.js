@@ -17,9 +17,9 @@ export function resolveSeatDisableReason(seatId, reservedSeats, pendingSeats, ho
   const reservedSet = toSeatSet(reservedSeats);
   if (reservedSet.has(seatId)) return SeatDisableReasons.RESERVED;
   const pendingSet = toSeatSet(pendingSeats);
+  if (pendingSet.has(seatId)) return SeatDisableReasons.PENDING;
   const holdSet = toSeatSet(holdSeats);
   if (holdSet.has(seatId)) return SeatDisableReasons.HOLD;
-  if (pendingSet.has(seatId)) return SeatDisableReasons.PENDING;
   return null;
 }
 
