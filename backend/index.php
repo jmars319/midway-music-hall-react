@@ -2854,50 +2854,56 @@ $router->add('POST', '/api/events', function (Request $request) {
             return Response::error('door_time is required and must include a valid date and time.', 422);
         }
         $publishAt = $payload['publish_at'] ?? ($status === 'published' && $startString ? $startString : null);
-        $stmt = $pdo->prepare('INSERT INTO events (artist_name, title, slug, description, notes, genre, category_tags, category_id, image_url, hero_image_id, poster_image_id, ticket_price, door_price, min_ticket_price, max_ticket_price, ticket_type, seating_enabled, venue_code, venue_section, timezone, start_datetime, end_datetime, door_time, event_date, event_time, age_restriction, status, visibility, publish_at, layout_id, layout_version_id, ticket_url, contact_name, contact_phone_raw, contact_phone_normalized, contact_email, contact_notes, seat_request_email_override, change_note, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        $stmt->execute([
-            $artist,
-            $title,
-            $slug,
-            $payload['description'] ?? null,
-            $payload['notes'] ?? null,
-            $payload['genre'] ?? null,
-            $categoryTags,
-            $categoryId,
-            $payload['image_url'] ?? null,
-            $payload['hero_image_id'] ?? null,
-            $payload['poster_image_id'] ?? null,
-            $ticketPrice,
-            $doorPrice,
-            $payload['min_ticket_price'] ?? $ticketPrice,
-            $payload['max_ticket_price'] ?? $doorPrice ?? $ticketPrice,
-            $ticketType,
-            $seatingEnabled,
-            $venueCode,
-            $payload['venue_section'] ?? null,
-            $timezone,
-            $startString,
-            $endString,
-            $doorTime,
-            $startDt ? $startDt->format('Y-m-d') : ($payload['event_date'] ?? null),
-            $startDt ? $startDt->format('H:i:s') : ($payload['event_time'] ?? null),
-            $payload['age_restriction'] ?? 'All Ages',
-            $status,
-            $visibility,
-            $publishAt,
-            $layoutId,
-            $layoutVersionId,
-            $payload['ticket_url'] ?? null,
-            $payload['contact_name'] ?? null,
-            $contactPhoneRaw,
-            $contactPhoneNormalized,
-            $payload['contact_email'] ?? null,
-            $payload['contact_notes'] ?? null,
-            $seatRequestOverride,
-            'created via API',
-            'api',
-            'api'
-        ]);
+        $hasContactNotesColumn = events_table_has_column($pdo, 'contact_notes');
+        $insertColumns = [
+            'artist_name' => $artist,
+            'title' => $title,
+            'slug' => $slug,
+            'description' => $payload['description'] ?? null,
+            'notes' => $payload['notes'] ?? null,
+            'genre' => $payload['genre'] ?? null,
+            'category_tags' => $categoryTags,
+            'category_id' => $categoryId,
+            'image_url' => $payload['image_url'] ?? null,
+            'hero_image_id' => $payload['hero_image_id'] ?? null,
+            'poster_image_id' => $payload['poster_image_id'] ?? null,
+            'ticket_price' => $ticketPrice,
+            'door_price' => $doorPrice,
+            'min_ticket_price' => $payload['min_ticket_price'] ?? $ticketPrice,
+            'max_ticket_price' => $payload['max_ticket_price'] ?? $doorPrice ?? $ticketPrice,
+            'ticket_type' => $ticketType,
+            'seating_enabled' => $seatingEnabled,
+            'venue_code' => $venueCode,
+            'venue_section' => $payload['venue_section'] ?? null,
+            'timezone' => $timezone,
+            'start_datetime' => $startString,
+            'end_datetime' => $endString,
+            'door_time' => $doorTime,
+            'event_date' => $startDt ? $startDt->format('Y-m-d') : ($payload['event_date'] ?? null),
+            'event_time' => $startDt ? $startDt->format('H:i:s') : ($payload['event_time'] ?? null),
+            'age_restriction' => $payload['age_restriction'] ?? 'All Ages',
+            'status' => $status,
+            'visibility' => $visibility,
+            'publish_at' => $publishAt,
+            'layout_id' => $layoutId,
+            'layout_version_id' => $layoutVersionId,
+            'ticket_url' => $payload['ticket_url'] ?? null,
+            'contact_name' => $payload['contact_name'] ?? null,
+            'contact_phone_raw' => $contactPhoneRaw,
+            'contact_phone_normalized' => $contactPhoneNormalized,
+            'contact_email' => $payload['contact_email'] ?? null,
+        ];
+        if ($hasContactNotesColumn) {
+            $insertColumns['contact_notes'] = $payload['contact_notes'] ?? null;
+        }
+        $insertColumns['seat_request_email_override'] = $seatRequestOverride;
+        $insertColumns['change_note'] = 'created via API';
+        $insertColumns['created_by'] = 'api';
+        $insertColumns['updated_by'] = 'api';
+        $placeholders = implode(', ', array_fill(0, count($insertColumns), '?'));
+        $sql = 'INSERT INTO events (' . implode(', ', array_keys($insertColumns)) . ") VALUES ({$placeholders})";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(array_values($insertColumns));
         $id = (int)$pdo->lastInsertId();
         record_audit('event.create', 'event', $id, [
             'slug' => $slug,
@@ -2912,7 +2918,8 @@ $router->add('POST', '/api/events', function (Request $request) {
         if (APP_DEBUG) {
             error_log('POST /api/events error: ' . $e->getMessage());
         }
-        Response::error('Failed to create event', 500);
+        $errorExtra = APP_DEBUG ? ['error' => $e->getMessage()] : [];
+        Response::error('Failed to create event', 500, $errorExtra);
     }
 });
 
@@ -2920,6 +2927,7 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
     try {
         $pdo = Database::connection();
         $hasCategoryTable = event_categories_table_exists($pdo);
+        $hasContactNotesColumn = events_table_has_column($pdo, 'contact_notes');
         $eventId = (int)$params['id'];
         $existingStmt = $pdo->prepare('SELECT * FROM events WHERE id = ? LIMIT 1');
         $existingStmt->execute([$eventId]);
@@ -3022,50 +3030,58 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             return Response::error('door_time is required and must include a valid date and time.', 422);
         }
 
-        $stmt = $pdo->prepare('UPDATE events SET artist_name = ?, title = ?, slug = ?, description = ?, notes = ?, genre = ?, category_tags = ?, category_id = ?, image_url = ?, hero_image_id = ?, poster_image_id = ?, ticket_price = ?, door_price = ?, min_ticket_price = ?, max_ticket_price = ?, ticket_type = ?, seating_enabled = ?, venue_code = ?, venue_section = ?, timezone = ?, start_datetime = ?, end_datetime = ?, door_time = ?, event_date = ?, event_time = ?, age_restriction = ?, status = ?, visibility = ?, publish_at = ?, layout_id = ?, layout_version_id = ?, ticket_url = ?, contact_name = ?, contact_phone_raw = ?, contact_phone_normalized = ?, contact_email = ?, contact_notes = ?, seat_request_email_override = ?, change_note = ?, updated_by = ? WHERE id = ?');
-        $stmt->execute([
-            $artist,
-            $title,
-            $slug,
-            $payload['description'] ?? $existing['description'],
-            $payload['notes'] ?? $existing['notes'],
-            $payload['genre'] ?? $existing['genre'],
-            $categoryTags,
-            $categoryId,
-            $payload['image_url'] ?? $existing['image_url'],
-            $payload['hero_image_id'] ?? $existing['hero_image_id'],
-            $payload['poster_image_id'] ?? $existing['poster_image_id'],
-            $payload['ticket_price'] ?? $existing['ticket_price'],
-            $payload['door_price'] ?? $existing['door_price'],
-            $payload['min_ticket_price'] ?? $existing['min_ticket_price'],
-            $payload['max_ticket_price'] ?? $existing['max_ticket_price'],
-            $ticketType,
-            $seatingEnabled,
-            $venueCode,
-            $payload['venue_section'] ?? $existing['venue_section'],
-            $timezone,
-            $startString,
-            $endString,
-            $doorTime,
-            $startDt ? $startDt->format('Y-m-d') : ($payload['event_date'] ?? $existing['event_date']),
-            $startDt ? $startDt->format('H:i:s') : ($payload['event_time'] ?? $existing['event_time']),
-            $payload['age_restriction'] ?? $existing['age_restriction'],
-            $status,
-            $visibility,
-            $publishAt,
-            $layoutId,
-            $layoutVersionId,
-            $payload['ticket_url'] ?? $existing['ticket_url'],
-            $payload['contact_name'] ?? $existing['contact_name'],
-            $contactPhoneRaw,
-            $contactPhoneNormalized,
-            $payload['contact_email'] ?? $existing['contact_email'],
-            $payload['contact_notes'] ?? $existing['contact_notes'],
-            $seatRequestOverride,
-            $payload['change_note'] ?? 'updated via API',
-            'api',
-            $eventId
-        ]);
+        $updateColumns = [
+            'artist_name' => $artist,
+            'title' => $title,
+            'slug' => $slug,
+            'description' => $payload['description'] ?? $existing['description'],
+            'notes' => $payload['notes'] ?? $existing['notes'],
+            'genre' => $payload['genre'] ?? $existing['genre'],
+            'category_tags' => $categoryTags,
+            'category_id' => $categoryId,
+            'image_url' => $payload['image_url'] ?? $existing['image_url'],
+            'hero_image_id' => $payload['hero_image_id'] ?? $existing['hero_image_id'],
+            'poster_image_id' => $payload['poster_image_id'] ?? $existing['poster_image_id'],
+            'ticket_price' => $payload['ticket_price'] ?? $existing['ticket_price'],
+            'door_price' => $payload['door_price'] ?? $existing['door_price'],
+            'min_ticket_price' => $payload['min_ticket_price'] ?? $existing['min_ticket_price'],
+            'max_ticket_price' => $payload['max_ticket_price'] ?? $existing['max_ticket_price'],
+            'ticket_type' => $ticketType,
+            'seating_enabled' => $seatingEnabled,
+            'venue_code' => $venueCode,
+            'venue_section' => $payload['venue_section'] ?? $existing['venue_section'],
+            'timezone' => $timezone,
+            'start_datetime' => $startString,
+            'end_datetime' => $endString,
+            'door_time' => $doorTime,
+            'event_date' => $startDt ? $startDt->format('Y-m-d') : ($payload['event_date'] ?? $existing['event_date']),
+            'event_time' => $startDt ? $startDt->format('H:i:s') : ($payload['event_time'] ?? $existing['event_time']),
+            'age_restriction' => $payload['age_restriction'] ?? $existing['age_restriction'],
+            'status' => $status,
+            'visibility' => $visibility,
+            'publish_at' => $publishAt,
+            'layout_id' => $layoutId,
+            'layout_version_id' => $layoutVersionId,
+            'ticket_url' => $payload['ticket_url'] ?? $existing['ticket_url'],
+            'contact_name' => $payload['contact_name'] ?? $existing['contact_name'],
+            'contact_phone_raw' => $contactPhoneRaw,
+            'contact_phone_normalized' => $contactPhoneNormalized,
+            'contact_email' => $payload['contact_email'] ?? $existing['contact_email'],
+        ];
+        if ($hasContactNotesColumn) {
+            $updateColumns['contact_notes'] = $payload['contact_notes'] ?? $existing['contact_notes'];
+        }
+        $updateColumns['seat_request_email_override'] = $seatRequestOverride;
+        $updateColumns['change_note'] = $payload['change_note'] ?? 'updated via API';
+        $updateColumns['updated_by'] = 'api';
+        $assignments = implode(', ', array_map(function ($col) {
+            return "{$col} = ?";
+        }, array_keys($updateColumns)));
+        $sql = 'UPDATE events SET ' . $assignments . ' WHERE id = ?';
+        $stmt = $pdo->prepare($sql);
+        $values = array_values($updateColumns);
+        $values[] = $eventId;
+        $stmt->execute($values);
         record_audit('event.update', 'event', $eventId, [
             'slug' => $slug,
             'status' => $status,
@@ -3079,7 +3095,8 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         if (APP_DEBUG) {
             error_log('PUT /api/events/:id error: ' . $e->getMessage());
         }
-        Response::error('Failed to update event', 500);
+        $errorExtra = APP_DEBUG ? ['error' => $e->getMessage()] : [];
+        Response::error('Failed to update event', 500, $errorExtra);
     }
 });
 
