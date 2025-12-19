@@ -8,12 +8,36 @@ import { buildSeatLabel, normalizeSeatLabels, resolveRowHeaderLabels } from '../
 
 const isDevBuild = process.env.NODE_ENV !== 'production';
 
-const initialForm = {
+const DEFAULT_STAGE_POSITION = { x: 50, y: 10 };
+const DEFAULT_STAGE_SIZE = { width: 200, height: 80 };
+const DEFAULT_CANVAS = { preset: 'standard', width: 1200, height: 800 };
+
+const buildEmptyLayoutRow = () => ({
+  id: `placeholder-${Math.random().toString(36).slice(2, 8)}`,
+  element_type: 'marker',
+  label: 'Tap "Edit layout" to customize',
+  section_name: 'Layout',
+  row_label: '',
+  seat_type: 'general',
+  table_shape: null,
+  total_seats: 0,
+  pos_x: 50,
+  pos_y: 50,
+  rotation: 0,
+  width: 140,
+  height: 110,
+  color: '#4b5563',
+  seat_labels: {}
+});
+
+const buildEmptyLayoutData = () => [buildEmptyLayoutRow()];
+
+const createInitialFormState = () => ({
   name: '',
   description: '',
   is_default: false,
-  layout_data: []
-};
+  layout_data: buildEmptyLayoutData(),
+});
 
 const seatTypes = ['general', 'premium', 'vip', 'accessible'];
 const tableShapes = [
@@ -62,7 +86,7 @@ export default function LayoutsModule() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [formData, setFormData] = useState(initialForm);
+  const [formData, setFormData] = useState(() => createInitialFormState());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showPreview, setShowPreview] = useState(null);
@@ -140,7 +164,7 @@ export default function LayoutsModule() {
 
   const openAdd = () => {
     setEditing(null);
-    setFormData(initialForm);
+    setFormData(createInitialFormState());
     setShowForm(true);
     setError('');
   };
@@ -189,7 +213,9 @@ export default function LayoutsModule() {
       name: `${layout.name} (Copy)`,
       description: layout.description || '',
       is_default: false,
-      layout_data: layout.layout_data || []
+      layout_data: Array.isArray(layout.layout_data) && layout.layout_data.length
+        ? layout.layout_data
+        : buildEmptyLayoutData(),
     });
     setShowForm(true);
     setError('');
@@ -205,6 +231,11 @@ export default function LayoutsModule() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const trimmedName = (formData.name || '').trim();
+    if (!trimmedName) {
+      setError('Please enter a layout name before saving.');
+      return;
+    }
     setSubmitting(true);
     setError('');
     
@@ -213,13 +244,15 @@ export default function LayoutsModule() {
       const url = editing ? `${API_BASE}/seating-layouts/${editing.id}` : `${API_BASE}/seating-layouts`;
       
       const payload = {
-        name: formData.name,
+        name: trimmedName,
         description: formData.description,
         is_default: formData.is_default ? 1 : 0,
-        layout_data: formData.layout_data,
-        stage_position: editing?.stage_position || null,
-        stage_size: editing?.stage_size || null,
-        canvas_settings: editing?.canvas_settings || null
+        layout_data: Array.isArray(formData.layout_data) && formData.layout_data.length
+          ? formData.layout_data
+          : buildEmptyLayoutData(),
+        stage_position: editing?.stage_position || DEFAULT_STAGE_POSITION,
+        stage_size: editing?.stage_size || DEFAULT_STAGE_SIZE,
+        canvas_settings: editing?.canvas_settings || DEFAULT_CANVAS
       };
 
       const res = await fetch(url, {
@@ -886,8 +919,9 @@ export default function LayoutsModule() {
 
       {/* Visual Editor Modal */}
       {showEditor && editingLayout && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-7xl h-[90vh] flex flex-col">
+        <div className="fixed inset-0 bg-black/70 z-50 p-4 overflow-y-auto">
+          <div className="min-h-full flex items-start justify-center w-full">
+            <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-7xl max-h-[90vh] h-full flex flex-col overflow-hidden">
             {/* Header */}
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 p-6 border-b border-gray-200 dark:border-gray-700">
               <div className="flex-1 flex flex-col gap-3">
@@ -933,97 +967,98 @@ export default function LayoutsModule() {
               </div>
             </div>
 
-            {/* Grid Controls */}
-            <div className="flex flex-wrap items-center gap-4 px-6 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showGrid}
-                  onChange={(e) => setShowGrid(e.target.checked)}
-                  className="w-4 h-4 text-purple-600 rounded"
-                />
-                <span className="text-sm font-medium">Show Grid</span>
-              </label>
-              
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={snapToGrid}
-                  onChange={(e) => setSnapToGrid(e.target.checked)}
-                  className="w-4 h-4 text-purple-600 rounded"
-                />
-                <span className="text-sm font-medium">Snap to Grid</span>
-              </label>
+            <div className="flex-1 overflow-y-auto">
+              {/* Grid Controls */}
+              <div className="flex flex-wrap items-center gap-4 px-6 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showGrid}
+                    onChange={(e) => setShowGrid(e.target.checked)}
+                    className="w-4 h-4 text-purple-600 rounded"
+                  />
+                  <span className="text-sm font-medium">Show Grid</span>
+                </label>
+                
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={snapToGrid}
+                    onChange={(e) => setSnapToGrid(e.target.checked)}
+                    className="w-4 h-4 text-purple-600 rounded"
+                  />
+                  <span className="text-sm font-medium">Snap to Grid</span>
+                </label>
 
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">Grid Size:</span>
-                <input
-                  type="range"
-                  min="2"
-                  max="20"
-                  step="1"
-                  value={gridSize}
-                  onChange={(e) => setGridSize(Number(e.target.value))}
-                  className="w-32"
-                />
-                <span className="text-sm text-gray-600 dark:text-gray-400 w-8">{gridSize}%</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">Canvas:</span>
-                <select
-                  value={canvasSettings.preset}
-                  onChange={(e) => handleCanvasPresetChange(e.target.value)}
-                  className="px-2 py-1 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
-                >
-                  {canvasPresets.map((preset) => (
-                    <option key={preset.key} value={preset.key}>{preset.label}</option>
-                  ))}
-                </select>
-                <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                  <span>{Math.round(canvasSettings.width)}px</span>
-                  <span>×</span>
-                  <span>{Math.round(canvasSettings.height)}px</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Grid Size:</span>
+                  <input
+                    type="range"
+                    min="2"
+                    max="20"
+                    step="1"
+                    value={gridSize}
+                    onChange={(e) => setGridSize(Number(e.target.value))}
+                    className="w-32"
+                  />
+                  <span className="text-sm text-gray-600 dark:text-gray-400 w-8">{gridSize}%</span>
                 </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Canvas:</span>
+                  <select
+                    value={canvasSettings.preset}
+                    onChange={(e) => handleCanvasPresetChange(e.target.value)}
+                    className="px-2 py-1 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
+                  >
+                    {canvasPresets.map((preset) => (
+                      <option key={preset.key} value={preset.key}>{preset.label}</option>
+                    ))}
+                  </select>
+                  <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                    <span>{Math.round(canvasSettings.width)}px</span>
+                    <span>×</span>
+                    <span>{Math.round(canvasSettings.height)}px</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Zoom:</span>
+                  <button
+                    onClick={() => setZoom((prev) => Math.max(0.5, parseFloat((prev - 0.1).toFixed(2))))}
+                    className="p-1.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
+                    title="Zoom out"
+                  >
+                    <ZoomOut className="h-4 w-4" />
+                  </button>
+                  <span className="text-sm w-12 text-center">{Math.round(zoom * 100)}%</span>
+                  <button
+                    onClick={() => setZoom((prev) => Math.min(2, parseFloat((prev + 0.1).toFixed(2))))}
+                    className="p-1.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
+                    title="Zoom in"
+                  >
+                    <ZoomIn className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
+                    className="p-1.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
+                    title="Reset view"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => setPanMode(!panMode)}
+                  className={`px-3 py-1.5 rounded text-sm flex items-center gap-2 ${panMode ? 'bg-purple-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+                >
+                  <Move className="h-4 w-4" />
+                  {panMode ? 'Panning Enabled' : 'Pan View'}
+                </button>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">Zoom:</span>
-                <button
-                  onClick={() => setZoom((prev) => Math.max(0.5, parseFloat((prev - 0.1).toFixed(2))))}
-                  className="p-1.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
-                  title="Zoom out"
-                >
-                  <ZoomOut className="h-4 w-4" />
-                </button>
-                <span className="text-sm w-12 text-center">{Math.round(zoom * 100)}%</span>
-                <button
-                  onClick={() => setZoom((prev) => Math.min(2, parseFloat((prev + 0.1).toFixed(2))))}
-                  className="p-1.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
-                  title="Zoom in"
-                >
-                  <ZoomIn className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
-                  className="p-1.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
-                  title="Reset view"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                </button>
-              </div>
-
-              <button
-                onClick={() => setPanMode(!panMode)}
-                className={`px-3 py-1.5 rounded text-sm flex items-center gap-2 ${panMode ? 'bg-purple-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
-              >
-                <Move className="h-4 w-4" />
-                {panMode ? 'Panning Enabled' : 'Pan View'}
-              </button>
-            </div>
-
-            {/* Main Editor Area */}
-            <div className="flex-1 flex overflow-hidden">
+              {/* Main Editor Area */}
+              <div className="flex-1 flex overflow-hidden">
               {/* Canvas */}
               <div 
                 ref={containerRef}
@@ -1526,6 +1561,8 @@ export default function LayoutsModule() {
             </div>
           </div>
         </div>
+      </div>
+    </div>
       )}
     </div>
   );

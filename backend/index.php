@@ -3465,17 +3465,28 @@ $router->add('GET', '/api/seating-layouts/:id', function ($request, $params) {
 
 $router->add('POST', '/api/seating-layouts', function (Request $request) {
     $payload = read_json_body($request);
-    $name = $payload['name'] ?? null;
+    $rawName = isset($payload['name']) ? trim((string) $payload['name']) : '';
     $layoutData = $payload['layout_data'] ?? null;
-    if (!$name || !$layoutData) {
-        return Response::error('Name and layout_data are required', 400);
+    $missing = [];
+    if ($rawName === '') {
+        $missing[] = 'name';
+    }
+    if (!is_array($layoutData) || empty($layoutData)) {
+        $missing[] = 'layout_data';
+    }
+    if ($missing) {
+        return Response::error(
+            'Missing required fields: ' . implode(', ', $missing),
+            400,
+            ['missing_fields' => $missing]
+        );
     }
     $isDefault = !empty($payload['is_default']);
     if ($isDefault) {
         Database::run('UPDATE seating_layouts SET is_default = 0');
     }
     Database::run('INSERT INTO seating_layouts (name, description, is_default, layout_data, canvas_settings) VALUES (?, ?, ?, ?, ?)', [
-        $name,
+        $rawName,
         $payload['description'] ?? '',
         $isDefault ? 1 : 0,
         json_encode($layoutData),
