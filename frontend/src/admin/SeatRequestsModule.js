@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { CheckCircle, XCircle, Trash2, Edit3, RefreshCw, X, Clock, ChevronDown, ChevronRight, Plus, Info } from 'lucide-react';
 import { API_BASE } from '../apiConfig';
 import TableComponent from '../components/TableComponent';
-import { seatingLegendSwatches, seatingStatusLabels } from '../utils/seatingTheme';
+import { buildSeatLegendItems } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow, seatIdsForRow } from '../utils/seatLabelUtils';
 import { getSeatReasonMessage, getAdminReservationFailureMessage } from '../utils/reservationReasonMessages';
@@ -1005,6 +1005,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
   const [layoutRows, setLayoutRows] = useState([]);
   const [reservedSeats, setReservedSeats] = useState([]);
   const [pendingSeats, setPendingSeats] = useState([]);
+  const [holdSeats, setHoldSeats] = useState([]);
   const [stagePosition, setStagePosition] = useState({ x: 50, y: 10 });
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
   const [canvasSettings, setCanvasSettings] = useState({ width: 1200, height: 800 });
@@ -1032,6 +1033,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
   const decorRows = useMemo(() => activeRows.filter((row) => !isSeatRow(row)), [activeRows]);
   const reservedSeatSet = useMemo(() => new Set(reservedSeats || []), [reservedSeats]);
   const pendingSeatSet = useMemo(() => new Set(pendingSeats || []), [pendingSeats]);
+  const holdSeatSet = useMemo(() => new Set(holdSeats || []), [holdSeats]);
   const rowHasPosition = useCallback(
     (row) =>
       row &&
@@ -1049,10 +1051,10 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
       if (!prev.length) {
         return prev;
       }
-      const filtered = filterUnavailableSeats(prev, reservedSeatSet, pendingSeatSet);
+      const filtered = filterUnavailableSeats(prev, reservedSeatSet, pendingSeatSet, holdSeatSet);
       return filtered.length === prev.length ? prev : filtered;
     });
-  }, [pendingSeatSet, reservedSeatSet]);
+  }, [holdSeatSet, pendingSeatSet, reservedSeatSet]);
 
   useEffect(() => {
     if (selectedEventId) {
@@ -1074,6 +1076,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
         setLayoutRows(Array.isArray(data.seating) ? data.seating : []);
         setReservedSeats(data.reservedSeats || []);
         setPendingSeats(data.pendingSeats || []);
+        setHoldSeats(data.holdSeats || []);
         if (data.stagePosition) setStagePosition(data.stagePosition);
         if (data.stageSize) setStageSize(data.stageSize);
         if (data.canvasSettings) {
@@ -1159,12 +1162,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
     }
   };
 
-  const legendItems = [
-    { key: 'available', label: seatingStatusLabels.available, className: seatingLegendSwatches.available },
-    { key: 'selected', label: seatingStatusLabels.selected, className: seatingLegendSwatches.selected },
-    { key: 'pending', label: seatingStatusLabels.pending, className: seatingLegendSwatches.pending },
-    { key: 'reserved', label: seatingStatusLabels.reserved, className: seatingLegendSwatches.reserved },
-  ];
+  const legendItems = useMemo(() => buildSeatLegendItems(), []);
 
   const selectedEvent = events.find((ev) => String(ev.id) === String(selectedEventId));
   const hasPositions = positionedSeatRows.length > 0;
@@ -1337,6 +1335,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                       const seatIds = seatIdsForRow(row);
                       const reservedForRow = seatIds.filter((seatId) => reservedSeatSet.has(seatId));
                       const pendingForRow = seatIds.filter((seatId) => pendingSeatSet.has(seatId));
+                      const holdForRow = seatIds.filter((seatId) => holdSeatSet.has(seatId));
                       return (
                         <div
                           key={`${row.id}-${row.row_label}`}
@@ -1361,9 +1360,9 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                                 tableShape={row.table_shape || 'table-6'}
                                 selectedSeats={selectedSeats}
                                 pendingSeats={pendingForRow}
+                                holdSeats={holdForRow}
                                 reservedSeats={reservedForRow}
                                 onToggleSeat={(seatId) => toggleSeat(seatId, reservedForRow, pendingForRow)}
-                                showSeatReason
                                 seatReasonResolver={getSeatReasonMessage}
                               />
                             </div>

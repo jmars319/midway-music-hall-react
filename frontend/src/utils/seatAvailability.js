@@ -3,6 +3,7 @@
 export const SeatDisableReasons = {
   RESERVED: 'reserved',
   PENDING: 'pending',
+  HOLD: 'hold',
 };
 
 const toSeatSet = (collection = []) => {
@@ -11,20 +12,25 @@ const toSeatSet = (collection = []) => {
   return new Set();
 };
 
-export function resolveSeatDisableReason(seatId, reservedSeats, pendingSeats) {
+export function resolveSeatDisableReason(seatId, reservedSeats, pendingSeats, holdSeats = []) {
   if (!seatId) return null;
   const reservedSet = toSeatSet(reservedSeats);
   if (reservedSet.has(seatId)) return SeatDisableReasons.RESERVED;
   const pendingSet = toSeatSet(pendingSeats);
+  const holdSet = toSeatSet(holdSeats);
+  if (holdSet.has(seatId)) return SeatDisableReasons.HOLD;
   if (pendingSet.has(seatId)) return SeatDisableReasons.PENDING;
   return null;
 }
 
-export function filterUnavailableSeats(selection = [], reservedSeats, pendingSeats) {
+export function filterUnavailableSeats(selection = [], reservedSeats, pendingSeats, holdSeats = []) {
   if (!Array.isArray(selection) || selection.length === 0) return [];
   const reservedSet = toSeatSet(reservedSeats);
   const pendingSet = toSeatSet(pendingSeats);
-  return selection.filter((seatId) => seatId && !reservedSet.has(seatId) && !pendingSet.has(seatId));
+  const holdSet = toSeatSet(holdSeats);
+  return selection.filter(
+    (seatId) => seatId && !reservedSet.has(seatId) && !pendingSet.has(seatId) && !holdSet.has(seatId)
+  );
 }
 
 // Stress helper used by tests to validate sequential reservation flows.

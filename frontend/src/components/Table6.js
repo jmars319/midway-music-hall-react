@@ -1,6 +1,6 @@
 import React from 'react';
 import { Armchair } from 'lucide-react';
-import { seatingStatusClasses } from '../utils/seatingTheme';
+import { resolveSeatVisualState } from '../utils/seatingTheme';
 
 // small helper to pick classes per seat type
 const seatTypeClass = (type) => {
@@ -70,12 +70,10 @@ export default function Table6({ row, size = 80, selectedSeats = [], pendingSeat
 
   const seatClasses = (seatId) => {
     const isReserved = reservedSeatList.includes(seatId);
-    const isPending = (!isReserved) && Array.isArray(pendingSeats) && pendingSeats.includes(seatId);
-    const isSelected = selectedSeats.includes(seatId) && !isReserved && !isPending;
-    if (isReserved) return seatingStatusClasses.reserved;
-    if (isPending) return seatingStatusClasses.pending;
-    if (isSelected) return seatingStatusClasses.selected;
-    return seatTypeClass(row.seat_type);
+    const isPending = !isReserved && Array.isArray(pendingSeats) && pendingSeats.includes(seatId);
+    const isSelected = !isReserved && !isPending && selectedSeats.includes(seatId);
+    const visual = resolveSeatVisualState({ isReserved, isPending, isHold: false, isSelected });
+    return visual.statusKey === 'available' ? seatTypeClass(row.seat_type) : visual.className;
   };
 
   return (

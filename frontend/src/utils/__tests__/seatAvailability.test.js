@@ -32,6 +32,16 @@ describe('seatAvailability sequential guard', () => {
     expect(resolveSeatDisableReason('SIM-3', reserved, pending)).toBeNull();
   });
 
+  test('held seats surface distinct reason and block selection', () => {
+    const reserved = new Set();
+    const pending = new Set(['SIM-2']);
+    const holds = new Set(['SIM-3']);
+
+    expect(resolveSeatDisableReason('SIM-3', reserved, pending, holds)).toBe(SeatDisableReasons.HOLD);
+    const result = filterUnavailableSeats(['SIM-1', 'SIM-2', 'SIM-3'], reserved, pending, holds);
+    expect(result).toEqual(['SIM-1']);
+  });
+
   test('stress helper stays healthy for large runs', () => {
     const result = simulateSequentialReservationRun({ totalSeats: 120, pendingInterval: 7 });
     expect(result.successfulRequests).toBe(120);

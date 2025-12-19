@@ -4,6 +4,7 @@ import TableComponent from './TableComponent';
 import { API_BASE } from '../apiConfig';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow, seatIdsForRow, resolveRowHeaderLabels } from '../utils/seatLabelUtils';
 import { filterUnavailableSeats, resolveSeatDisableReason } from '../utils/seatAvailability';
+import { buildSeatLegendItems } from '../utils/seatingTheme';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
 
 const DEFAULT_STAGE_POSITION = { x: 50, y: 8 };
@@ -39,6 +40,7 @@ export default function SeatingChart({
   const [layoutRows, setLayoutRows] = useState(externalLayoutProvided ? seatingConfig : []);
   const [reservedSeatIds, setReservedSeatIds] = useState(externalReservedProvided ? reservedSeats : []);
   const [pendingSeatIds, setPendingSeatIds] = useState(externalPendingProvided ? pendingSeats : []);
+  const [holdSeatIds, setHoldSeatIds] = useState([]);
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [layoutRefreshToken, setLayoutRefreshToken] = useState(0);
@@ -71,6 +73,7 @@ export default function SeatingChart({
   const seatDebug = useSeatDebugLogger('public');
   const { log: seatDebugLog, enabled: seatDebugEnabled } = seatDebug;
   useSeatDebugProbe(seatingSurfaceRef, seatDebug);
+  const legendItems = useMemo(() => buildSeatLegendItems(), []);
 
   const clearTransientErrorTimer = useCallback(() => {
     if (errorResetTimer.current) {
@@ -179,12 +182,14 @@ export default function SeatingChart({
           setLayoutRows(Array.isArray(data.seating) ? data.seating : []);
           setReservedSeatIds(Array.isArray(data.reservedSeats) ? data.reservedSeats : []);
           setPendingSeatIds(Array.isArray(data.pendingSeats) ? data.pendingSeats : []);
+          setHoldSeatIds(Array.isArray(data.holdSeats) ? data.holdSeats : []);
           seatDebugLog('layout-load-success', {
             eventId,
             refreshToken: layoutRefreshToken,
             rows: Array.isArray(data.seating) ? data.seating.length : 0,
             reserved: Array.isArray(data.reservedSeats) ? data.reservedSeats.length : 0,
             pending: Array.isArray(data.pendingSeats) ? data.pendingSeats.length : 0,
+            hold: Array.isArray(data.holdSeats) ? data.holdSeats.length : 0,
           });
           if (data.stagePosition) {
             setStagePosition({
@@ -206,6 +211,9 @@ export default function SeatingChart({
           }
         } else if (data.layout) {
           setLayoutRows(Array.isArray(data.layout.layout_data) ? data.layout.layout_data : []);
+          setReservedSeatIds([]);
+          setPendingSeatIds([]);
+          setHoldSeatIds([]);
           seatDebugLog('layout-load-success', {
             eventId: null,
             refreshToken: layoutRefreshToken,
@@ -270,13 +278,14 @@ export default function SeatingChart({
   const seatLabelMap = useMemo(() => buildSeatLookupMap(seatRows), [seatRows]);
   const reservedSeatSet = useMemo(() => new Set(reservedSeatIds || []), [reservedSeatIds]);
   const pendingSeatSet = useMemo(() => new Set(pendingSeatIds || []), [pendingSeatIds]);
+  const holdSeatSet = useMemo(() => new Set(holdSeatIds || []), [holdSeatIds]);
 
   useEffect(() => {
     setSelectedSeats((prev) => {
-      const filtered = filterUnavailableSeats(prev, reservedSeatSet, pendingSeatSet);
+      const filtered = filterUnavailableSeats(prev, reservedSeatSet, pendingSeatSet, holdSeatSet);
       return filtered.length === prev.length ? prev : filtered;
     });
-  }, [pendingSeatSet, reservedSeatSet]);
+  }, [holdSeatSet, pendingSeatSet, reservedSeatSet]);
 
   useEffect(() => {
     setSelectedSeats((prev) => (prev.length ? [] : prev));
@@ -304,6 +313,7 @@ export default function SeatingChart({
         seatId: firstSeat,
         reserved: reservedSeatSet.has(firstSeat),
         pending: pendingSeatSet.has(firstSeat),
+        hold: holdSeatSet.has(firstSeat),
       };
     }).filter(Boolean);
     seatDebugLog('seat-status-snapshot', {
@@ -312,9 +322,10 @@ export default function SeatingChart({
       decorRows: decorRows.length,
       reservedCount: reservedSeatSet.size,
       pendingCount: pendingSeatSet.size,
+      holdCount: holdSeatSet.size,
       sample,
     });
-  }, [decorRows.length, layoutRows, pendingSeatSet, positionedSeatRows, reservedSeatSet, seatDebugEnabled, seatDebugLog, seatRows.length]);
+  }, [decorRows.length, holdSeatSet, layoutRows, pendingSeatSet, positionedSeatRows, reservedSeatSet, seatDebugEnabled, seatDebugLog, seatRows.length]);
 
   useEffect(() => {
     if (!seatDebugEnabled) return;
@@ -337,7 +348,7 @@ export default function SeatingChart({
   const handleSeatInteraction = useCallback(
     (seatId, meta = {}) => {
       if (!interactive) return;
-      const reason = resolveSeatDisableReason(seatId, reservedSeatSet, pendingSeatSet);
+      const reason = resolveSeatDisableReason(seatId, reservedSeatSet, pendingSeatSet, holdSeatSet);
       seatDebugLog('seat-click', {
         eventId: resolvedEventId,
         seatId,
@@ -349,7 +360,9 @@ export default function SeatingChart({
         const message =
           reason === 'reserved'
             ? 'That seat is already reserved.'
-            : 'That seat currently has a pending request.';
+            : reason === 'hold'
+              ? 'That seat is currently on a temporary hold.'
+              : 'That seat currently has a pending request.';
         showTransientError(message);
         return;
       }
@@ -366,7 +379,7 @@ export default function SeatingChart({
         return next;
       });
     },
-    [interactive, pendingSeatSet, reservedSeatSet, resolvedEventId, seatDebugLog, showTransientError]
+    [holdSeatSet, interactive, pendingSeatSet, reservedSeatSet, resolvedEventId, seatDebugLog, showTransientError]
   );
 
   const openRequestModal = () => {
@@ -572,8 +585,9 @@ export default function SeatingChart({
                 const width = Math.max(baseWidth, minDimension);
                 const height = Math.max(baseHeight, minDimension);
                 const seatIds = seatIdsForRow(row);
-                const reservedForRow = seatIds.filter((seatId) => reservedSeatSet.has(seatId));
-                const pendingForRow = seatIds.filter((seatId) => pendingSeatSet.has(seatId));
+                    const reservedForRow = seatIds.filter((seatId) => reservedSeatSet.has(seatId));
+                    const pendingForRow = seatIds.filter((seatId) => pendingSeatSet.has(seatId));
+                    const holdForRow = seatIds.filter((seatId) => holdSeatSet.has(seatId));
                 const labels = resolveRowHeaderLabels(row);
                 const paddingValue = elementType === 'chair' ? '8px 6px' : '14px 10px';
                 const showFloatingLabel = !interactive && (labels.sectionLabel || labels.rowLabel);
@@ -617,6 +631,7 @@ export default function SeatingChart({
                           tableShape={row.table_shape || row.seat_type || 'table-6'}
                           selectedSeats={selectedSeats}
                           pendingSeats={pendingForRow}
+                          holdSeats={holdForRow}
                           reservedSeats={reservedForRow}
                           onToggleSeat={(seatId) =>
                             handleSeatInteraction(seatId, {
@@ -654,20 +669,12 @@ export default function SeatingChart({
         {showLegend && (
           <aside className="bg-gray-900/80 border border-purple-500/20 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-64 flex-shrink-0 xl:sticky xl:top-6 self-start">
             <div className="font-semibold mb-3">Legend</div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="w-5 h-5 rounded bg-gray-500" /> <span>Available</span>
-            </div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="w-5 h-5 rounded bg-purple-700 ring-2 ring-purple-400" />{' '}
-              <span>Your Selection</span>
-            </div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="w-5 h-5 rounded bg-purple-500/80 border-2 border-dashed border-purple-300" />{' '}
-              <span>Pending</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded bg-red-600 ring-2 ring-red-400" /> <span>Reserved</span>
-            </div>
+            {legendItems.map((item) => (
+              <div className="flex items-center gap-2 mb-2 last:mb-0" key={item.key}>
+                <span className={`w-5 h-5 rounded ${item.className}`} />
+                <span>{item.label}</span>
+              </div>
+            ))}
           </aside>
         )}
       </div>

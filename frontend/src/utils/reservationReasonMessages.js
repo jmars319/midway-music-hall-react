@@ -4,6 +4,7 @@ export const RESERVATION_REASON_FALLBACK_MESSAGE =
 const seatReasonMessages = {
   reserved: 'Seat already confirmed for another guest.',
   pending: 'Seat is part of a pending request awaiting review.',
+  hold: 'Seat is currently on a temporary hold awaiting confirmation.',
 };
 
 const reservationReasonMessages = {

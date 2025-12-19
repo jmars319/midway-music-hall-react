@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { X, Send, AlertCircle, Phone, Mail } from 'lucide-react';
 import TableComponent from './TableComponent';
 import { API_BASE } from '../apiConfig';
-import { seatingLegendSwatches, seatingStatusLabels } from '../utils/seatingTheme';
+import { buildSeatLegendItems } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
 import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/seatLabelUtils';
 import { CONTACT_LINK_CLASSES, formatPhoneHref } from '../utils/contactLinks';
@@ -20,6 +20,7 @@ export default function EventSeatingModal({ event, onClose }) {
   const [seatingConfig, setSeatingConfig] = useState([]);
   const [reservedSeats, setReservedSeats] = useState([]);
   const [pendingSeats, setPendingSeats] = useState([]);
+  const [holdSeats, setHoldSeats] = useState([]);
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -58,6 +59,8 @@ export default function EventSeatingModal({ event, onClose }) {
   const contactPhoneHref = formatPhoneHref(contactPhone);
   const reservedSet = useMemo(() => new Set(reservedSeats || []), [reservedSeats]);
   const pendingSet = useMemo(() => new Set(pendingSeats || []), [pendingSeats]);
+  const holdSet = useMemo(() => new Set(holdSeats || []), [holdSeats]);
+  const legendItems = useMemo(() => buildSeatLegendItems(), []);
   const clearTransientErrorTimer = useCallback(() => {
     if (errorResetTimer.current) {
       clearTimeout(errorResetTimer.current);
@@ -113,10 +116,10 @@ export default function EventSeatingModal({ event, onClose }) {
 
   useEffect(() => {
     setSelectedSeats((prev) => {
-      const filtered = filterUnavailableSeats(prev, reservedSet, pendingSet);
+      const filtered = filterUnavailableSeats(prev, reservedSet, pendingSet, holdSet);
       return filtered.length === prev.length ? prev : filtered;
     });
-  }, [pendingSet, reservedSet]);
+  }, [holdSet, pendingSet, reservedSet]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
   const fetchEventSeating = async () => {
@@ -125,16 +128,18 @@ export default function EventSeatingModal({ event, onClose }) {
       const res = await fetch(`${API_BASE}/seating/event/${event.id}`);
       seatDebugLog('modal-layout-load-start', { eventId: event.id });
       const data = await res.json();
-      if (data.success) {
-        setSeatingConfig(data.seating || []);
-        setReservedSeats(data.reservedSeats || []);
-        setPendingSeats(data.pendingSeats || []);
-        seatDebugLog('modal-layout-load-success', {
-          eventId: event.id,
-          rows: Array.isArray(data.seating) ? data.seating.length : 0,
-          reserved: Array.isArray(data.reservedSeats) ? data.reservedSeats.length : 0,
-          pending: Array.isArray(data.pendingSeats) ? data.pendingSeats.length : 0,
-        });
+        if (data.success) {
+          setSeatingConfig(data.seating || []);
+          setReservedSeats(data.reservedSeats || []);
+          setPendingSeats(data.pendingSeats || []);
+          setHoldSeats(data.holdSeats || []);
+          seatDebugLog('modal-layout-load-success', {
+            eventId: event.id,
+            rows: Array.isArray(data.seating) ? data.seating.length : 0,
+            reserved: Array.isArray(data.reservedSeats) ? data.reservedSeats.length : 0,
+            pending: Array.isArray(data.pendingSeats) ? data.pendingSeats.length : 0,
+            hold: Array.isArray(data.holdSeats) ? data.holdSeats.length : 0,
+          });
         if (data.stagePosition) {
           setStagePosition(data.stagePosition);
         }
@@ -170,7 +175,7 @@ export default function EventSeatingModal({ event, onClose }) {
 
   const handleSeatInteraction = useCallback(
     (seatId, meta = {}) => {
-      const reason = resolveSeatDisableReason(seatId, reservedSet, pendingSet);
+      const reason = resolveSeatDisableReason(seatId, reservedSet, pendingSet, holdSet);
       seatDebugLog('seat-click', {
         eventId: event.id,
         seatId,
@@ -182,7 +187,9 @@ export default function EventSeatingModal({ event, onClose }) {
         const message =
           reason === 'reserved'
             ? 'Seat already reserved.'
-            : 'Seat currently pending confirmation.';
+            : reason === 'hold'
+              ? 'Seat currently on a temporary hold.'
+              : 'Seat currently pending confirmation.';
         showTransientError(message);
         return;
       }
@@ -199,7 +206,7 @@ export default function EventSeatingModal({ event, onClose }) {
         return next;
       });
     },
-    [event.id, pendingSet, reservedSet, seatDebugLog, showTransientError]
+    [event.id, holdSet, pendingSet, reservedSet, seatDebugLog, showTransientError]
   );
 
   const handleCancel = () => {
@@ -310,16 +317,13 @@ export default function EventSeatingModal({ event, onClose }) {
     }
   };
 
-  const hasPositions = activeRows.some(r => 
-    r.pos_x !== null && r.pos_y !== null && 
-    r.pos_x !== undefined && r.pos_y !== undefined
+  const hasPositions = activeRows.some(
+    (r) =>
+      r.pos_x !== null &&
+      r.pos_y !== null &&
+      r.pos_x !== undefined &&
+      r.pos_y !== undefined
   );
-  const legendItems = [
-    { key: 'available', label: seatingStatusLabels.available, className: seatingLegendSwatches.available },
-    { key: 'selected', label: seatingStatusLabels.selected, className: seatingLegendSwatches.selected },
-    { key: 'pending', label: seatingStatusLabels.pending, className: seatingLegendSwatches.pending },
-    { key: 'reserved', label: seatingStatusLabels.reserved, className: seatingLegendSwatches.reserved },
-  ];
 
   return (
     <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4" role="presentation">
@@ -567,8 +571,10 @@ export default function EventSeatingModal({ event, onClose }) {
                       {activeRows.map(row => {
                         if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
                         
-                        const reservedForRow = reservedSeats.filter(s => s.startsWith(`${row.section_name || row.section}-${row.row_label}-`));
-                        const pendingForRow = pendingSeats.filter(s => s.startsWith(`${row.section_name || row.section}-${row.row_label}-`));
+                        const seatPrefix = `${row.section_name || row.section}-${row.row_label}-`;
+                        const reservedForRow = reservedSeats.filter((s) => s.startsWith(seatPrefix));
+                        const pendingForRow = pendingSeats.filter((s) => s.startsWith(seatPrefix));
+                        const holdForRow = holdSeats.filter((s) => s.startsWith(seatPrefix));
                         
                         return (
                           <div
@@ -591,6 +597,7 @@ export default function EventSeatingModal({ event, onClose }) {
                                   tableShape={row.table_shape || 'table-6'}
                                   selectedSeats={selectedSeats}
                                   pendingSeats={pendingForRow}
+                                  holdSeats={holdForRow}
                                   reservedSeats={reservedForRow}
                                   onToggleSeat={(seatId) =>
                                     handleSeatInteraction(seatId, {
