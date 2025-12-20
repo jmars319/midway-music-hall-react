@@ -2,25 +2,20 @@
 
 > **Deployment note:** The production site now uses the `/api` backend layout documented in `../DEPLOYMENT_GUIDE.md`. Always deploy the root `.htaccess`; the old `frontend/.htaccess-deployment` file has been retired.
 
-React application with two modes: single-page landing and full application.
+React application for the full Midway Music Hall experience (public + admin). The retired single-page landing remains in `archive/SinglePageLanding.js` for posterity but is no longer built.
 
 ## Build & Run
 
-**Single-Page Landing (Production):**
-```bash
-REACT_APP_SINGLE_PAGE=true npm run build
-# Deploy build/ contents to web server
-```
-
-**Full Application (Development):**
+**Full Application (Development/Production):**
 ```bash
 npm install
 npm start  # Opens http://localhost:3000
+# npm run build  # Production bundle
 ```
 
 ## Structure
 
-- **`src/SinglePageLanding.js`** - Single-page public landing
+- **`archive/SinglePageLanding.js`** - Legacy single-page landing kept for reference (not bundled)
 - **`src/components/`** - Public components (seating, schedule, navigation)
 - **`src/admin/`** - Admin panel modules (events, seating, requests, suggestions)
 - **`src/pages/`** - Page components (HomePage, LoginPage)
@@ -49,7 +44,6 @@ Use the repository root `.htaccess` at deployment time (already configured for H
 ## Configuration
 
 - **API Base:** Configured in `App.js` via `API_BASE` constant
-- **Environment Variable:** `REACT_APP_SINGLE_PAGE=true` switches to landing mode
 - **Styling:** Tailwind CSS (see `tailwind.config.js`)
 
 See `../DEVELOPER_GUIDE.md` for detailed component architecture.
