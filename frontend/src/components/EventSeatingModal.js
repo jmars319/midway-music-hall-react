@@ -554,7 +554,7 @@ export default function EventSeatingModal({ event, onClose }) {
               </div>
             ) : (
               <div className="flex flex-col xl:flex-row gap-4 h-full">
-                <div className="relative flex-1 min-h-[360px]">
+                <div className="relative flex-1 min-h-[360px] min-w-0">
                   <div
                     className="relative h-full bg-gray-100 dark:bg-gray-900 rounded-xl overflow-auto border border-purple-500/20"
                     ref={canvasContainerRef}
@@ -630,14 +630,16 @@ export default function EventSeatingModal({ event, onClose }) {
                     </div>
                   </div>
                 </div>
-                <aside className="bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-64 flex-shrink-0">
+                <aside className="bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-72 flex-shrink-0 max-h-[320px] xl:max-h-[calc(100vh-10rem)] overflow-y-auto">
                   <div className="font-semibold mb-3 text-white">Legend</div>
-                  {legendItems.map((item) => (
-                    <div className="flex items-center gap-2 mb-2 last:mb-0" key={item.key}>
-                      <span className={`w-6 h-6 rounded ${item.className}`} />
-                      <span>{item.label}</span>
-                    </div>
-                  ))}
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                    {legendItems.map((item) => (
+                      <div className="flex items-center gap-2 min-w-0" key={item.key}>
+                        <span className={`w-6 h-6 rounded ${item.className}`} />
+                        <span className="text-sm text-gray-100 break-words">{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
                 </aside>
               </div>
             )}
