@@ -1,4 +1,5 @@
 # Midway Music Hall Deployment – GoDaddy cPanel + Cloudflare + phpMyAdmin
+> PageSpeed posture is documented in `PAGESPEED_TRADEOFFS.md`; treat those decisions as locked unless leadership explicitly revisits them.
 
 > **Canonical Notice:** This file is the single source of truth for deployments. `DEPLOY.md`, `DEPLOY_SMOKE_TEST.md`, and other historical docs remain for reference but are marked legacy—always start here.
 
@@ -137,6 +138,7 @@ ADMIN_SESSION_COOKIE_SECURE=true
 3. **Edge settings**: Enable Brotli + Auto Minify (HTML/CSS/JS). Keep Rocket Loader OFF to avoid script issues.
 4. **Caching**: “Standard” level, respect origin headers. Purge after each deploy.
 5. cPanel/GoDaddy should keep AutoSSL enabled for the origin certificate (Cloudflare handles public cert).
+6. **Scrape Shield**: Disable *Email Address Obfuscation* so Cloudflare doesn’t inject `email-decode.min.js`, which blocks rendering on mobile. Our HTML already exposes mailto links safely.
 
 ---
 
