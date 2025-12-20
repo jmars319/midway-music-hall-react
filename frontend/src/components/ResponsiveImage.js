@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { buildImageVariant } from '../utils/imageVariants';
+import { buildVariantFromUrl, DEFAULT_EVENT_ICON_PATH } from '../utils/preferWebp';
+import { DEFAULT_EVENT_ICON_SRC } from './BrandImage';
 
-const DEFAULT_EVENT_FALLBACK = '/iconslogos/mmh-default-event@1x.png';
+const DEFAULT_EVENT_FALLBACK_VARIANT = buildVariantFromUrl(DEFAULT_EVENT_ICON_SRC || DEFAULT_EVENT_ICON_PATH);
 
 /**
  * Shared image component that renders a responsive <picture> block with
@@ -24,17 +26,24 @@ export default function ResponsiveImage({
   fill = false,
   ...rest
 }) {
-  const defaultFallback = fallback || DEFAULT_EVENT_FALLBACK;
+  const fallbackVariant = useMemo(() => {
+    if (!fallback) {
+      return DEFAULT_EVENT_FALLBACK_VARIANT;
+    }
+    return buildVariantFromUrl(fallback) || DEFAULT_EVENT_FALLBACK_VARIANT;
+  }, [fallback]);
+
+  const fallbackUrl = fallbackVariant?.original || fallbackVariant?.fallback || DEFAULT_EVENT_ICON_SRC || DEFAULT_EVENT_ICON_PATH;
 
   const variant = useMemo(() => {
     if (image) {
-      return buildImageVariant(image, defaultFallback);
+      return buildImageVariant(image, fallbackUrl);
     }
     if (src) {
-      return buildImageVariant({ original: src }, defaultFallback);
+      return buildImageVariant({ original: src }, fallbackUrl);
     }
-    return buildImageVariant(null, defaultFallback);
-  }, [image, src, defaultFallback]);
+    return buildImageVariant(fallbackVariant, fallbackUrl);
+  }, [image, src, fallbackVariant, fallbackUrl]);
 
   const resolvedWidth = width || variant.width || undefined;
   const resolvedHeight = height || variant.height || undefined;
@@ -64,10 +73,10 @@ export default function ResponsiveImage({
         || normalizedFallbackAspectRatio,
       );
 
-  const [currentSrc, setCurrentSrc] = useState(variant.src || variant.fallback || defaultFallback);
+  const [currentSrc, setCurrentSrc] = useState(variant.src || variant.fallback || fallbackUrl);
   useEffect(() => {
-    setCurrentSrc(variant.src || variant.fallback || defaultFallback);
-  }, [variant.src, variant.fallback, defaultFallback]);
+    setCurrentSrc(variant.src || variant.fallback || fallbackUrl);
+  }, [variant.src, variant.fallback, fallbackUrl]);
 
   const loading = priority ? 'eager' : 'lazy';
   const fetchPriority = priority ? 'high' : undefined;
@@ -76,7 +85,7 @@ export default function ResponsiveImage({
     : undefined;
 
   const handleError = (event) => {
-    const fallbackSrc = variant.fallback || defaultFallback;
+    const fallbackSrc = variant.fallback || fallbackUrl;
     if (!fallbackSrc || event?.target?.dataset?.fallbackApplied) {
       return;
     }
@@ -119,7 +128,7 @@ export default function ResponsiveImage({
         />
       ))}
       <img
-        src={currentSrc || variant.fallback || defaultFallback}
+        src={currentSrc || variant.fallback || fallbackUrl}
         alt={alt}
         width={imgWidth}
         height={imgHeight}
