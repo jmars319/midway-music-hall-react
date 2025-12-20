@@ -213,6 +213,9 @@ export default function EventsModule(){
   const [listError, setListError] = useState('');
   const [seriesExpanded, setSeriesExpanded] = useState({});
   const [seriesActionId, setSeriesActionId] = useState(null);
+  const [refreshingLayout, setRefreshingLayout] = useState(false);
+  const [refreshLayoutMessage, setRefreshLayoutMessage] = useState('');
+  const [refreshLayoutError, setRefreshLayoutError] = useState('');
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -1040,11 +1043,15 @@ export default function EventsModule(){
     setFormData(initialForm);
     setImageFile(null);
     setImagePreview(null);
+    setRefreshLayoutError('');
+    setRefreshLayoutMessage('');
     setShowForm(true);
   };
 
   const openEdit = (event) => {
     setEditing(event);
+    setRefreshLayoutError('');
+    setRefreshLayoutMessage('');
     setFormData({
       artist_name: event.artist_name || '',
       event_date: event.event_date || '',
@@ -1094,6 +1101,17 @@ const clearImage = () => {
   setFormData(prev => ({ ...prev, image_url: '' }));
 };
 
+const parseJsonSafely = (payload) => {
+  if (!payload) return null;
+  try {
+    return JSON.parse(payload);
+  } catch (err) {
+    console.error('Failed to parse JSON payload', err, payload);
+    return null;
+  }
+};
+
+
 const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reject) => {
   const formDataUpload = new FormData();
   formDataUpload.append('image', file);
@@ -1128,6 +1146,44 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
   xhr.send(formDataUpload);
 }), []);
 
+  const refreshLayoutSnapshot = async () => {
+    const editingId = editing?.id;
+    if (!editingId) {
+      setRefreshLayoutError('Open an event to refresh its layout.');
+      return;
+    }
+    if (!editing.layout_id && !(formData.layout_id && String(formData.layout_id).trim() !== '')) {
+      setRefreshLayoutError('Assign a seating layout before refreshing.');
+      return;
+    }
+    setRefreshingLayout(true);
+    setRefreshLayoutError('');
+    setRefreshLayoutMessage('');
+    try {
+      const res = await fetch(`${API_BASE}/events/${editingId}/refresh-layout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const responseText = await res.text();
+      const data = parseJsonSafely(responseText) || {};
+      if (!res.ok || !data.success) {
+        const errorMessage = data?.message || data?.error || `Server returned status ${res.status}.`;
+        throw new Error(errorMessage);
+      }
+      const newVersionId = data.layout_version_id || null;
+      setRefreshLayoutMessage('Layout snapshot updated. Public seat pickers now use the latest template.');
+      setEditing((prev) => {
+        if (!prev || Number(prev.id) !== Number(editingId)) return prev;
+        return { ...prev, layout_version_id: newVersionId };
+      });
+      setEvents((prev) => prev.map((evt) => (Number(evt.id) === Number(editingId) ? { ...evt, layout_version_id: newVersionId } : evt)));
+    } catch (err) {
+      console.error('Failed to refresh layout snapshot', err);
+      setRefreshLayoutError(err.message || 'Unable to refresh layout. Please try again.');
+    } finally {
+      setRefreshingLayout(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1762,6 +1818,23 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                   ))}
                 </select>
                 <p className="text-xs text-gray-400 mt-1">Select a saved layout or leave as None if this event doesn't use seat reservations</p>
+                {editing && (formData.layout_id || editing.layout_id) && (
+                  <div className="mt-3 space-y-2">
+                    <button
+                      type="button"
+                      onClick={refreshLayoutSnapshot}
+                      disabled={refreshingLayout}
+                      className="inline-flex items-center justify-center rounded bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm font-medium text-white transition"
+                    >
+                      {refreshingLayout ? 'Refreshing layout…' : 'Apply latest layout template'}
+                    </button>
+                    <p className="text-xs text-gray-400">
+                      Use this after editing the layout template so the public seating chart stays in sync.
+                    </p>
+                    {refreshLayoutMessage && <p className="text-xs text-green-400">{refreshLayoutMessage}</p>}
+                    {refreshLayoutError && <p className="text-xs text-red-400">{refreshLayoutError}</p>}
+                  </div>
+                )}
               </div>
 
               <div className="md:col-span-2">

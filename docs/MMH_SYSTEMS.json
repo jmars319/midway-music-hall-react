@@ -1,6 +1,6 @@
 {
   "executiveSummary": [
-    "MMH is a React SPA plus PHP API hosted in one repo (`frontend/src/SinglePageLanding.js`, `backend/index.php`).",
+    "MMH is a React SPA plus PHP API hosted in one repo (`frontend/src/components/*`, legacy landing in `frontend/archive/SinglePageLanding.js`, `backend/index.php`).",
     "Public seating requests originate from `EventSeatingModal.js` and hit `/api/seating/event/:id` plus `/api/seat-requests` (backend/index.php:3263-3739).",
     "Admins manage stats, events, seat requests, and media through modules like `DashboardModule.js`, `SeatRequestsModule.js`, and `MediaManager.js` backed by `/api/dashboard-stats`, `/api/seat-requests`, and `/api/media`.",
     "Image uploads are processed into responsive variants by `/api/media` and `backend/lib/ImageUtils.php`, then rendered via `ResponsiveImage.js` and `imageVariants.js`.",
@@ -76,7 +76,7 @@
   "flows": {
     "publicReservation": "User opens EventSeatingModal, fetches /api/seating/event/:id, selects seats filtered by seatAvailability.js, submits to /api/seat-requests which snapshots the layout (backend/index.php:1733-1833).",
     "adminManualReservation": "SeatRequestsModule fetches admin events, staff submit manual POST /api/seat-requests with overrides, and backend locking (`detect_seat_conflicts`, `apply_seat_reservations`) enforces exclusivity.",
-    "layoutRefresh": "Layouts managed via /api/seating-layouts* (backend/index.php:3426-3517) are snapshot when requests arrive; holds expire through expire_stale_holds and the modal reloads reserved/pending seats each time.",
+    "layoutRefresh": "Layouts managed via /api/seating-layouts* (backend/index.php:3426-3517) can be resnapshotted on demand from the event editor via POST /api/events/:id/refresh-layout so public pickers reflect template edits without reassigning layouts; holds still expire through expire_stale_holds and the modal reloads reserved/pending seats each time.",
     "eventMediaFlow": "EventsModule previews art with ResponsiveImage/getImageUrlSync, MediaManager uploads to /api/media, backend/lib/ImageUtils.php generates variants, and components consume `image_variants`.",
     "brandingFlow": "Navigation/Hero use BrandImage srcsets and apiConfig fallbacks while useSiteContent fetches /api/site-content and merges with DEFAULT_CONTENT.",
     "auditFlow": "DashboardModule calls /api/audit-log?limit=6, backend/index.php:2589-2659 returns recent record_audit entries for seat requests, events, categories, and settings."

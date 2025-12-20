@@ -213,6 +213,11 @@ useEffect(() => {
    - Select layout from dropdown
    - Save event
 
+4. **Refresh Layout Snapshot (when templates change)**
+   - While editing an event that already has a layout assigned, click **"Apply latest layout template"**
+   - The admin UI calls `POST /api/events/:id/refresh-layout`, snapshots the template, and updates the event’s `layout_version_id`
+   - Use whenever tables/chairs are added or removed so the public picker reflects the latest blueprint without re-entering event data
+
 ### Customer Workflow:
 
 1. **View Homepage**
@@ -278,14 +283,12 @@ useEffect(() => {
 - Seat requests, previews, and public seat pickers always read from that frozen version so guest communications stay consistent even if the template changes later.
 - Editing a layout template does **not** update events that already captured a version — staff must edit each event (or reassign the layout) to pull in the new seating.
 
-### Staff-Friendly Recommendation
+### Layout Refresh Control
 
-- Keep the current snapshot-by-default behavior so existing seat requests never silently shift.
-- Add an explicit **“Refresh layout from template”** control inside the event editor:
-  1. Confirm with staff that pending holds will keep their prior snapshot.
-  2. Snapshot the latest template for the selected `layout_id` and update the event’s `layout_version_id`.
-  3. Reload the seating preview so changes are visible immediately.
-- This opt-in refresh keeps control in staff hands and avoids large global changes while still making it easy to adopt template tweaks.
+- Admins now have an **“Apply latest layout template”** action inside the event editor.
+- The button invokes `POST /api/events/:id/refresh-layout`, snapshots the assigned template, updates `layout_version_id`, and logs `event.layout.refresh` in the audit log.
+- Pending and approved seat requests remain intact because reservations live in `seat_requests`; the refresh only changes what future viewers see.
+- Use the control whenever a template is edited after events have already been configured so the dancefloor layout matches reality without re-entering the event.
 
 ---
 

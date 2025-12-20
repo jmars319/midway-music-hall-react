@@ -1536,7 +1536,7 @@ function expire_stale_holds(PDO $pdo): void
     }
 }
 
-function snapshot_layout_version(PDO $pdo, ?int $layoutId, string $changeNote = 'auto-snapshot'): ?int
+function snapshot_layout_version(PDO $pdo, ?int $layoutId, string $changeNote = 'auto-snapshot', string $createdBy = 'system'): ?int
 {
     if (!$layoutId) {
         return null;
@@ -1558,7 +1558,7 @@ function snapshot_layout_version(PDO $pdo, ?int $layoutId, string $changeNote = 
         $layout['stage_position'],
         $layout['stage_size'],
         $layout['canvas_settings'] ?? null,
-        'system',
+        $createdBy ?: 'system',
         $changeNote
     ]);
     return (int) $pdo->lastInsertId();
@@ -3097,6 +3097,43 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         }
         $errorExtra = APP_DEBUG ? ['error' => $e->getMessage()] : [];
         Response::error('Failed to update event', 500, $errorExtra);
+    }
+});
+
+$router->add('POST', '/api/events/:id/refresh-layout', function (Request $request, $params) {
+    try {
+        $pdo = Database::connection();
+        $eventId = (int) $params['id'];
+        $stmt = $pdo->prepare('SELECT id, layout_id, layout_version_id FROM events WHERE id = ? LIMIT 1');
+        $stmt->execute([$eventId]);
+        $event = $stmt->fetch();
+        if (!$event) {
+            return Response::error('Event not found', 404);
+        }
+        $layoutId = (int) ($event['layout_id'] ?? 0);
+        if (!$layoutId) {
+            return Response::error('Assign a seating layout before refreshing.', 422);
+        }
+        $actor = audit_log_actor();
+        $newVersionId = snapshot_layout_version($pdo, $layoutId, 'manual-refresh', $actor);
+        if (!$newVersionId) {
+            return Response::error('Unable to snapshot the selected layout.', 500);
+        }
+        $update = $pdo->prepare('UPDATE events SET layout_version_id = ?, change_note = ?, updated_by = ? WHERE id = ?');
+        $update->execute([$newVersionId, 'layout refresh via admin', $actor, $eventId]);
+        record_audit('event.layout.refresh', 'event', $eventId, [
+            'layout_id' => $layoutId,
+            'layout_version_id' => $newVersionId,
+        ]);
+        Response::success([
+            'layout_version_id' => $newVersionId,
+            'layout_id' => $layoutId,
+        ]);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('POST /api/events/:id/refresh-layout error: ' . $e->getMessage());
+        }
+        Response::error('Unable to refresh layout for this event.', 500);
     }
 });
 
