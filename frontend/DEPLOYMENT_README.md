@@ -138,7 +138,7 @@ code frontend/src/data/events.json
 
 # 2. Rebuild
 cd frontend
-REACT_APP_SINGLE_PAGE=true npm run build
+npm run build  # Full SPA bundle
 
 # 3. Create new package
 cd build

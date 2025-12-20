@@ -34,7 +34,7 @@ Single-page landing deployment to GoDaddy cPanel with Cloudflare SSL.
 
 ```bash
 cd frontend
-REACT_APP_SINGLE_PAGE=true npm run build
+npm run build  # Legacy static-only deployment now uses the full SPA bundle
 # Creates: frontend/midway-music-hall-deploy.zip (2.9 MB)
 ```
 
@@ -101,7 +101,7 @@ public_html/
 code frontend/src/data/events.json
 
 # 2. Rebuild
-cd frontend && REACT_APP_SINGLE_PAGE=true npm run build
+cd frontend && npm run build
 
 # 3. Package
 cd build && zip -r ../deploy-$(date +%Y%m%d).zip .
@@ -133,4 +133,4 @@ cd build && zip -r ../deploy-$(date +%Y%m%d).zip .
 
 **Full Documentation:** See `DEPLOYMENT_GUIDE.md` for detailed step-by-step instructions.  
 **Package Location:** `frontend/midway-music-hall-deploy.zip`  
-**Build Command:** `REACT_APP_SINGLE_PAGE=true npm run build`
+**Build Command:** `npm run build`

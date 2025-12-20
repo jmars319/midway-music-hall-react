@@ -4,13 +4,6 @@ React-based website for Midway Music Hall featuring a public landing page and fu
 
 ## Quick Start
 
-### Single-Page Landing (Production)
-```bash
-cd frontend
-REACT_APP_SINGLE_PAGE=true npm run build
-# Deploy contents of build/ folder to web server
-```
-
 ### Full Application (Development)
 ```bash
 # Backend (Terminal 1)
@@ -26,10 +19,10 @@ npm start
 ## Project Structure
 
 - **`frontend/`** - React application with Tailwind CSS
-  - Single-page landing mode (env: `REACT_APP_SINGLE_PAGE=true`)
   - Full application with admin panel
   - Production build: `frontend/build/`
   - Deployment package: `frontend/midway-music-hall-deploy.zip`
+  - Legacy single-page landing preserved in `frontend/archive/SinglePageLanding.js` for reference only
 
 - **`backend/`** - PHP API server
   - Event management endpoints
