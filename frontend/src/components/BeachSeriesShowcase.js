@@ -33,13 +33,19 @@ export default function BeachSeriesShowcase({ events = [] }) {
   const beachContact = useMemo(() => {
     const contacts = Array.isArray(siteContent.contacts) ? siteContent.contacts : [];
     const matcher = (value = '') => /beach/i.test(value);
-    return (
-      contacts.find((contact) => matcher(contact.title) || matcher(contact.notes)) ||
-      contacts.find((contact) => matcher(contact.name)) ||
-      contacts[1] ||
-      contacts[0] ||
-      null
-    );
+    if (!contacts.length) return null;
+
+    // Prefer the dedicated Beach Bands contact by email (mmhbeachbands@ or similar)
+    const emailMatch = contacts.find((contact) => matcher(contact.email));
+    if (emailMatch) return emailMatch;
+
+    const titleOrNotesMatch = contacts.find((contact) => matcher(contact.title) || matcher(contact.notes));
+    if (titleOrNotesMatch) return titleOrNotesMatch;
+
+    const nameMatch = contacts.find((contact) => matcher(contact.name));
+    if (nameMatch) return nameMatch;
+
+    return contacts[1] || contacts[0] || null;
   }, [siteContent]);
 
   const contactInstructions = beachContact?.notes || 'Call or text with Beach Bands questions or seat requests.';
