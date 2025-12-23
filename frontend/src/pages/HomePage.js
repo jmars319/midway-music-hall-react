@@ -119,9 +119,14 @@ const sameWeek = (date, now) => {
 
 const lookupSeriesMetadata = (master) => {
   const override = SERIES_OVERRIDES.find((item) => item.match.test(master.title || master.artist_name || ''));
-  const summary = override?.summary || master.description || master.notes || 'Recurring community series.';
-  const scheduleLabel = override?.schedule || 'Recurring schedule';
-  return { summary, scheduleLabel, overrideKey: override?.key || null };
+  const getTrimmed = (value) => (typeof value === 'string' ? value.trim() : '');
+  const customSummary = getTrimmed(master.series_summary);
+  const customSchedule = getTrimmed(master.series_schedule_label);
+  const customFooter = getTrimmed(master.series_footer_note);
+  const summary = customSummary || override?.summary || master.description || master.notes || 'Recurring community series.';
+  const scheduleLabel = customSchedule || override?.schedule || 'Recurring schedule';
+  const footerNote = customFooter || null;
+  return { summary, scheduleLabel, footerNote, overrideKey: override?.key || null };
 };
 
 const getSeriesDisplayName = (event = {}) => event.series_label || event.title || event.artist_name || 'Recurring Series';
@@ -176,7 +181,7 @@ const buildRecurringSeries = (masters, occurrences, now) => {
       return null;
     }
     const happeningThisWeek = nextOccurrence ? sameWeek(getEventDateValue(nextOccurrence), now) : false;
-    const { summary, scheduleLabel, overrideKey } = lookupSeriesMetadata(masterLike || {});
+    const { summary, scheduleLabel, footerNote, overrideKey } = lookupSeriesMetadata(masterLike || {});
     const displayNameSource = masterLike || {};
     const fallbackBaseKey = normalizeSeriesKey(getSeriesDisplayName(displayNameSource));
     const baseKey = overrideKey || fallbackBaseKey;
@@ -195,6 +200,7 @@ const buildRecurringSeries = (masters, occurrences, now) => {
       happeningThisWeek,
       summary,
       scheduleLabel,
+      footerNote,
       sourceEventIds: Array.from(new Set(sourceIds)),
     };
   };
@@ -244,6 +250,7 @@ const buildManualRecurringSeries = (events, now, existingKeys = new Set()) => SE
     happeningThisWeek: nextOccurrence ? sameWeek(getEventDateValue(nextOccurrence), now) : false,
     summary: override.summary,
     scheduleLabel: override.schedule,
+    footerNote: null,
     sourceEventIds: matched.map((event) => event.id).filter(Boolean),
   };
 }).filter(Boolean);

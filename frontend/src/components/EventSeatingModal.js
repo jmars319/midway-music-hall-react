@@ -31,6 +31,7 @@ export default function EventSeatingModal({ event, onClose }) {
   const [stagePosition, setStagePosition] = useState({ x: 50, y: 10 });
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
   const [canvasSettings, setCanvasSettings] = useState({ width: 1200, height: 800 });
+  const [seatingEnabled, setSeatingEnabled] = useState(() => Number(event.seating_enabled) === 1);
   const canvasContainerRef = useRef(null);
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
@@ -109,8 +110,9 @@ export default function EventSeatingModal({ event, onClose }) {
 
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
+    setSeatingEnabled(Number(event.seating_enabled) === 1);
     fetchEventSeating();
-  }, [event.id]);
+  }, [event.id, event.seating_enabled]);
 
   useEffect(() => {
     setSelectedSeats([]);
@@ -137,6 +139,9 @@ export default function EventSeatingModal({ event, onClose }) {
           setReservedSeats(data.reservedSeats || []);
           setPendingSeats(data.pendingSeats || []);
           setHoldSeats(data.holdSeats || []);
+          if (typeof data.seatingEnabled !== 'undefined') {
+            setSeatingEnabled(Boolean(data.seatingEnabled));
+          }
           seatDebugLog('modal-layout-load-success', {
             eventId: event.id,
             rows: Array.isArray(data.seating) ? data.seating.length : 0,
@@ -179,6 +184,10 @@ export default function EventSeatingModal({ event, onClose }) {
 
   const handleSeatInteraction = useCallback(
     (seatId, meta = {}) => {
+      if (!seatingEnabled) {
+        showTransientError('Seat reservations are temporarily paused for this event.');
+        return;
+      }
       const seatStatus = seatStatusMap.get(seatId) || 'available';
       const isBlocked = seatStatus === 'reserved' || seatStatus === 'pending' || seatStatus === 'hold';
       seatDebugLog('seat-click', {
@@ -223,7 +232,7 @@ export default function EventSeatingModal({ event, onClose }) {
         return next;
       });
     },
-    [event.id, seatDebugEnabled, seatDebugLog, seatStatusMap, showTransientError]
+    [event.id, seatDebugEnabled, seatDebugLog, seatStatusMap, seatingEnabled, showTransientError]
   );
 
   const handleCancel = () => {
@@ -629,6 +638,16 @@ export default function EventSeatingModal({ event, onClose }) {
                       })}
                     </div>
                   </div>
+                  {!seatingEnabled && (
+                    <div className="pointer-events-none absolute inset-0 flex items-start justify-center p-4">
+                      <div className="mt-6 rounded-xl bg-black/70 text-white border border-amber-400/60 max-w-xl w-full shadow-xl p-4 text-center">
+                        <p className="text-base font-semibold">Seat reservations are temporarily paused.</p>
+                        <p className="text-sm text-amber-100 mt-2">
+                          You can review which seats are already held or reserved, but new requests are disabled while staff finalizes the lineup. Please check back soon or contact the venue for assistance.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <aside className="bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-72 flex-shrink-0 max-h-[320px] xl:max-h-[calc(100vh-10rem)] overflow-y-auto">
                   <div className="font-semibold mb-3 text-white">Legend</div>
@@ -663,7 +682,9 @@ export default function EventSeatingModal({ event, onClose }) {
                   )}
                 </div>
               ) : (
-                <p className="mt-2 text-gray-200">Pick seats on the map to continue.</p>
+                <p className="mt-2 text-gray-200">
+                  {seatingEnabled ? 'Pick seats on the map to continue.' : 'Seat selection is disabled right now, but you can still review the map.'}
+                </p>
               )}
             </div>
             <div className="flex flex-col sm:flex-row gap-3">
@@ -675,10 +696,12 @@ export default function EventSeatingModal({ event, onClose }) {
               </button>
               <button
                 onClick={handleConfirmSeats}
-                disabled={selectedSeats.length === 0}
+                disabled={selectedSeats.length === 0 || !seatingEnabled}
                 className="px-8 py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition font-medium text-lg"
               >
-                Confirm Selection ({selectedSeats.length} {selectedSeats.length === 1 ? 'seat' : 'seats'})
+                {seatingEnabled
+                  ? `Confirm Selection (${selectedSeats.length} ${selectedSeats.length === 1 ? 'seat' : 'seats'})`
+                  : 'Temporarily Unavailable'}
               </button>
             </div>
           </div>

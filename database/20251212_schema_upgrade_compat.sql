@@ -55,22 +55,35 @@ BEGIN
 END$$
 DELIMITER ;
 
--- Helper: add foreign key constraint if it does not exist
+-- Helper: add foreign key constraint if it does not exist.
+-- Compatibility note: we check both constraint-name AND an equivalent FK relationship
+-- (single-column FKs) so older DBs with different FK names do not error.
 DROP PROCEDURE IF EXISTS add_constraint_if_missing;
 DELIMITER $$
 CREATE PROCEDURE add_constraint_if_missing(
     IN in_schema VARCHAR(64),
     IN in_table VARCHAR(64),
     IN in_constraint VARCHAR(64),
+    IN in_column VARCHAR(64),
+    IN in_ref_table VARCHAR(64),
+    IN in_ref_column VARCHAR(64),
     IN constraint_definition TEXT
 )
 BEGIN
     IF NOT EXISTS (
         SELECT 1
-        FROM information_schema.table_constraints
-        WHERE table_schema = in_schema
-          AND table_name = in_table
-          AND constraint_name = in_constraint
+        FROM information_schema.table_constraints tc
+        WHERE tc.table_schema = in_schema
+          AND tc.table_name = in_table
+          AND tc.constraint_name = in_constraint
+    ) AND NOT EXISTS (
+        SELECT 1
+        FROM information_schema.key_column_usage kcu
+        WHERE kcu.table_schema = in_schema
+          AND kcu.table_name = in_table
+          AND kcu.referenced_table_name = in_ref_table
+          AND kcu.column_name = in_column
+          AND kcu.referenced_column_name = in_ref_column
     ) THEN
         SET @ddl = CONCAT('ALTER TABLE `', in_schema, '`.`', in_table, '` ', constraint_definition);
         PREPARE stmt FROM @ddl;
@@ -89,13 +102,9 @@ CALL add_column_if_missing(@TARGET_DB, 'media', 'webp_path', 'webp_path VARCHAR(
 CALL add_column_if_missing(@TARGET_DB, 'media', 'optimization_status', 'optimization_status ENUM(''pending'',''processing'',''complete'',''skipped'',''failed'') DEFAULT ''pending'' AFTER webp_path');
 CALL add_column_if_missing(@TARGET_DB, 'media', 'processing_notes', 'processing_notes TEXT AFTER optimization_status');
 
--- SEATING LAYOUT STAGE METADATA
 CALL add_column_if_missing(@TARGET_DB, 'seating_layouts', 'stage_position', 'stage_position JSON DEFAULT NULL AFTER layout_data');
 CALL add_column_if_missing(@TARGET_DB, 'seating_layouts', 'stage_size', 'stage_size JSON DEFAULT NULL AFTER stage_position');
 CALL add_column_if_missing(@TARGET_DB, 'seating_layouts', 'canvas_settings', 'canvas_settings JSON DEFAULT NULL AFTER stage_size');
-CALL add_column_if_missing(@TARGET_DB, 'seating_layout_versions', 'stage_position', 'stage_position JSON DEFAULT NULL AFTER layout_data');
-CALL add_column_if_missing(@TARGET_DB, 'seating_layout_versions', 'stage_size', 'stage_size JSON DEFAULT NULL AFTER stage_position');
-CALL add_column_if_missing(@TARGET_DB, 'seating_layout_versions', 'canvas_settings', 'canvas_settings JSON DEFAULT NULL AFTER stage_size');
 
 -- VERSIONED LAYOUT SNAPSHOTS
 CREATE TABLE IF NOT EXISTS seating_layout_versions (
@@ -113,6 +122,11 @@ CREATE TABLE IF NOT EXISTS seating_layout_versions (
   CONSTRAINT fk_layout_versions_layout FOREIGN KEY (layout_id) REFERENCES seating_layouts(id) ON DELETE CASCADE,
   UNIQUE KEY uniq_layout_version (layout_id, version_number)
 );
+
+-- Ensure any newer layout version columns exist even if the table was created earlier (safe no-ops)
+CALL add_column_if_missing(@TARGET_DB, 'seating_layout_versions', 'stage_position', 'stage_position JSON DEFAULT NULL AFTER layout_data');
+CALL add_column_if_missing(@TARGET_DB, 'seating_layout_versions', 'stage_size', 'stage_size JSON DEFAULT NULL AFTER stage_position');
+CALL add_column_if_missing(@TARGET_DB, 'seating_layout_versions', 'canvas_settings', 'canvas_settings JSON DEFAULT NULL AFTER stage_size');
 
 -- EVENTS TABLE EXTENSIONS
 CALL add_column_if_missing(@TARGET_DB, 'events', 'artist_name', 'artist_name VARCHAR(255) NOT NULL DEFAULT '''' AFTER id');
@@ -153,7 +167,7 @@ CALL add_column_if_missing(@TARGET_DB, 'events', 'contact_phone_raw', 'contact_p
 CALL add_column_if_missing(@TARGET_DB, 'events', 'contact_phone_normalized', 'contact_phone_normalized VARCHAR(20) DEFAULT NULL AFTER contact_phone_raw');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'contact_email', 'contact_email VARCHAR(255) DEFAULT NULL AFTER contact_phone_normalized');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'contact_notes', 'contact_notes TEXT DEFAULT NULL AFTER contact_email');
-CALL add_column_if_missing(@TARGET_DB, 'events', 'change_note', 'change_note VARCHAR(255) DEFAULT NULL AFTER contact_email');
+CALL add_column_if_missing(@TARGET_DB, 'events', 'change_note', 'change_note VARCHAR(255) DEFAULT NULL AFTER contact_notes');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'created_by', 'created_by VARCHAR(191) DEFAULT NULL AFTER change_note');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'updated_by', 'updated_by VARCHAR(191) DEFAULT NULL AFTER created_by');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'created_at', 'created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER updated_by');
@@ -165,11 +179,23 @@ CALL add_index_if_missing(@TARGET_DB, 'events', 'idx_events_status', 'ADD INDEX 
 CALL add_index_if_missing(@TARGET_DB, 'events', 'idx_events_venue', 'ADD INDEX idx_events_venue (venue_code)');
 CALL add_index_if_missing(@TARGET_DB, 'events', 'idx_events_slug', 'ADD UNIQUE INDEX idx_events_slug (slug)');
 
-CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_layout', 'ADD CONSTRAINT fk_events_layout FOREIGN KEY (layout_id) REFERENCES seating_layouts(id) ON DELETE SET NULL');
-CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_layout_version', 'ADD CONSTRAINT fk_events_layout_version FOREIGN KEY (layout_version_id) REFERENCES seating_layout_versions(id) ON DELETE SET NULL');
-CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_series_master', 'ADD CONSTRAINT fk_events_series_master FOREIGN KEY (series_master_id) REFERENCES events(id) ON DELETE SET NULL');
-CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_hero_media', 'ADD CONSTRAINT fk_events_hero_media FOREIGN KEY (hero_image_id) REFERENCES media(id) ON DELETE SET NULL');
-CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_poster_media', 'ADD CONSTRAINT fk_events_poster_media FOREIGN KEY (poster_image_id) REFERENCES media(id) ON DELETE SET NULL');
+CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_layout', 'layout_id', 'seating_layouts', 'id', 'ADD CONSTRAINT fk_events_layout FOREIGN KEY (layout_id) REFERENCES seating_layouts(id) ON DELETE SET NULL');
+CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_layout_version', 'layout_version_id', 'seating_layout_versions', 'id', 'ADD CONSTRAINT fk_events_layout_version FOREIGN KEY (layout_version_id) REFERENCES seating_layout_versions(id) ON DELETE SET NULL');
+CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_series_master', 'series_master_id', 'events', 'id', 'ADD CONSTRAINT fk_events_series_master FOREIGN KEY (series_master_id) REFERENCES events(id) ON DELETE SET NULL');
+CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_hero_media', 'hero_image_id', 'media', 'id', 'ADD CONSTRAINT fk_events_hero_media FOREIGN KEY (hero_image_id) REFERENCES media(id) ON DELETE SET NULL');
+CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_poster_media', 'poster_image_id', 'media', 'id', 'ADD CONSTRAINT fk_events_poster_media FOREIGN KEY (poster_image_id) REFERENCES media(id) ON DELETE SET NULL');
+
+CREATE TABLE IF NOT EXISTS event_series_meta (
+  event_id INT PRIMARY KEY,
+  schedule_label VARCHAR(255) DEFAULT NULL,
+  summary TEXT,
+  footer_note TEXT,
+  created_by VARCHAR(191) DEFAULT NULL,
+  updated_by VARCHAR(191) DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_series_meta_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+);
 
 -- RECURRENCE TABLES
 CREATE TABLE IF NOT EXISTS event_recurrence_rules (
@@ -231,8 +257,8 @@ CALL add_column_if_missing(@TARGET_DB, 'seating', 'updated_at', 'updated_at TIME
 CALL add_index_if_missing(@TARGET_DB, 'seating', 'idx_seating_layout', 'ADD INDEX idx_seating_layout (layout_id)');
 CALL add_index_if_missing(@TARGET_DB, 'seating', 'idx_seating_event', 'ADD INDEX idx_seating_event (event_id)');
 
-CALL add_constraint_if_missing(@TARGET_DB, 'seating', 'fk_seating_event', 'ADD CONSTRAINT fk_seating_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE SET NULL');
-CALL add_constraint_if_missing(@TARGET_DB, 'seating', 'fk_seating_layout', 'ADD CONSTRAINT fk_seating_layout FOREIGN KEY (layout_id) REFERENCES seating_layouts(id) ON DELETE SET NULL');
+CALL add_constraint_if_missing(@TARGET_DB, 'seating', 'fk_seating_event', 'event_id', 'events', 'id', 'ADD CONSTRAINT fk_seating_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE SET NULL');
+CALL add_constraint_if_missing(@TARGET_DB, 'seating', 'fk_seating_layout', 'layout_id', 'seating_layouts', 'id', 'ADD CONSTRAINT fk_seating_layout FOREIGN KEY (layout_id) REFERENCES seating_layouts(id) ON DELETE SET NULL');
 
 -- SEAT REQUESTS TABLE UPDATES
 CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'layout_version_id', 'layout_version_id BIGINT DEFAULT NULL AFTER event_id');
@@ -251,13 +277,49 @@ CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'created_at', 'created_a
 CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'updated_at', 'updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at');
 
 ALTER TABLE seat_requests
-  MODIFY COLUMN status ENUM('hold','pending','approved','denied','finalized','cancelled') DEFAULT 'hold';
+  MODIFY COLUMN status ENUM(
+    'new',
+    'contacted',
+    'waiting',
+    'confirmed',
+    'declined',
+    'closed',
+    'spam',
+    'expired',
+    'hold',
+    'pending',
+    'approved',
+    'denied',
+    'finalized',
+    'cancelled'
+  ) DEFAULT 'new';
 
 CALL add_index_if_missing(@TARGET_DB, 'seat_requests', 'idx_seat_requests_event', 'ADD INDEX idx_seat_requests_event (event_id)');
 CALL add_index_if_missing(@TARGET_DB, 'seat_requests', 'idx_seat_requests_hold', 'ADD INDEX idx_seat_requests_hold (hold_expires_at)');
 
-CALL add_constraint_if_missing(@TARGET_DB, 'seat_requests', 'fk_seat_requests_event', 'ADD CONSTRAINT fk_seat_requests_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE');
-CALL add_constraint_if_missing(@TARGET_DB, 'seat_requests', 'fk_seat_requests_layout_version', 'ADD CONSTRAINT fk_seat_requests_layout_version FOREIGN KEY (layout_version_id) REFERENCES seating_layout_versions(id) ON DELETE SET NULL');
+CALL add_constraint_if_missing(@TARGET_DB, 'seat_requests', 'fk_seat_requests_event', 'event_id', 'events', 'id', 'ADD CONSTRAINT fk_seat_requests_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE SET NULL');
+CALL add_constraint_if_missing(@TARGET_DB, 'seat_requests', 'fk_seat_requests_layout_version', 'layout_version_id', 'seating_layout_versions', 'id', 'ADD CONSTRAINT fk_seat_requests_layout_version FOREIGN KEY (layout_version_id) REFERENCES seating_layout_versions(id) ON DELETE SET NULL');
+CALL add_constraint_if_missing(@TARGET_DB, 'seating_layout_versions', 'fk_layout_versions_layout', 'layout_id', 'seating_layouts', 'id', 'ADD CONSTRAINT fk_layout_versions_layout FOREIGN KEY (layout_id) REFERENCES seating_layouts(id) ON DELETE CASCADE');
+CALL add_constraint_if_missing(@TARGET_DB, 'event_series_meta', 'fk_series_meta_event', 'event_id', 'events', 'id', 'ADD CONSTRAINT fk_series_meta_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE');
+CALL add_constraint_if_missing(@TARGET_DB, 'event_recurrence_rules', 'fk_recurrence_event', 'event_id', 'events', 'id', 'ADD CONSTRAINT fk_recurrence_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE');
+CALL add_constraint_if_missing(@TARGET_DB, 'event_recurrence_exceptions', 'fk_recurrence_exception', 'recurrence_id', 'event_recurrence_rules', 'id', 'ADD CONSTRAINT fk_recurrence_exception FOREIGN KEY (recurrence_id) REFERENCES event_recurrence_rules(id) ON DELETE CASCADE');
+CALL add_constraint_if_missing(@TARGET_DB, 'event_seating_snapshots', 'fk_event_snapshot_event', 'event_id', 'events', 'id', 'ADD CONSTRAINT fk_event_snapshot_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE');
+
+CREATE TABLE IF NOT EXISTS event_seating_snapshots (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  event_id INT NOT NULL,
+  layout_id INT DEFAULT NULL,
+  layout_version_id BIGINT DEFAULT NULL,
+  snapshot_type ENUM('pre_layout_change','manual','pre_disable') NOT NULL DEFAULT 'pre_layout_change',
+  reserved_seats JSON NOT NULL,
+  pending_seats JSON DEFAULT NULL,
+  hold_seats JSON DEFAULT NULL,
+  notes VARCHAR(255) DEFAULT NULL,
+  created_by VARCHAR(191) DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_seating_snapshot_event (event_id, created_at),
+  CONSTRAINT fk_event_snapshot_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+);
 
 -- CLEANUP HELPERS
 DROP PROCEDURE IF EXISTS add_column_if_missing;

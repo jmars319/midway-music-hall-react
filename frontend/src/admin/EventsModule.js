@@ -1,8 +1,9 @@
 // EventsModule: admin UI to create and manage events
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Edit, Copy, CheckCircle, XCircle, Archive as ArchiveIcon } from 'lucide-react';
 import { API_BASE, getImageUrlSync } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
+import { getEventEditorFlags } from './eventEditorFlags';
 const SECTION_STORAGE_KEY = 'mmh_event_sections';
 
 const VENUE_LABELS = {
@@ -23,6 +24,8 @@ const SEAT_ROUTING_SOURCE_LABELS = {
   category_slug: 'Beach Bands auto-routing',
   default: 'Default staff inbox',
 };
+const MAX_PREVIEW_SEATS = 50;
+const MAX_COMPARISON_SEATS = 20;
 
 const SESSION_TIMEZONE = 'America/New_York';
 
@@ -113,11 +116,24 @@ const combineDateAndTime = (date, time) => {
   return `${date} ${safeTime}`;
 };
 
+const valuesDiffer = (next, original) => {
+  const normalize = (val) => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'string') return val.trim();
+    return String(val).trim();
+  };
+  const nextVal = normalize(next);
+  const originalVal = normalize(original);
+  if (!nextVal && !originalVal) return false;
+  return nextVal !== originalVal;
+};
+
 const eventAllowsSeatRequests = (event = {}) => {
   if (!event) return false;
-  if (Number(event.seating_enabled) === 1) return true;
-  if (event.layout_id || event.layout_version_id) return true;
-  return false;
+  if (typeof event.seating_enabled !== 'undefined') {
+    return Number(event.seating_enabled) === 1;
+  }
+  return Boolean(event.layout_id || event.layout_version_id);
 };
 
 const formatPrice = (value) => {
@@ -166,6 +182,9 @@ const initialForm = {
   door_time: '',
   genre: '',
   description: '',
+  series_schedule_label: '',
+  series_summary: '',
+  series_footer_note: '',
   image_url: '',
   ticket_price: '',
   door_price: '',
@@ -179,6 +198,7 @@ const initialForm = {
   contact_phone_raw: '',
   contact_email: '',
   contact_notes: '',
+  seating_enabled: false,
 };
 
 export default function EventsModule(){
@@ -216,6 +236,24 @@ export default function EventsModule(){
   const [refreshingLayout, setRefreshingLayout] = useState(false);
   const [refreshLayoutMessage, setRefreshLayoutMessage] = useState('');
   const [refreshLayoutError, setRefreshLayoutError] = useState('');
+  const [layoutConfirmState, setLayoutConfirmState] = useState({ open: false, pendingValue: '' });
+  const [layoutChangeToast, setLayoutChangeToast] = useState('');
+  const [seatingSnapshotsState, setSeatingSnapshotsState] = useState({ loading: false, items: [], error: '', eventId: null });
+  const [snapshotCopyMessage, setSnapshotCopyMessage] = useState('');
+  const [snapshotRestoreState, setSnapshotRestoreState] = useState({
+    restoringId: null,
+    message: '',
+    error: '',
+    conflicts: [],
+    lastSnapshotId: null,
+  });
+  const [snapshotPreviewState, setSnapshotPreviewState] = useState({
+    open: false,
+    snapshot: null,
+    seatFilter: '',
+  });
+  const previewModalRef = useRef(null);
+  const previewCloseButtonRef = useRef(null);
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -287,6 +325,35 @@ export default function EventsModule(){
     }
   };
 
+  const fetchSeatingSnapshots = useCallback(async (eventId) => {
+    if (!eventId) {
+      setSeatingSnapshotsState({ loading: false, items: [], error: '', eventId: null });
+      return;
+    }
+    setSeatingSnapshotsState((prev) => ({
+      loading: true,
+      error: '',
+      eventId,
+      items: prev.eventId === eventId ? prev.items : [],
+    }));
+    try {
+      const res = await fetch(`${API_BASE}/events/${eventId}/seating-snapshots?limit=5`);
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || 'Unable to load seating snapshots');
+      }
+      setSeatingSnapshotsState({ loading: false, items: data.snapshots || [], error: '', eventId });
+    } catch (err) {
+      console.error('Failed to load seating snapshots', err);
+      setSeatingSnapshotsState({
+        loading: false,
+        items: [],
+        error: err instanceof Error ? err.message : 'Unable to load seating snapshots',
+        eventId,
+      });
+    }
+  }, []);
+
   const fetchCategories = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/event-categories`);
@@ -314,6 +381,79 @@ export default function EventsModule(){
   useEffect(() => {
     fetchEvents();
   }, [fetchEvents]);
+
+  useEffect(() => {
+    if (!showForm || !editing?.id) {
+      setSeatingSnapshotsState({ loading: false, items: [], error: '', eventId: null });
+      setSnapshotCopyMessage('');
+      setSnapshotRestoreState({
+        restoringId: null,
+        message: '',
+        error: '',
+        conflicts: [],
+        lastSnapshotId: null,
+      });
+      return;
+    }
+    setSnapshotRestoreState((prev) => ({
+      restoringId: null,
+      message: '',
+      error: '',
+      conflicts: [],
+      lastSnapshotId: prev.lastSnapshotId,
+    }));
+    fetchSeatingSnapshots(editing.id);
+  }, [showForm, editing, fetchSeatingSnapshots]);
+
+  const closeSnapshotPreview = useCallback(() => {
+    setSnapshotPreviewState({ open: false, snapshot: null, seatFilter: '' });
+  }, []);
+
+  const openSnapshotPreview = useCallback((snapshot) => {
+    if (!snapshot) return;
+    setSnapshotPreviewState({ open: true, snapshot, seatFilter: '' });
+  }, []);
+
+  useEffect(() => {
+    if (!snapshotPreviewState.open) return;
+    if (previewCloseButtonRef.current) {
+      previewCloseButtonRef.current.focus();
+    }
+  }, [snapshotPreviewState.open]);
+
+  useEffect(() => {
+    if (!snapshotPreviewState.open) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeSnapshotPreview();
+        return;
+      }
+      if (event.key === 'Tab' && previewModalRef.current) {
+        const focusableSelectors = [
+          'a[href]',
+          'button',
+          'textarea',
+          'input',
+          'select',
+          '[tabindex]:not([tabindex="-1"])'
+        ].join(',');
+        const focusable = previewModalRef.current.querySelectorAll(focusableSelectors);
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        } else if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [snapshotPreviewState.open, closeSnapshotPreview]);
 
   useEffect(() => {
     try {
@@ -344,6 +484,20 @@ export default function EventsModule(){
     });
     return map;
   }, [categories]);
+
+  const selectedCategoryId = formData.category_id ? String(formData.category_id) : '';
+  const selectedCategory = selectedCategoryId ? categoryLookup.get(selectedCategoryId) : null;
+  const editingIsSeriesMaster = Boolean(editing && Number(editing.is_series_master) === 1);
+  const effectiveCategorySlug = (selectedCategory?.slug || editing?.category_slug || '').toLowerCase();
+  const editorFlags = useMemo(
+    () =>
+      getEventEditorFlags({
+        categorySlug: effectiveCategorySlug,
+        isSeriesMaster: editingIsSeriesMaster,
+        seatingEnabled: Boolean(formData.seating_enabled),
+      }),
+    [effectiveCategorySlug, editingIsSeriesMaster, formData.seating_enabled]
+  );
 
   const layoutNameForEvent = (event) => {
     if (!event.layout_id) return 'Not assigned';
@@ -665,6 +819,73 @@ export default function EventsModule(){
     if (!editing) return null;
     return resolveSeatRoutingInfo(editing);
   }, [editing]);
+
+  const snapshotPreviewLists = useMemo(() => {
+    if (!snapshotPreviewState.snapshot) return null;
+    const seatFilter = snapshotPreviewState.seatFilter.trim().toLowerCase();
+    const filterList = (list = []) => {
+      const normalized = Array.isArray(list) ? list.filter(Boolean) : [];
+      const filtered = seatFilter ? normalized.filter((seat) => seat.toLowerCase().includes(seatFilter)) : normalized;
+      return {
+        total: normalized.length,
+        matchCount: filtered.length,
+        seats: filtered.slice(0, MAX_PREVIEW_SEATS),
+        remainder: Math.max(filtered.length - MAX_PREVIEW_SEATS, 0),
+      };
+    };
+    return {
+      reserved: filterList(snapshotPreviewState.snapshot.reserved_seats || []),
+      pending: filterList(snapshotPreviewState.snapshot.pending_seats || []),
+      hold: filterList(snapshotPreviewState.snapshot.hold_seats || []),
+    };
+  }, [snapshotPreviewState]);
+
+  const currentSeatLists = useMemo(() => {
+    const summary = editing?.current_seat_summary || editing?.seat_snapshot_summary || editing?.current_seating || null;
+    if (!summary) return null;
+    const normalize = (list) => (Array.isArray(list) ? list.filter(Boolean) : []);
+    const reserved = normalize(summary.reserved_seats);
+    const pending = normalize(summary.pending_seats);
+    const hold = normalize(summary.hold_seats);
+    if (!reserved.length && !pending.length && !hold.length) return null;
+    return { reserved, pending, hold };
+  }, [editing]);
+
+  const snapshotComparison = useMemo(() => {
+    if (!snapshotPreviewState.snapshot) return null;
+    const buildSet = (list) => new Set((Array.isArray(list) ? list : []).filter(Boolean));
+    const snapshotSets = {
+      reserved: buildSet(snapshotPreviewState.snapshot.reserved_seats || []),
+      pending: buildSet(snapshotPreviewState.snapshot.pending_seats || []),
+      hold: buildSet(snapshotPreviewState.snapshot.hold_seats || []),
+    };
+    if (!currentSeatLists) {
+      return { available: false };
+    }
+    const comparisonLimit = MAX_COMPARISON_SEATS;
+    const diffSets = (snapshotSet, currentSet) => {
+      const snapshotOnly = [];
+      snapshotSet.forEach((seat) => {
+        if (!currentSet.has(seat)) snapshotOnly.push(seat);
+      });
+      const currentOnly = [];
+      currentSet.forEach((seat) => {
+        if (!snapshotSet.has(seat)) currentOnly.push(seat);
+      });
+      return {
+        snapshotOnlyCount: snapshotOnly.length,
+        snapshotOnlyPreview: snapshotOnly.slice(0, comparisonLimit),
+        currentOnlyCount: currentOnly.length,
+        currentOnlyPreview: currentOnly.slice(0, comparisonLimit),
+      };
+    };
+    return {
+      available: true,
+      reserved: diffSets(snapshotSets.reserved, new Set(currentSeatLists.reserved || [])),
+      pending: diffSets(snapshotSets.pending, new Set(currentSeatLists.pending || [])),
+      hold: diffSets(snapshotSets.hold, new Set(currentSeatLists.hold || [])),
+    };
+  }, [snapshotPreviewState.snapshot, currentSeatLists]);
 
   const renderEventCard = (event) => {
     const eventTitle = event.artist_name || event.title || 'Untitled Event';
@@ -1045,6 +1266,7 @@ export default function EventsModule(){
     setImagePreview(null);
     setRefreshLayoutError('');
     setRefreshLayoutMessage('');
+    setLayoutConfirmState({ open: false, pendingValue: '' });
     setShowForm(true);
   };
 
@@ -1059,12 +1281,15 @@ export default function EventsModule(){
       door_time: deriveDoorTimeInput(event.door_time),
       genre: event.genre || '',
       description: event.description || '',
+      series_schedule_label: event.series_schedule_label || '',
+      series_summary: event.series_summary || '',
+      series_footer_note: event.series_footer_note || '',
       image_url: event.image_url || '',
       ticket_price: event.ticket_price || '',
       door_price: event.door_price || '',
       age_restriction: event.age_restriction || 'All Ages',
       venue_section: event.venue_section || '',
-      layout_id: event.layout_id || '',
+      layout_id: event.layout_id ? String(event.layout_id) : '',
       category_id: event.category_id ? String(event.category_id) : '',
       seat_request_email_override: event.seat_request_email_override || '',
       venue_code: event.venue_code || 'MMH',
@@ -1072,15 +1297,12 @@ export default function EventsModule(){
       contact_phone_raw: event.contact_phone_raw || event.contact_phone || event.contact_phone_normalized || '',
       contact_email: event.contact_email || '',
       contact_notes: event.contact_notes || '',
+      seating_enabled: Boolean(event.seating_enabled),
     });
     setImageFile(null);
     setImagePreview(event.image_url ? getImageUrlSync(event.image_url) : null);
+    setLayoutConfirmState({ open: false, pendingValue: '' });
     setShowForm(true);
-  };
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handleImageChange = (e) => {
@@ -1095,11 +1317,238 @@ export default function EventsModule(){
     }
   };
 
-const clearImage = () => {
-  setImageFile(null);
-  setImagePreview(null);
-  setFormData(prev => ({ ...prev, image_url: '' }));
-};
+  const clearImage = () => {
+    setImageFile(null);
+    setImagePreview(null);
+    setFormData(prev => ({ ...prev, image_url: '' }));
+  };
+
+  const copySnapshotPayload = useCallback(async (snapshot) => {
+    if (!snapshot) return;
+    const payload = {
+      reserved_seats: snapshot.reserved_seats || [],
+      pending_seats: snapshot.pending_seats || [],
+      hold_seats: snapshot.hold_seats || [],
+    };
+    const text = JSON.stringify(payload, null, 2);
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setSnapshotCopyMessage(`Snapshot #${snapshot.id} JSON copied.`);
+    } catch (err) {
+      console.error('Failed to copy seating snapshot JSON', err);
+      setSnapshotCopyMessage('Unable to copy snapshot JSON.');
+    }
+    setTimeout(() => setSnapshotCopyMessage(''), 4000);
+  }, []);
+
+  const handleRestoreSnapshot = useCallback(
+    async (snapshot) => {
+      if (!snapshot || !editing?.id) return;
+      const reservedCount = snapshot.reserved_seats?.length || 0;
+      const pendingCount = snapshot.pending_seats?.length || 0;
+      const holdCount = snapshot.hold_seats?.length || 0;
+      const summaryParts = [];
+      if (reservedCount) summaryParts.push(`${reservedCount} reserved`);
+      if (pendingCount) summaryParts.push(`${pendingCount} pending`);
+      if (holdCount) summaryParts.push(`${holdCount} hold`);
+      const summaryText = summaryParts.length ? summaryParts.join(', ') : 'no seats';
+      if (
+        !window.confirm(
+          `Restore seating & seat requests from snapshot #${snapshot.id}? This overwrites current seat requests with the ${summaryText} captured in that snapshot.`
+        )
+      ) {
+        return;
+      }
+      setSnapshotRestoreState({ restoringId: snapshot.id, message: '', error: '', conflicts: [], lastSnapshotId: snapshot.id });
+      try {
+        const res = await fetch(`${API_BASE}/events/${editing.id}/restore-seating-snapshot`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ snapshot_id: snapshot.id }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data?.success) {
+          throw new Error(data?.message || 'Unable to restore snapshot');
+        }
+        const details = data.details || {};
+        setSnapshotRestoreState({
+          restoringId: null,
+          message: `Snapshot #${snapshot.id} restored. Reserved ${details.restored_reserved || 0} · Pending ${details.restored_pending || 0} · Holds ${details.restored_hold || 0}.`,
+          error: '',
+          conflicts: Array.isArray(details.conflicts) ? details.conflicts : [],
+          lastSnapshotId: snapshot.id,
+        });
+        const normalizedLayoutId = details.layout_id ? String(details.layout_id) : '';
+        setFormData((prev) => ({
+          ...prev,
+          layout_id: normalizedLayoutId,
+          seating_enabled: Boolean(details.seating_enabled),
+        }));
+        setEditing((prev) =>
+          prev
+            ? {
+                ...prev,
+                layout_id: details.layout_id ?? prev.layout_id ?? null,
+                layout_version_id: details.layout_version_id ?? prev.layout_version_id ?? null,
+                seating_enabled: details.seating_enabled ?? prev.seating_enabled ?? 0,
+              }
+            : prev
+        );
+        fetchSeatingSnapshots(editing.id);
+      } catch (err) {
+        console.error('Failed to restore seating snapshot', err);
+        setSnapshotRestoreState({
+          restoringId: null,
+          message: '',
+          error: err instanceof Error ? err.message : 'Unable to restore snapshot',
+          conflicts: [],
+          lastSnapshotId: snapshot.id,
+        });
+      }
+    },
+    [editing, fetchSeatingSnapshots]
+  );
+
+  const formatSnapshotTimestamp = (value) => {
+    if (!value) return 'Unknown';
+    try {
+      return new Date(value).toLocaleString();
+    } catch (err) {
+      return value;
+    }
+  };
+
+  const describeSnapshotConflict = (conflict) => {
+    if (!conflict) return 'Conflict detected';
+    if (conflict.type === 'seat_missing' && conflict.seat) {
+      return `Seat ${conflict.seat} no longer exists in this map. Follow up manually.`;
+    }
+    if (conflict.message) {
+      return conflict.message;
+    }
+    if (conflict.type === 'layout_missing') {
+      return 'Original layout template was deleted. Layout stayed on the current selection.';
+    }
+    if (conflict.type === 'layout_version_missing') {
+      return 'Original layout version is gone. Requests restored but template stayed on current version.';
+    }
+    return 'Conflict detected during restore.';
+  };
+
+  const requestLayoutChange = (rawValue) => {
+    const normalized = rawValue === '' ? '' : String(rawValue);
+    const hadLayout = Boolean(editing && (editing.layout_id || editing.layout_version_id));
+    const originalValue = editing?.layout_id ? String(editing.layout_id) : '';
+    if (!hadLayout || originalValue === normalized) {
+      setFormData((prev) => ({ ...prev, layout_id: normalized }));
+      return;
+    }
+    setLayoutConfirmState({ open: true, pendingValue: normalized });
+  };
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    if (name === 'layout_id') {
+      requestLayoutChange(value);
+      return;
+    }
+    const nextValue = type === 'checkbox' ? checked : value;
+    setFormData((prev) => ({ ...prev, [name]: nextValue }));
+  };
+
+  const confirmLayoutChange = () => {
+    setFormData((prev) => ({ ...prev, layout_id: layoutConfirmState.pendingValue }));
+    setLayoutConfirmState({ open: false, pendingValue: '' });
+  };
+
+  const renderSeatBadges = (seats = []) => {
+    if (!seats.length) {
+      return <span className="text-xs text-gray-400">None</span>;
+    }
+    return (
+      <div className="flex flex-wrap gap-1">
+        {seats.map((seat) => (
+          <span key={seat} className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-100 border border-gray-600">
+            {seat}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
+  const renderSeatListBlock = (title, info) => {
+    if (!info) {
+      return (
+        <div className="rounded border border-gray-700 bg-gray-900/60 p-3 space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-semibold text-white">{title}</span>
+            <span className="text-gray-400">0 seats</span>
+          </div>
+          <p className="text-xs text-gray-400">No seats recorded in this snapshot.</p>
+        </div>
+      );
+    }
+    const showingFilteredMessage = snapshotPreviewState.seatFilter.trim() && info.matchCount !== info.total;
+    return (
+      <div className="rounded border border-gray-700 bg-gray-900/60 p-3 space-y-2">
+        <div className="flex items-center justify-between text-sm">
+          <span className="font-semibold text-white">{title}</span>
+          <span className="text-gray-400">
+            {info.matchCount}/{info.total} seats
+          </span>
+        </div>
+        {info.seats.length ? renderSeatBadges(info.seats) : (
+          <p className="text-xs text-gray-400">No seats match this filter.</p>
+        )}
+        {info.remainder > 0 && (
+          <p className="text-xs text-gray-400">+{info.remainder} more not shown.</p>
+        )}
+        {showingFilteredMessage && (
+          <p className="text-xs text-gray-500">Filter matches {info.matchCount} seat(s).</p>
+        )}
+      </div>
+    );
+  };
+
+  const renderComparisonBlock = (label, data) => {
+    if (!data) return null;
+    return (
+      <div className="rounded border border-gray-700 bg-gray-900/40 p-3 space-y-2">
+        <h5 className="text-sm font-semibold text-white">{label}</h5>
+        <div className="text-xs text-gray-300 space-y-1">
+          <div>
+            <span className="font-semibold text-amber-400">{data.snapshotOnlyCount}</span> in snapshot only
+          </div>
+          {renderSeatBadges(data.snapshotOnlyPreview)}
+          {data.snapshotOnlyCount > data.snapshotOnlyPreview.length && (
+            <p className="text-xs text-gray-500">+{data.snapshotOnlyCount - data.snapshotOnlyPreview.length} more</p>
+          )}
+        </div>
+        <div className="text-xs text-gray-300 space-y-1">
+          <div>
+            <span className="font-semibold text-emerald-300">{data.currentOnlyCount}</span> currently reserved/pending/hold but not in snapshot
+          </div>
+          {renderSeatBadges(data.currentOnlyPreview)}
+          {data.currentOnlyCount > data.currentOnlyPreview.length && (
+            <p className="text-xs text-gray-500">+{data.currentOnlyCount - data.currentOnlyPreview.length} more</p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const cancelLayoutChange = () => {
+    setLayoutConfirmState({ open: false, pendingValue: '' });
+  };
 
 const parseJsonSafely = (payload) => {
   if (!payload) return null;
@@ -1185,6 +1634,8 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
     }
   };
 
+  const scheduleInputsRequired = editorFlags.requireScheduleFields;
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
@@ -1218,27 +1669,56 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       const payload = { ...formData, image_url: finalImageUrl };
       payload.ticket_price = normalizePriceInput(payload.ticket_price);
       payload.door_price = normalizePriceInput(payload.door_price);
-      const parsedLayoutId = payload.layout_id && payload.layout_id !== '' ? Number(payload.layout_id) : null;
+      const parsedLayoutId = formData.layout_id === '' ? null : Number(formData.layout_id);
       const normalizedLayoutId = Number.isFinite(parsedLayoutId) && parsedLayoutId > 0 ? parsedLayoutId : null;
       payload.layout_id = normalizedLayoutId;
       const parsedCategoryId = payload.category_id && payload.category_id !== '' ? Number(payload.category_id) : null;
       payload.category_id = Number.isFinite(parsedCategoryId) && parsedCategoryId > 0 ? parsedCategoryId : null;
       payload.seat_request_email_override = (payload.seat_request_email_override || '').trim() || null;
-      if (!payload.layout_id) {
-        payload.seating_enabled = false;
-        payload.layout_version_id = null;
-      } else if (typeof payload.seating_enabled === 'undefined') {
-        payload.seating_enabled = true;
-      }
+      payload.seating_enabled = formData.seating_enabled ? 1 : 0;
       payload.venue_code = (payload.venue_code || 'MMH').toUpperCase();
-      const normalizedDoorTime = combineDateAndTime(payload.event_date, payload.door_time);
-      if (!normalizedDoorTime) {
-        setError('Doors open time requires both an event date and a time.');
-        setSubmitting(false);
-        return;
+      const originalLayoutKey = editing?.layout_id ? String(editing.layout_id) : '';
+      const newLayoutKey = normalizedLayoutId ? String(normalizedLayoutId) : '';
+      const layoutChanged = Boolean(editing) && originalLayoutKey !== newLayoutKey;
+      const eventDateValue = (payload.event_date || '').trim();
+      const eventTimeValue = (payload.event_time || '').trim();
+      const doorTimeValue = (payload.door_time || '').trim();
+      const originalEventDate = (editing?.event_date || '').trim();
+      const originalEventTime = (editing?.event_time || '').trim();
+      const originalDoorTimeValue = deriveDoorTimeInput(editing?.door_time);
+      const startOrEndProvided = Boolean(payload.start_datetime || payload.end_datetime);
+      const scheduleFieldsChanged = editing
+        ? startOrEndProvided ||
+          valuesDiffer(eventDateValue, originalEventDate) ||
+          valuesDiffer(eventTimeValue, originalEventTime) ||
+          valuesDiffer(doorTimeValue, originalDoorTimeValue)
+        : Boolean(eventDateValue || eventTimeValue || doorTimeValue || startOrEndProvided);
+      const mustRequireSchedule = editorFlags.requireScheduleFields || scheduleFieldsChanged;
+      if (eventDateValue) {
+        payload.event_date = eventDateValue;
       }
-      payload.door_time = normalizedDoorTime;
-      ['contact_name', 'contact_email', 'contact_phone_raw', 'contact_notes'].forEach((field) => {
+      if (eventTimeValue) {
+        payload.event_time = eventTimeValue;
+      }
+      if (mustRequireSchedule) {
+        if (!eventDateValue || !eventTimeValue) {
+          setError('Event date and start time are required.');
+          setSubmitting(false);
+          return;
+        }
+        const normalizedDoorTime = combineDateAndTime(eventDateValue, doorTimeValue);
+        if (!normalizedDoorTime) {
+          setError('Doors open time requires both an event date and a time.');
+          setSubmitting(false);
+          return;
+        }
+        payload.door_time = normalizedDoorTime;
+      } else {
+        delete payload.event_date;
+        delete payload.event_time;
+        delete payload.door_time;
+      }
+      ['contact_name', 'contact_email', 'contact_phone_raw', 'contact_notes', 'series_schedule_label', 'series_summary', 'series_footer_note'].forEach((field) => {
         if (typeof payload[field] === 'string') {
           const trimmed = payload[field].trim();
           payload[field] = trimmed.length ? trimmed : null;
@@ -1254,7 +1734,17 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       });
       const data = await res.json();
       if (data && data.success) {
+        if (layoutChanged) {
+          const snapshotId = data.seating_snapshot_id || data.snapshot_id || null;
+          const toastCopy = snapshotId
+            ? `Seating layout updated. Snapshot #${snapshotId} saved for recovery.`
+            : 'Seating layout updated and a recovery snapshot was saved.';
+          setLayoutChangeToast(toastCopy);
+        }
         setShowForm(false);
+        setSeatingSnapshotsState({ loading: false, items: [], error: '', eventId: null });
+        setSnapshotCopyMessage('');
+        setLayoutConfirmState({ open: false, pendingValue: '' });
         fetchEvents();
       } else {
         setError(data?.message || 'Failed to save event');
@@ -1482,129 +1972,140 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
         </div>
       )}
 
-      {events.length > 0 && (
-        <div className="bg-gray-900 border border-purple-500/20 rounded-xl p-4 mb-6 space-y-3">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col">
-              <label className="text-xs uppercase text-gray-400 mb-1">Status</label>
-              <select
-                value={filters.status}
-                onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
-                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
-              >
-                <option value="published">Published only</option>
-                <option value="draft">Draft only</option>
-                <option value="all">All statuses</option>
-              </select>
-            </div>
-            <div className="flex flex-col">
-              <label className="text-xs uppercase text-gray-400 mb-1">Timeframe</label>
-              <select
-                value={filters.timeframe}
-                onChange={(e) => setFilters((prev) => ({ ...prev, timeframe: e.target.value }))}
-                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
-              >
-                <option value="upcoming">Upcoming only</option>
-                <option value="past">Past events</option>
-                <option value="all">All dates</option>
-                <option value="archived">Archived</option>
-              </select>
-            </div>
-            <div className="flex flex-col">
-              <label className="text-xs uppercase text-gray-400 mb-1">Venue</label>
-              <select
-                value={filters.venue}
-                onChange={(e) => setFilters((prev) => ({ ...prev, venue: e.target.value }))}
-                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
-              >
-                <option value="all">All venues</option>
-                <option value="MMH">Midway Music Hall</option>
-                <option value="TGP">Gathering Place</option>
-              </select>
-            </div>
-            <div className="flex flex-col">
-              <label className="text-xs uppercase text-gray-400 mb-1">Category</label>
-              <select
-                value={filters.category}
-                onChange={(e) => setFilters((prev) => ({ ...prev, category: e.target.value }))}
-                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
-              >
-                <option value="all">All categories</option>
-                {categoryFilterOptions.map((cat) => (
-                  <option key={cat.slug} value={cat.slug}>
-                    {cat.name}{cat.is_active ? '' : ' (inactive)'}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <label className="inline-flex items-center gap-2 text-sm text-gray-300">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-gray-600"
-                checked={filters.recurringOnly}
-                onChange={(e) => setFilters((prev) => ({ ...prev, recurringOnly: e.target.checked }))}
-              />
-              Recurring only
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm text-gray-300">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-gray-600"
-                checked={filters.seatingOnly}
-                onChange={(e) => setFilters((prev) => ({ ...prev, seatingOnly: e.target.checked }))}
-              />
-              With seating only
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm text-gray-300">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-gray-600"
-                checked={filters.needsScheduleOnly}
-                onChange={(e) => setFilters((prev) => ({ ...prev, needsScheduleOnly: e.target.checked }))}
-              />
-              Needs date/time only
-            </label>
-            <div className="flex flex-col">
-              <label className="text-xs uppercase text-gray-400 mb-1">Sort</label>
-              <select
-                value={filters.sortBy}
-                onChange={(e) => setFilters((prev) => ({ ...prev, sortBy: e.target.value }))}
-                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
-              >
-                {SORT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex flex-col">
-              <label className="text-xs uppercase text-gray-400 mb-1">Grouping</label>
-              <select
-                value={filters.groupBy}
-                onChange={(e) => setFilters((prev) => ({ ...prev, groupBy: e.target.value }))}
-                className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
-              >
-                {GROUP_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="sr-only" htmlFor="event-search">Search events</label>
-            <input
-              id="event-search"
-              type="search"
-              value={filters.search}
-              onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
-              placeholder="Search artist, title, notes, venue..."
-              className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
-            />
-          </div>
-          <p className="text-xs text-gray-500">
-            Upcoming shows load by default. Switch timeframe to “Past” for recent history or “Archived” to manage cleanups.
-          </p>
+      {layoutChangeToast && (
+        <div className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-emerald-500/40 bg-emerald-900/30 px-4 py-3 text-sm text-emerald-100">
+          <span>{layoutChangeToast}</span>
+          <button
+            type="button"
+            onClick={() => setLayoutChangeToast('')}
+            className="text-emerald-200 hover:text-white text-xs font-semibold"
+          >
+            Dismiss
+          </button>
         </div>
       )}
+
+      <div className="bg-gray-900 border border-purple-500/20 rounded-xl p-4 mb-6 space-y-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-col">
+            <label className="text-xs uppercase text-gray-400 mb-1">Status</label>
+            <select
+              value={filters.status}
+              onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
+              className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
+            >
+              <option value="published">Published only</option>
+              <option value="draft">Draft only</option>
+              <option value="all">All statuses</option>
+            </select>
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs uppercase text-gray-400 mb-1">Timeframe</label>
+            <select
+              value={filters.timeframe}
+              onChange={(e) => setFilters((prev) => ({ ...prev, timeframe: e.target.value }))}
+              className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
+            >
+              <option value="upcoming">Upcoming only</option>
+              <option value="past">Past events</option>
+              <option value="all">All dates</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs uppercase text-gray-400 mb-1">Venue</label>
+            <select
+              value={filters.venue}
+              onChange={(e) => setFilters((prev) => ({ ...prev, venue: e.target.value }))}
+              className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
+            >
+              <option value="all">All venues</option>
+              <option value="MMH">Midway Music Hall</option>
+              <option value="TGP">Gathering Place</option>
+            </select>
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs uppercase text-gray-400 mb-1">Category</label>
+            <select
+              value={filters.category}
+              onChange={(e) => setFilters((prev) => ({ ...prev, category: e.target.value }))}
+              className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
+            >
+              <option value="all">All categories</option>
+              {categoryFilterOptions.map((cat) => (
+                <option key={cat.slug} value={cat.slug}>
+                  {cat.name}{cat.is_active ? '' : ' (inactive)'}
+                </option>
+              ))}
+            </select>
+          </div>
+          <label className="inline-flex items-center gap-2 text-sm text-gray-300">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-gray-600"
+              checked={filters.recurringOnly}
+              onChange={(e) => setFilters((prev) => ({ ...prev, recurringOnly: e.target.checked }))}
+            />
+            Recurring only
+          </label>
+          <label className="inline-flex items-center gap-2 text-sm text-gray-300">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-gray-600"
+              checked={filters.seatingOnly}
+              onChange={(e) => setFilters((prev) => ({ ...prev, seatingOnly: e.target.checked }))}
+            />
+            With seating only
+          </label>
+          <label className="inline-flex items-center gap-2 text-sm text-gray-300">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-gray-600"
+              checked={filters.needsScheduleOnly}
+              onChange={(e) => setFilters((prev) => ({ ...prev, needsScheduleOnly: e.target.checked }))}
+            />
+            Needs date/time only
+          </label>
+          <div className="flex flex-col">
+            <label className="text-xs uppercase text-gray-400 mb-1">Sort</label>
+            <select
+              value={filters.sortBy}
+              onChange={(e) => setFilters((prev) => ({ ...prev, sortBy: e.target.value }))}
+              className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs uppercase text-gray-400 mb-1">Grouping</label>
+            <select
+              value={filters.groupBy}
+              onChange={(e) => setFilters((prev) => ({ ...prev, groupBy: e.target.value }))}
+              className="px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
+            >
+              {GROUP_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="sr-only" htmlFor="event-search">Search events</label>
+          <input
+            id="event-search"
+            type="search"
+            value={filters.search}
+            onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+            placeholder="Search artist, title, notes, venue..."
+            className="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-700 text-sm"
+          />
+        </div>
+        <p className="text-xs text-gray-500">
+          Upcoming shows load by default. Switch timeframe to “Past” for recent history or “Archived” to manage cleanups.
+        </p>
+      </div>
 
       {filters.timeframe === 'archived' && (
         <div className="mb-6 p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-sm text-amber-100">
@@ -1679,6 +2180,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       )}
 
       {showForm && (
+        <>
         <div className="fixed inset-0 bg-black/60 flex items-start justify-center p-4 z-50 overflow-auto">
           <div className="bg-gray-800 rounded-xl max-w-3xl w-full p-6 border border-purple-500/30">
             <div className="flex justify-between items-center mb-4">
@@ -1714,7 +2216,9 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                   onChange={handleChange}
                   className="w-full px-4 py-2 bg-gray-700 text-white rounded"
                 >
-                  <option value="">Normal</option>
+                  <option value="">
+                    {categories.length ? 'Select category (defaults to Normal)' : 'Loading categories…'}
+                  </option>
                   {categoryOptions.map((cat) => (
                     <option key={cat.id} value={cat.id}>
                       {cat.name}{cat.is_active ? '' : ' (inactive)'}
@@ -1726,12 +2230,26 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
 
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Event Date*</label>
-                <input type="date" name="event_date" value={formData.event_date} onChange={handleChange} required className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
+                <input
+                  type="date"
+                  name="event_date"
+                  value={formData.event_date}
+                  onChange={handleChange}
+                  required={scheduleInputsRequired}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                />
               </div>
 
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Event Time*</label>
-                <input type="time" name="event_time" value={formData.event_time} onChange={handleChange} required className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
+                <input
+                  type="time"
+                  name="event_time"
+                  value={formData.event_time}
+                  onChange={handleChange}
+                  required={scheduleInputsRequired}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                />
               </div>
 
               <div>
@@ -1741,7 +2259,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                   name="door_time"
                   value={formData.door_time}
                   onChange={handleChange}
-                  required
+                  required={scheduleInputsRequired}
                   aria-describedby="door-time-help"
                   className="w-full px-4 py-2 bg-gray-700 text-white rounded"
                 />
@@ -1793,6 +2311,23 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
               </div>
 
               <div>
+                <label className="block text-sm text-gray-300 mb-1">Seat Reservations</label>
+                <label className="inline-flex items-center gap-2 text-gray-200">
+                  <input
+                    type="checkbox"
+                    name="seating_enabled"
+                    checked={!!formData.seating_enabled}
+                    onChange={handleChange}
+                    className="h-4 w-4 rounded border-gray-600"
+                  />
+                  <span>{formData.seating_enabled ? 'Enabled' : 'Disabled'}</span>
+                </label>
+                <p className="text-xs text-gray-400 mt-1">
+                  Toggle to hide or show seating UI without losing layouts or reservations.
+                </p>
+              </div>
+
+              <div>
                 <label className="block text-sm text-gray-300 mb-1">Venue*</label>
                 <select
                   name="venue_code"
@@ -1807,35 +2342,141 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                 <p className="text-xs text-gray-400 mt-1">Controls which public schedule and filtering bucket this show appears in.</p>
               </div>
 
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Seating Layout</label>
-                <select name="layout_id" value={formData.layout_id} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded">
-                  <option value="">None (No seat reservations)</option>
-                  {layouts.map(layout => (
-                    <option key={layout.id} value={layout.id}>
-                      {layout.name} {layout.is_default === 1 ? '(Default)' : ''}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-400 mt-1">Select a saved layout or leave as None if this event doesn't use seat reservations</p>
-                {editing && (formData.layout_id || editing.layout_id) && (
-                  <div className="mt-3 space-y-2">
-                    <button
-                      type="button"
-                      onClick={refreshLayoutSnapshot}
-                      disabled={refreshingLayout}
-                      className="inline-flex items-center justify-center rounded bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm font-medium text-white transition"
-                    >
-                      {refreshingLayout ? 'Refreshing layout…' : 'Apply latest layout template'}
-                    </button>
-                    <p className="text-xs text-gray-400">
-                      Use this after editing the layout template so the public seating chart stays in sync.
+              {editorFlags.showSeatingPanel && (
+                <>
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">Seating Layout</label>
+                    <select name="layout_id" value={formData.layout_id} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded">
+                      <option value="">None (No seat reservations)</option>
+                      {layouts.map(layout => (
+                        <option key={layout.id} value={layout.id}>
+                          {layout.name} {layout.is_default === 1 ? '(Default)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Select a layout or leave as None. Changing layouts will prompt a confirmation and creates a recovery snapshot.
                     </p>
-                    {refreshLayoutMessage && <p className="text-xs text-green-400">{refreshLayoutMessage}</p>}
-                    {refreshLayoutError && <p className="text-xs text-red-400">{refreshLayoutError}</p>}
+                    {editing && (formData.layout_id || editing.layout_id) && (
+                      <div className="mt-3 space-y-2">
+                        <button
+                          type="button"
+                          onClick={refreshLayoutSnapshot}
+                          disabled={refreshingLayout}
+                          className="inline-flex items-center justify-center rounded bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm font-medium text-white transition"
+                        >
+                          {refreshingLayout ? 'Refreshing layout…' : 'Apply latest layout template'}
+                        </button>
+                        <p className="text-xs text-gray-400">
+                          Use this after editing the layout template so the public seating chart stays in sync.
+                        </p>
+                        {refreshLayoutMessage && <p className="text-xs text-green-400">{refreshLayoutMessage}</p>}
+                        {refreshLayoutError && <p className="text-xs text-red-400">{refreshLayoutError}</p>}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+
+                  {editing && (
+                    <div className="md:col-span-2 rounded-2xl border border-gray-700 bg-gray-900/40 p-4 space-y-3">
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div>
+                          <h3 className="text-base font-semibold text-white">Seating Snapshots</h3>
+                          <p className="text-xs text-gray-400">
+                            Latest recovery checkpoints captured before layout changes.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => fetchSeatingSnapshots(editing.id)}
+                          disabled={seatingSnapshotsState.loading}
+                          className="inline-flex items-center justify-center rounded bg-gray-700 px-3 py-1 text-xs font-semibold text-white hover:bg-gray-600 disabled:opacity-50"
+                        >
+                          {seatingSnapshotsState.loading ? 'Loading…' : 'Refresh'}
+                        </button>
+                      </div>
+                      {seatingSnapshotsState.error && (
+                        <p className="text-xs text-red-400">{seatingSnapshotsState.error}</p>
+                      )}
+                      {snapshotCopyMessage && (
+                        <p className="text-xs text-emerald-300">{snapshotCopyMessage}</p>
+                      )}
+                      {snapshotRestoreState.error && (
+                        <p className="text-xs text-red-400">{snapshotRestoreState.error}</p>
+                      )}
+                      {snapshotRestoreState.message && (
+                        <div
+                          className={`rounded px-3 py-2 text-sm ${
+                            snapshotRestoreState.conflicts.length > 0
+                              ? 'border border-amber-500 bg-amber-900/20 text-amber-100'
+                              : 'border border-emerald-600 bg-emerald-900/20 text-emerald-100'
+                          }`}
+                        >
+                          <p>{snapshotRestoreState.message}</p>
+                          {snapshotRestoreState.conflicts.length > 0 && (
+                            <div className="mt-2">
+                              <p className="text-xs font-semibold">Conflicts to follow up:</p>
+                              <ul className="mt-1 list-disc space-y-1 pl-4 text-xs">
+                                {snapshotRestoreState.conflicts.map((conflict, idx) => (
+                                  <li key={conflict.seat || conflict.type || idx}>{describeSnapshotConflict(conflict)}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {seatingSnapshotsState.loading ? (
+                        <p className="text-sm text-gray-400">Loading snapshots…</p>
+                      ) : seatingSnapshotsState.items.length === 0 ? (
+                        <p className="text-sm text-gray-400">
+                          No snapshots yet. A recovery snapshot is saved automatically before each layout change.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {seatingSnapshotsState.items.map((snapshot) => (
+                            <div key={snapshot.id} className="flex flex-col gap-2 rounded border border-gray-700 px-3 py-2 md:flex-row md:items-center md:justify-between">
+                              <div>
+                                <p className="text-sm font-semibold text-white">Snapshot #{snapshot.id}</p>
+                                <p className="text-xs text-gray-400">
+                                  {formatSnapshotTimestamp(snapshot.created_at)} · {snapshot.snapshot_type?.replace(/_/g, ' ')}
+                                </p>
+                                <p className="text-xs text-gray-400">
+                                  Reserved: {snapshot.reserved_seats?.length || 0} · Pending: {snapshot.pending_seats?.length || 0} · Holds: {snapshot.hold_seats?.length || 0}
+                                </p>
+                              </div>
+                              <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                                <button
+                                  type="button"
+                                  onClick={() => openSnapshotPreview(snapshot)}
+                                  className="inline-flex items-center justify-center rounded bg-gray-600 px-3 py-1 text-xs font-semibold text-white hover:bg-gray-500"
+                                  aria-label={`Preview snapshot ${snapshot.id}`}
+                                >
+                                  Preview
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => copySnapshotPayload(snapshot)}
+                                  className="inline-flex items-center justify-center rounded bg-purple-600 px-3 py-1 text-xs font-semibold text-white hover:bg-purple-500"
+                                  aria-label={`Copy snapshot ${snapshot.id} JSON`}
+                                >
+                                  Copy JSON
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestoreSnapshot(snapshot)}
+                                  disabled={snapshotRestoreState.restoringId === snapshot.id}
+                                  className="inline-flex items-center justify-center rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {snapshotRestoreState.restoringId === snapshot.id ? 'Restoring…' : 'Restore layout & seats'}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
 
               <div className="md:col-span-2">
                 <label className="block text-sm text-gray-300 mb-1">Seat request email (optional)</label>
@@ -1853,6 +2494,64 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                     : 'Leave blank to use the Beach Bands inbox for beach shows or the main staff inbox for everything else.'}
                 </p>
               </div>
+
+              {editorFlags.showRecurringPanel ? (
+                <div className="md:col-span-2 rounded-2xl border border-blue-700/40 bg-blue-950/20 p-4 space-y-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Recurring Series Details</h3>
+                    <p className="text-sm text-gray-400">Customize the public copy for this series. These fields power the Recurring Events grid on the home page.</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Typical schedule label</label>
+                      <input
+                        name="series_schedule_label"
+                        value={formData.series_schedule_label}
+                        onChange={handleChange}
+                        className="w-full px-4 py-2 bg-gray-800 text-white rounded"
+                        placeholder="e.g., Thursdays · 6:00 – 10:00 PM"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">Shown beneath the “Typical schedule” heading.</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Highlight summary</label>
+                      <textarea
+                        name="series_summary"
+                        value={formData.series_summary}
+                        onChange={handleChange}
+                        rows="3"
+                        className="w-full px-4 py-2 bg-gray-800 text-white rounded"
+                        placeholder="One-line overview that appears near the title."
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">Footer note</label>
+                    <textarea
+                      name="series_footer_note"
+                      value={formData.series_footer_note}
+                      onChange={handleChange}
+                      rows="2"
+                      className="w-full px-4 py-2 bg-gray-800 text-white rounded"
+                      placeholder="Optional line that shows at the bottom of the recurring card (e.g., Weekly classic car cruise in)."
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              {editorFlags.showBeachBandsPanel && (
+                <div className="md:col-span-2 rounded-2xl border border-cyan-600/40 bg-cyan-950/20 p-4 space-y-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Beach Bands notes</h3>
+                    <p className="text-sm text-gray-300">
+                      Beach Bands shows use special routing and promo copy. Double-check pricing, sponsor copy, and imagery before publishing.
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Future Beach Bands-only settings will live here so staff always knows why this section is visible.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div className="md:col-span-2 rounded-2xl border border-gray-700 bg-gray-900/40 p-4 space-y-4">
                 <div>
@@ -2008,6 +2707,135 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
             </form>
           </div>
         </div>
+        {layoutConfirmState.open && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4">
+            <div className="bg-gray-800 rounded-xl max-w-lg w-full p-6 border border-amber-500/40 shadow-xl">
+              <h3 className="text-lg font-semibold text-white mb-2">Change seating layout?</h3>
+              <p className="text-sm text-gray-300">
+                Existing seat requests and holds are preserved, but they may no longer align with the new seating map. A
+                recovery snapshot will be saved automatically before this change is applied.
+              </p>
+              <ul className="mt-3 text-xs text-gray-400 list-disc list-inside space-y-1">
+                <li>Nothing is deleted automatically.</li>
+                <li>You can copy the reserved seat list from the snapshots panel at any time.</li>
+              </ul>
+              <div className="mt-5 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={cancelLayoutChange}
+                  className="px-4 py-2 rounded bg-gray-700 text-white hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmLayoutChange}
+                  className="px-4 py-2 rounded bg-amber-600 text-white hover:bg-amber-500"
+                >
+                  Confirm change
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {snapshotPreviewState.open && snapshotPreviewState.snapshot && (
+          <div
+            className="fixed inset-0 z-[65] flex items-center justify-center bg-black/80 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="snapshot-preview-heading"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                closeSnapshotPreview();
+              }
+            }}
+          >
+            <div
+              ref={previewModalRef}
+              className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-purple-500/40 bg-gray-900 p-6 shadow-2xl"
+            >
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h3 id="snapshot-preview-heading" className="text-xl font-semibold text-white">
+                    Snapshot #{snapshotPreviewState.snapshot.id}
+                  </h3>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Preview does not change anything. Restore Seating applies this snapshot.
+                  </p>
+                </div>
+                <button
+                  ref={previewCloseButtonRef}
+                  type="button"
+                  onClick={closeSnapshotPreview}
+                  className="inline-flex items-center justify-center rounded bg-gray-700 px-3 py-1 text-sm font-semibold text-white hover:bg-gray-600"
+                  aria-label="Close snapshot preview"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-3 text-sm text-gray-200 md:grid-cols-2">
+                <div>
+                  <span className="text-gray-400 block text-xs uppercase">Created at</span>
+                  <p>{formatSnapshotTimestamp(snapshotPreviewState.snapshot.created_at)}</p>
+                </div>
+                <div>
+                  <span className="text-gray-400 block text-xs uppercase">Created by</span>
+                  <p>{snapshotPreviewState.snapshot.created_by || 'Unknown'}</p>
+                </div>
+                <div>
+                  <span className="text-gray-400 block text-xs uppercase">Snapshot type</span>
+                  <p className="capitalize">{(snapshotPreviewState.snapshot.snapshot_type || 'n/a').replace(/_/g, ' ')}</p>
+                </div>
+                {snapshotPreviewState.snapshot.notes && (
+                  <div className="md:col-span-2">
+                    <span className="text-gray-400 block text-xs uppercase">Notes</span>
+                    <p>{snapshotPreviewState.snapshot.notes}</p>
+                  </div>
+                )}
+              </div>
+              <div className="mt-4">
+                <label htmlFor="snapshot-seat-filter" className="block text-sm text-gray-300 mb-1">
+                  Seat search/filter
+                </label>
+                <input
+                  id="snapshot-seat-filter"
+                  type="text"
+                  value={snapshotPreviewState.seatFilter}
+                  onChange={(event) =>
+                    setSnapshotPreviewState((prev) => ({ ...prev, seatFilter: event.target.value }))
+                  }
+                  placeholder="Search for a seat id (e.g., Table-1)"
+                  className="w-full rounded bg-gray-800 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  aria-label="Filter seats within this snapshot"
+                />
+                <p className="text-xs text-gray-500 mt-1">Filters reserved, pending, and hold lists below.</p>
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                {renderSeatListBlock('Reserved seats', snapshotPreviewLists?.reserved)}
+                {renderSeatListBlock('Pending seats', snapshotPreviewLists?.pending)}
+                {renderSeatListBlock('Hold seats', snapshotPreviewLists?.hold)}
+              </div>
+              <div className="mt-5 rounded-2xl border border-gray-700 bg-gray-900/50 p-4 space-y-3">
+                <div>
+                  <h4 className="text-base font-semibold text-white">Compare to current seating</h4>
+                  <p className="text-xs text-gray-400">Highlights differences between this snapshot and the latest saved seat requests.</p>
+                </div>
+                {snapshotComparison?.available ? (
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    {renderComparisonBlock('Reserved seats', snapshotComparison.reserved)}
+                    {renderComparisonBlock('Pending seats', snapshotComparison.pending)}
+                    {renderComparisonBlock('Hold seats', snapshotComparison.hold)}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400">
+                    Current seating data isn’t available right now. Preview shows snapshot contents only.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        </>
       )}
     </div>
   );

@@ -198,6 +198,59 @@ function mysql_now(): string
     return (new DateTime('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s');
 }
 
+function layout_table_has_column(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+    $key = strtolower($table . '.' . $column);
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $table) || !preg_match('/^[a-zA-Z0-9_]+$/', $column)) {
+        $cache[$key] = false;
+        return false;
+    }
+    try {
+        $stmt = $pdo->prepare('SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1');
+        $stmt->execute([$table, $column]);
+        $cache[$key] = (bool) $stmt->fetchColumn();
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log(sprintf('layout_table_has_column failure for %s.%s: %s', $table, $column, $e->getMessage()));
+        }
+        $cache[$key] = false;
+    }
+    return $cache[$key];
+}
+
+function layout_optional_select_clause(PDO $pdo, string $table): string
+{
+    static $cache = [];
+    $key = strtolower($table);
+    if (isset($cache[$key])) {
+        return $cache[$key];
+    }
+    $parts = [];
+    foreach (['stage_position','stage_size','canvas_settings'] as $column) {
+        $parts[] = layout_table_has_column($pdo, $table, $column) ? $column : ('NULL AS ' . $column);
+    }
+    $cache[$key] = implode(', ', $parts);
+    return $cache[$key];
+}
+
+function decode_layout_json_value($value): ?array
+{
+    if (is_array($value)) {
+        return $value;
+    }
+    if (is_string($value) && $value !== '') {
+        $decoded = json_decode($value, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+            return $decoded;
+        }
+    }
+    return null;
+}
+
 function fetch_layout_for_event(?int $eventId): array
 {
     $pdo = Database::connection();
@@ -205,44 +258,46 @@ function fetch_layout_for_event(?int $eventId): array
     $stagePosition = null;
     $stageSize = null;
     $canvasSettings = null;
+    $versionSelect = layout_optional_select_clause($pdo, 'seating_layout_versions');
+    $layoutSelect = layout_optional_select_clause($pdo, 'seating_layouts');
 
     if ($eventId) {
         $stmt = $pdo->prepare('SELECT layout_id, layout_version_id FROM events WHERE id = ?');
         $stmt->execute([$eventId]);
         $layoutRow = $stmt->fetch();
         if ($layoutRow && $layoutRow['layout_version_id']) {
-            $stmt = $pdo->prepare('SELECT layout_data, stage_position, stage_size, canvas_settings FROM seating_layout_versions WHERE id = ?');
+            $stmt = $pdo->prepare("SELECT layout_data, {$versionSelect} FROM seating_layout_versions WHERE id = ?");
             $stmt->execute([$layoutRow['layout_version_id']]);
             $layout = $stmt->fetch();
             if ($layout) {
-                $layoutData = $layout['layout_data'] ? json_decode($layout['layout_data'], true) : [];
-                $stagePosition = $layout['stage_position'] ? json_decode($layout['stage_position'], true) : null;
-                $stageSize = $layout['stage_size'] ? json_decode($layout['stage_size'], true) : null;
-                $canvasSettings = $layout['canvas_settings'] ? json_decode($layout['canvas_settings'], true) : null;
+                $layoutData = decode_layout_json_value($layout['layout_data'] ?? null) ?? [];
+                $stagePosition = decode_layout_json_value($layout['stage_position'] ?? null);
+                $stageSize = decode_layout_json_value($layout['stage_size'] ?? null);
+                $canvasSettings = decode_layout_json_value($layout['canvas_settings'] ?? null);
                 return [$layoutData ?? [], $stagePosition, $stageSize, $canvasSettings];
             }
         }
         if ($layoutRow && $layoutRow['layout_id']) {
-            $stmt = $pdo->prepare('SELECT layout_data, stage_position, stage_size, canvas_settings FROM seating_layouts WHERE id = ?');
+            $stmt = $pdo->prepare("SELECT layout_data, {$layoutSelect} FROM seating_layouts WHERE id = ?");
             $stmt->execute([$layoutRow['layout_id']]);
             $layout = $stmt->fetch();
             if ($layout) {
-                $layoutData = $layout['layout_data'] ? json_decode($layout['layout_data'], true) : [];
-                $stagePosition = $layout['stage_position'] ? json_decode($layout['stage_position'], true) : null;
-                $stageSize = $layout['stage_size'] ? json_decode($layout['stage_size'], true) : null;
-                $canvasSettings = $layout['canvas_settings'] ? json_decode($layout['canvas_settings'], true) : null;
+                $layoutData = decode_layout_json_value($layout['layout_data'] ?? null) ?? [];
+                $stagePosition = decode_layout_json_value($layout['stage_position'] ?? null);
+                $stageSize = decode_layout_json_value($layout['stage_size'] ?? null);
+                $canvasSettings = decode_layout_json_value($layout['canvas_settings'] ?? null);
                 return [$layoutData ?? [], $stagePosition, $stageSize, $canvasSettings];
             }
         }
     }
 
-    $stmt = $pdo->query('SELECT layout_data, stage_position, stage_size, canvas_settings FROM seating_layouts WHERE is_default = 1 LIMIT 1');
+    $stmt = $pdo->query("SELECT layout_data, {$layoutSelect} FROM seating_layouts WHERE is_default = 1 LIMIT 1");
     $layout = $stmt->fetch();
     if ($layout) {
-        $layoutData = $layout['layout_data'] ? json_decode($layout['layout_data'], true) : [];
-        $stagePosition = $layout['stage_position'] ? json_decode($layout['stage_position'], true) : null;
-        $stageSize = $layout['stage_size'] ? json_decode($layout['stage_size'], true) : null;
-        $canvasSettings = $layout['canvas_settings'] ? json_decode($layout['canvas_settings'], true) : null;
+        $layoutData = decode_layout_json_value($layout['layout_data'] ?? null) ?? [];
+        $stagePosition = decode_layout_json_value($layout['stage_position'] ?? null);
+        $stageSize = decode_layout_json_value($layout['stage_size'] ?? null);
+        $canvasSettings = decode_layout_json_value($layout['canvas_settings'] ?? null);
     }
 
     return [$layoutData ?? [], $stagePosition, $stageSize, $canvasSettings];
@@ -520,6 +575,25 @@ function events_table_has_column(PDO $pdo, string $column): bool
     return $cache[$key];
 }
 
+function event_series_meta_table_exists(PDO $pdo): bool
+{
+    static $hasTable = null;
+    if ($hasTable !== null) {
+        return $hasTable;
+    }
+    try {
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?');
+        $stmt->execute(['event_series_meta']);
+        $hasTable = (int) $stmt->fetchColumn() > 0;
+    } catch (Throwable $error) {
+        $hasTable = false;
+        if (APP_DEBUG) {
+            error_log('event_series_meta_table_exists failure: ' . $error->getMessage());
+        }
+    }
+    return $hasTable;
+}
+
 function events_table_has_index(PDO $pdo, string $indexName): bool
 {
     static $cache = [];
@@ -540,6 +614,61 @@ function events_table_has_index(PDO $pdo, string $indexName): bool
     return $cache[$key];
 }
 
+function normalize_series_meta_field($value): ?string
+{
+    if ($value === null) {
+        return null;
+    }
+    if (is_string($value)) {
+        $trimmed = trim($value);
+        return $trimmed === '' ? null : $trimmed;
+    }
+    if (is_scalar($value)) {
+        $trimmed = trim((string) $value);
+        return $trimmed === '' ? null : $trimmed;
+    }
+    return null;
+}
+
+function save_event_series_meta(PDO $pdo, int $eventId, ?string $scheduleLabel, ?string $summary, ?string $footerNote): void
+{
+    if (!event_series_meta_table_exists($pdo)) {
+        if (APP_DEBUG && ($scheduleLabel !== null || $summary !== null || $footerNote !== null)) {
+            error_log('[series-meta] table missing; unable to persist metadata for event ' . $eventId);
+        }
+        return;
+    }
+    if ($scheduleLabel === null && $summary === null && $footerNote === null) {
+        $deleteStmt = $pdo->prepare('DELETE FROM event_series_meta WHERE event_id = ?');
+        $deleteStmt->execute([$eventId]);
+        return;
+    }
+    $stmt = $pdo->prepare('INSERT INTO event_series_meta (event_id, schedule_label, summary, footer_note, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE schedule_label = VALUES(schedule_label), summary = VALUES(summary), footer_note = VALUES(footer_note), updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP');
+    $stmt->execute([
+        $eventId,
+        $scheduleLabel,
+        $summary,
+        $footerNote,
+        'api',
+        'api',
+    ]);
+}
+
+function fetch_event_series_meta(PDO $pdo, int $eventId): array
+{
+    if (!event_series_meta_table_exists($pdo)) {
+        return ['schedule_label' => null, 'summary' => null, 'footer_note' => null];
+    }
+    $stmt = $pdo->prepare('SELECT schedule_label, summary, footer_note FROM event_series_meta WHERE event_id = ? LIMIT 1');
+    $stmt->execute([$eventId]);
+    $row = $stmt->fetch() ?: [];
+    return [
+        'schedule_label' => $row['schedule_label'] ?? null,
+        'summary' => $row['summary'] ?? null,
+        'footer_note' => $row['footer_note'] ?? null,
+    ];
+}
+
 function event_categories_table_exists(PDO $pdo): bool
 {
     static $exists = null;
@@ -553,6 +682,25 @@ function event_categories_table_exists(PDO $pdo): bool
         $exists = false;
         if (APP_DEBUG) {
             error_log('event_categories_table_exists failure: ' . $error->getMessage());
+        }
+    }
+    return $exists;
+}
+
+function event_seating_snapshots_table_exists(PDO $pdo): bool
+{
+    static $exists = null;
+    if ($exists !== null) {
+        return $exists;
+    }
+    try {
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?');
+        $stmt->execute(['event_seating_snapshots']);
+        $exists = (int) $stmt->fetchColumn() > 0;
+    } catch (Throwable $error) {
+        $exists = false;
+        if (APP_DEBUG) {
+            error_log('event_seating_snapshots_table_exists failure: ' . $error->getMessage());
         }
     }
     return $exists;
@@ -1541,7 +1689,8 @@ function snapshot_layout_version(PDO $pdo, ?int $layoutId, string $changeNote = 
     if (!$layoutId) {
         return null;
     }
-    $stmt = $pdo->prepare('SELECT layout_data, stage_position, stage_size, canvas_settings FROM seating_layouts WHERE id = ? LIMIT 1');
+    $layoutSelect = layout_optional_select_clause($pdo, 'seating_layouts');
+    $stmt = $pdo->prepare("SELECT layout_data, {$layoutSelect} FROM seating_layouts WHERE id = ? LIMIT 1");
     $stmt->execute([$layoutId]);
     $layout = $stmt->fetch();
     if (!$layout) {
@@ -1642,8 +1791,9 @@ function parse_seat_identifier(string $seatId): array
     return [$section, $rowLabel, $seatNum];
 }
 
-function apply_seat_reservations(PDO $pdo, array $seatIds): void
+function apply_seat_reservations(PDO $pdo, array $seatIds, bool $captureMissing = false): array
 {
+    $missing = [];
     foreach ($seatIds as $seatId) {
         [$section, $rowLabel] = parse_seat_identifier($seatId);
         if (!$section || !$rowLabel) {
@@ -1653,6 +1803,9 @@ function apply_seat_reservations(PDO $pdo, array $seatIds): void
         $stmt->execute([$section, $rowLabel]);
         $row = $stmt->fetch();
         if (!$row) {
+            if ($captureMissing) {
+                $missing[] = $seatId;
+            }
             continue;
         }
         $existing = parse_selected_seats($row['selected_seats']);
@@ -1662,6 +1815,274 @@ function apply_seat_reservations(PDO $pdo, array $seatIds): void
             $update->execute([json_encode($existing), $row['id']]);
         }
     }
+    return $captureMissing ? array_values(array_unique($missing)) : [];
+}
+
+function normalize_snapshot_seat_list(array $seats): array
+{
+    $map = [];
+    foreach ($seats as $seat) {
+        if (!is_string($seat)) {
+            continue;
+        }
+        $label = trim($seat);
+        if ($label === '' || isset($map[$label])) {
+            continue;
+        }
+        $map[$label] = true;
+    }
+    $result = array_keys($map);
+    sort($result, SORT_NATURAL);
+    return $result;
+}
+
+function collect_event_seating_snapshot_data(PDO $pdo, int $eventId): array
+{
+    $reserved = [];
+    $pending = [];
+    $hold = [];
+    $now = now_eastern();
+    $openStatuses = open_seat_request_statuses();
+    $stmt = $pdo->prepare('SELECT selected_seats, status, hold_expires_at FROM seat_requests WHERE event_id = ?');
+    $stmt->execute([$eventId]);
+    while ($row = $stmt->fetch()) {
+        $seats = parse_selected_seats($row['selected_seats'] ?? []);
+        if (!$seats) {
+            continue;
+        }
+        $status = normalize_seat_request_status($row['status'] ?? null);
+        if ($status === 'confirmed') {
+            $reserved = array_merge($reserved, $seats);
+            continue;
+        }
+        if (in_array($status, $openStatuses, true)) {
+            $target =& $pending;
+            if (!empty($row['hold_expires_at'])) {
+                try {
+                    $expiresAt = new DateTimeImmutable($row['hold_expires_at'], new DateTimeZone('America/New_York'));
+                    if ($expiresAt > $now) {
+                        $target =& $hold;
+                    }
+                } catch (Throwable $e) {
+                    // Ignore parse errors; treat as pending state
+                }
+            }
+            $target = array_merge($target, $seats);
+        }
+    }
+    $manualStmt = $pdo->prepare('SELECT selected_seats FROM seating WHERE event_id = ? AND selected_seats IS NOT NULL');
+    $manualStmt->execute([$eventId]);
+    while ($row = $manualStmt->fetch()) {
+        $rowSeats = parse_selected_seats($row['selected_seats'] ?? []);
+        if ($rowSeats) {
+            $reserved = array_merge($reserved, $rowSeats);
+        }
+    }
+    return [
+        'reserved' => normalize_snapshot_seat_list($reserved),
+        'pending' => normalize_snapshot_seat_list($pending),
+        'hold' => normalize_snapshot_seat_list($hold),
+    ];
+}
+
+function create_event_seating_snapshot(PDO $pdo, int $eventId, string $snapshotType = 'pre_layout_change', ?string $notes = null): ?array
+{
+    if (!event_seating_snapshots_table_exists($pdo)) {
+        return null;
+    }
+    $eventStmt = $pdo->prepare('SELECT id, layout_id, layout_version_id FROM events WHERE id = ? LIMIT 1');
+    $eventStmt->execute([$eventId]);
+    $event = $eventStmt->fetch();
+    if (!$event) {
+        return null;
+    }
+    $snapshotData = collect_event_seating_snapshot_data($pdo, $eventId);
+    $actor = audit_log_actor();
+    $insert = $pdo->prepare('INSERT INTO event_seating_snapshots (event_id, layout_id, layout_version_id, snapshot_type, reserved_seats, pending_seats, hold_seats, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $insert->execute([
+        $eventId,
+        $event['layout_id'] ?? null,
+        $event['layout_version_id'] ?? null,
+        $snapshotType,
+        json_encode($snapshotData['reserved']) ?: '[]',
+        $snapshotData['pending'] ? json_encode($snapshotData['pending']) : null,
+        $snapshotData['hold'] ? json_encode($snapshotData['hold']) : null,
+        $notes,
+        $actor,
+    ]);
+    $snapshotId = (int) $pdo->lastInsertId();
+    return [
+        'id' => $snapshotId,
+        'snapshot_type' => $snapshotType,
+        'layout_id' => $event['layout_id'] ?? null,
+        'layout_version_id' => $event['layout_version_id'] ?? null,
+        'reserved' => $snapshotData['reserved'],
+        'pending' => $snapshotData['pending'],
+        'hold' => $snapshotData['hold'],
+    ];
+}
+
+function decode_snapshot_seat_column($value): array
+{
+    if (is_array($value)) {
+        return array_values(array_filter($value, fn($seat) => is_string($seat) && trim($seat) !== ''));
+    }
+    if (is_string($value) && $value !== '') {
+        $decoded = json_decode($value, true);
+        if (is_array($decoded)) {
+            return array_values(array_filter($decoded, fn($seat) => is_string($seat) && trim($seat) !== ''));
+        }
+    }
+    return [];
+}
+
+function create_snapshot_placeholder_requests(PDO $pdo, int $eventId, array $seatIds, string $status, ?int $layoutVersionId, string $note, DateTimeImmutable $now): array
+{
+    if (!$seatIds) {
+        return [];
+    }
+    $chunks = array_chunk($seatIds, 15);
+    $missing = [];
+    foreach ($chunks as $chunk) {
+        $holdExpiresAt = null;
+        $finalizedAt = null;
+        if ($status === 'confirmed') {
+            $finalizedAt = $now->format('Y-m-d H:i:s');
+        } elseif ($status === 'hold') {
+            $holdExpiresAt = compute_hold_expiration($now)->format('Y-m-d H:i:s');
+        }
+        $stmt = $pdo->prepare('INSERT INTO seat_requests (event_id, layout_version_id, customer_name, customer_email, customer_phone, customer_phone_normalized, selected_seats, total_seats, status, special_requests, hold_expires_at, finalized_at, created_by, updated_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())');
+        $stmt->execute([
+            $eventId,
+            $layoutVersionId,
+            'Snapshot Restore',
+            '',
+            '',
+            null,
+            json_encode($chunk),
+            count($chunk),
+            $status,
+            $note,
+            $holdExpiresAt,
+            $finalizedAt,
+            'snapshot-restore',
+            'snapshot-restore',
+        ]);
+        if ($status === 'confirmed') {
+            $missingSeats = apply_seat_reservations($pdo, $chunk, true);
+            if ($missingSeats) {
+                $missing = array_merge($missing, $missingSeats);
+            }
+        }
+    }
+    return array_values(array_unique($missing));
+}
+
+function restore_event_seating_from_snapshot(PDO $pdo, int $eventId, array $snapshotRow): array
+{
+    $eventStmt = $pdo->prepare('SELECT layout_id, layout_version_id, seating_enabled FROM events WHERE id = ? LIMIT 1 FOR UPDATE');
+    $eventStmt->execute([$eventId]);
+    $event = $eventStmt->fetch();
+    if (!$event) {
+        throw new RuntimeException('Event not found');
+    }
+
+    $conflicts = [];
+    $targetLayoutId = $snapshotRow['layout_id'] ?? null;
+    $targetLayoutVersionId = $snapshotRow['layout_version_id'] ?? null;
+
+    if ($targetLayoutId) {
+        $layoutCheck = $pdo->prepare('SELECT id FROM seating_layouts WHERE id = ? LIMIT 1');
+        $layoutCheck->execute([$targetLayoutId]);
+        if (!$layoutCheck->fetchColumn()) {
+            $conflicts[] = ['type' => 'layout_missing', 'message' => "Layout template {$targetLayoutId} no longer exists."];
+            $targetLayoutId = null;
+            $targetLayoutVersionId = null;
+        }
+    }
+    if ($targetLayoutVersionId) {
+        $versionCheck = $pdo->prepare('SELECT id FROM seating_layout_versions WHERE id = ? LIMIT 1');
+        $versionCheck->execute([$targetLayoutVersionId]);
+        if (!$versionCheck->fetchColumn()) {
+            $conflicts[] = ['type' => 'layout_version_missing', 'message' => "Layout version {$targetLayoutVersionId} no longer exists."];
+            $targetLayoutVersionId = null;
+        }
+    }
+
+    $updateFields = [];
+    $updateParams = [];
+    $currentLayoutId = $event['layout_id'] ?? null;
+    $currentLayoutVersionId = $event['layout_version_id'] ?? null;
+    if ($targetLayoutId !== $currentLayoutId) {
+        $updateFields[] = 'layout_id = ?';
+        $updateParams[] = $targetLayoutId;
+    }
+    if ($targetLayoutVersionId !== $currentLayoutVersionId) {
+        $updateFields[] = 'layout_version_id = ?';
+        $updateParams[] = $targetLayoutVersionId;
+    }
+    if ($targetLayoutId && (int)($event['seating_enabled'] ?? 0) !== 1) {
+        $updateFields[] = 'seating_enabled = 1';
+        $updateParams[] = 1;
+    }
+    if ($updateFields) {
+        $updateParams[] = $eventId;
+        $pdo->prepare('UPDATE events SET ' . implode(', ', $updateFields) . ' WHERE id = ?')->execute($updateParams);
+    }
+
+    $pdo->prepare('DELETE FROM seat_requests WHERE event_id = ?')->execute([$eventId]);
+    $pdo->prepare('UPDATE seating SET selected_seats = NULL WHERE event_id = ?')->execute([$eventId]);
+
+    $reservedSeats = decode_snapshot_seat_column($snapshotRow['reserved_seats'] ?? null);
+    $pendingSeats = decode_snapshot_seat_column($snapshotRow['pending_seats'] ?? null);
+    $holdSeats = decode_snapshot_seat_column($snapshotRow['hold_seats'] ?? null);
+
+    $now = now_eastern();
+    $snapshotNoteBase = isset($snapshotRow['id']) ? "Restored from snapshot #{$snapshotRow['id']}" : 'Restored from snapshot';
+    $missingSeats = create_snapshot_placeholder_requests(
+        $pdo,
+        $eventId,
+        $reservedSeats,
+        'confirmed',
+        $targetLayoutVersionId,
+        "{$snapshotNoteBase} (confirmed)",
+        $now
+    );
+    foreach ($missingSeats as $seat) {
+        $conflicts[] = ['type' => 'seat_missing', 'seat' => $seat, 'message' => 'Seat not found in current layout'];
+    }
+    create_snapshot_placeholder_requests(
+        $pdo,
+        $eventId,
+        $pendingSeats,
+        'waiting',
+        $targetLayoutVersionId,
+        "{$snapshotNoteBase} (pending)",
+        $now
+    );
+    create_snapshot_placeholder_requests(
+        $pdo,
+        $eventId,
+        $holdSeats,
+        'hold',
+        $targetLayoutVersionId,
+        "{$snapshotNoteBase} (hold)",
+        $now
+    );
+
+    $finalStmt = $pdo->prepare('SELECT layout_id, layout_version_id, seating_enabled FROM events WHERE id = ? LIMIT 1');
+    $finalStmt->execute([$eventId]);
+    $finalEvent = $finalStmt->fetch() ?: $event;
+
+    return [
+        'layout_id' => $finalEvent['layout_id'] ?? null,
+        'layout_version_id' => $finalEvent['layout_version_id'] ?? null,
+        'seating_enabled' => (int)($finalEvent['seating_enabled'] ?? 0),
+        'restored_reserved' => count($reservedSeats),
+        'restored_pending' => count($pendingSeats),
+        'restored_hold' => count($holdSeats),
+        'conflicts' => $conflicts,
+    ];
 }
 
 function create_seat_request_record(PDO $pdo, array $payload, array $options = []): array
@@ -1837,6 +2258,7 @@ function list_events(Request $request, ?string $scopeOverride = null): array
 {
     $pdo = Database::connection();
     $hasCategoryTable = event_categories_table_exists($pdo);
+    $hasSeriesMeta = event_series_meta_table_exists($pdo);
     $params = [];
     $conditions = [];
     $includeDeleted = !empty($request->query['include_deleted']);
@@ -1921,10 +2343,16 @@ function list_events(Request $request, ?string $scopeOverride = null): array
         $categorySelect = ', ec.slug AS category_slug, ec.name AS category_name, ec.is_active AS category_is_active, ec.is_system AS category_is_system, ec.seat_request_email_to AS category_seat_request_email_to';
         $categoryJoin = ' LEFT JOIN event_categories ec ON ec.id = e.category_id';
     }
+    $seriesMetaSelect = '';
+    $seriesMetaJoin = '';
+    if ($hasSeriesMeta) {
+        $seriesMetaSelect = ', esm.schedule_label AS series_schedule_label, esm.summary AS series_summary, esm.footer_note AS series_footer_note';
+        $seriesMetaJoin = ' LEFT JOIN event_series_meta esm ON esm.event_id = e.id';
+    }
     $recurrenceSelect = ', rr_self.id AS recurrence_rule_id, rr_parent.id AS parent_recurrence_rule_id, rx_skip.id AS skipped_instance_exception_id, rx_skip.exception_date AS skipped_instance_exception_date';
     $occurrenceDateExpr = "COALESCE(e.event_date, DATE(e.start_datetime))";
     $recurrenceJoin = ' LEFT JOIN event_recurrence_rules rr_self ON rr_self.event_id = e.id LEFT JOIN event_recurrence_rules rr_parent ON rr_parent.event_id = e.series_master_id LEFT JOIN event_recurrence_exceptions rx_skip ON rx_skip.recurrence_id = rr_parent.id AND rx_skip.exception_type = \'skip\' AND rx_skip.exception_date = ' . $occurrenceDateExpr;
-    $sql = "SELECT e.*{$categorySelect}{$recurrenceSelect} FROM events e{$categoryJoin}{$recurrenceJoin} $where $orderBy $limitClause";
+    $sql = "SELECT e.*{$categorySelect}{$seriesMetaSelect}{$recurrenceSelect} FROM events e{$seriesMetaJoin}{$categoryJoin}{$recurrenceJoin} $where $orderBy $limitClause";
     try {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
@@ -1933,6 +2361,33 @@ function list_events(Request $request, ?string $scopeOverride = null): array
             $rows = array_values(array_filter($rows, function ($row) {
                 return empty($row['skipped_instance_exception_id']);
             }));
+            $masterIds = [];
+            foreach ($rows as $row) {
+                $masterId = isset($row['series_master_id']) ? (int) $row['series_master_id'] : 0;
+                if ($masterId > 0) {
+                    $masterIds[$masterId] = true;
+                }
+            }
+            foreach ($rows as $row) {
+                if (!empty($row['is_series_master']) && !empty($row['id'])) {
+                    unset($masterIds[(int) $row['id']]);
+                }
+            }
+            if ($masterIds) {
+                $masterIds = array_keys($masterIds);
+                $placeholders = implode(',', array_fill(0, count($masterIds), '?'));
+                $masterWhere = "WHERE e.id IN ({$placeholders})";
+                if (!$includeDeleted) {
+                    $masterWhere .= ' AND e.deleted_at IS NULL';
+                }
+                $masterSql = "SELECT e.*{$categorySelect}{$seriesMetaSelect}{$recurrenceSelect} FROM events e{$seriesMetaJoin}{$categoryJoin}{$recurrenceJoin} {$masterWhere}";
+                $masterStmt = $pdo->prepare($masterSql);
+                $masterStmt->execute($masterIds);
+                $masters = $masterStmt->fetchAll() ?: [];
+                if ($masters) {
+                    $rows = array_merge($rows, $masters);
+                }
+            }
         }
         if ($scope !== 'public') {
             foreach ($rows as &$row) {
@@ -2551,11 +3006,16 @@ $router->add('GET', '/api/public/events', function (Request $request) {
 $router->add('GET', '/api/events/:id', function ($request, $params) {
     $pdo = Database::connection();
     $hasCategoryTable = event_categories_table_exists($pdo);
+    $hasSeriesMeta = event_series_meta_table_exists($pdo);
+    $seriesMetaSelect = $hasSeriesMeta ? ', esm.schedule_label AS series_schedule_label, esm.summary AS series_summary, esm.footer_note AS series_footer_note' : '';
+    $seriesMetaJoin = $hasSeriesMeta ? ' LEFT JOIN event_series_meta esm ON esm.event_id = e.id' : '';
     if ($hasCategoryTable) {
-        $stmt = $pdo->prepare('SELECT e.*, ec.slug AS category_slug, ec.name AS category_name, ec.is_active AS category_is_active, ec.is_system AS category_is_system, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
+        $sql = 'SELECT e.*' . $seriesMetaSelect . ' , ec.slug AS category_slug, ec.name AS category_name, ec.is_active AS category_is_active, ec.is_system AS category_is_system, ec.seat_request_email_to AS category_seat_request_email_to FROM events e' . $seriesMetaJoin . ' LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
         $stmt->execute([$params['id']]);
     } else {
-        $stmt = $pdo->prepare('SELECT * FROM events WHERE id = ? LIMIT 1');
+        $sql = 'SELECT e.*' . $seriesMetaSelect . ' FROM events e' . $seriesMetaJoin . ' WHERE e.id = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
         $stmt->execute([$params['id']]);
     }
     $event = $stmt->fetch();
@@ -2813,7 +3273,7 @@ $router->add('POST', '/api/events', function (Request $request) {
         if (!$layoutId) {
             $seatingEnabled = 0;
         }
-        $layoutVersionId = ($seatingEnabled && $layoutId) ? ensure_event_layout_version($pdo, $layoutId, $requestedVersion) : null;
+        $layoutVersionId = $layoutId ? ensure_event_layout_version($pdo, $layoutId, $requestedVersion) : null;
 
         $categoryTags = $payload['category_tags'] ?? null;
         if (is_array($categoryTags)) {
@@ -2844,6 +3304,9 @@ $router->add('POST', '/api/events', function (Request $request) {
             }
             $seatRequestOverride = $rawOverride !== '' ? $rawOverride : null;
         }
+        $seriesScheduleLabel = normalize_series_meta_field($payload['series_schedule_label'] ?? null);
+        $seriesSummary = normalize_series_meta_field($payload['series_summary'] ?? null);
+        $seriesFooter = normalize_series_meta_field($payload['series_footer_note'] ?? null);
 
         $contactPhoneRaw = $payload['contact_phone_raw'] ?? $payload['contact_phone'] ?? null;
         $contactPhoneNormalized = normalize_phone_number($contactPhoneRaw);
@@ -2913,6 +3376,7 @@ $router->add('POST', '/api/events', function (Request $request) {
             'category_id' => $categoryId,
             'seating_enabled' => (bool) $seatingEnabled,
         ]);
+        save_event_series_meta($pdo, $id, $seriesScheduleLabel, $seriesSummary, $seriesFooter);
         Response::success(['id' => $id, 'slug' => $slug]);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
@@ -2935,7 +3399,28 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         if (!$existing) {
             return Response::error('Event not found', 404);
         }
+        $existingMeta = fetch_event_series_meta($pdo, $eventId);
         $payload = read_json_body($request);
+        $isSeriesMaster = !empty($existing['is_series_master']);
+        $hasExplicitScheduleInput = false;
+        foreach (['start_datetime', 'event_date', 'event_time', 'door_time', 'end_datetime'] as $scheduleField) {
+            if (!array_key_exists($scheduleField, $payload)) {
+                continue;
+            }
+            $value = $payload[$scheduleField];
+            if (is_string($value)) {
+                if (trim($value) !== '') {
+                    $hasExplicitScheduleInput = true;
+                    break;
+                }
+                continue;
+            }
+            if ($value !== null) {
+                $hasExplicitScheduleInput = true;
+                break;
+            }
+        }
+        $allowMissingSchedule = $isSeriesMaster && !$hasExplicitScheduleInput;
         $artist = trim((string)($payload['artist_name'] ?? $existing['artist_name']));
         if ($artist === '') {
             return Response::error('artist_name is required', 400);
@@ -2953,7 +3438,7 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         } catch (Throwable $e) {
             return Response::error('Invalid event_date or event_time value', 422);
         }
-        if (!$startDt) {
+        if (!$startDt && !$allowMissingSchedule) {
             return Response::error('event_date and event_time are required', 422);
         }
         $endInput = $payload['end_datetime'] ?? null;
@@ -2974,15 +3459,34 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $ticketType = in_array($payload['ticket_type'] ?? $existing['ticket_type'] ?? 'general_admission', ['general_admission','reserved_seating','hybrid'], true) ? ($payload['ticket_type'] ?? $existing['ticket_type']) : ($existing['ticket_type'] ?? 'general_admission');
         $status = in_array($payload['status'] ?? $existing['status'] ?? 'draft', ['draft','published','archived'], true) ? ($payload['status'] ?? $existing['status']) : ($existing['status'] ?? 'draft');
         $visibility = in_array($payload['visibility'] ?? $existing['visibility'] ?? 'public', ['public','private'], true) ? ($payload['visibility'] ?? $existing['visibility']) : ($existing['visibility'] ?? 'public');
-        $seatingEnabled = array_key_exists('seating_enabled', $payload) ? (!empty($payload['seating_enabled']) ? 1 : 0) : (int)$existing['seating_enabled'];
-        $rawLayoutValue = array_key_exists('layout_id', $payload) ? $payload['layout_id'] : $existing['layout_id'];
+        $seatingEnabled = array_key_exists('seating_enabled', $payload) ? (!empty($payload['seating_enabled']) ? 1 : 0) : (int) $existing['seating_enabled'];
+        $existingLayoutId = normalize_layout_identifier($existing['layout_id'] ?? null);
+        $existingLayoutVersionId = normalize_layout_identifier($existing['layout_version_id'] ?? null);
+        $layoutIdProvided = array_key_exists('layout_id', $payload);
+        $rawLayoutValue = $layoutIdProvided ? $payload['layout_id'] : ($existing['layout_id'] ?? null);
         $layoutId = normalize_layout_identifier($rawLayoutValue);
-        $rawVersionValue = array_key_exists('layout_version_id', $payload) ? $payload['layout_version_id'] : $existing['layout_version_id'];
+        if ($layoutId === null && !$layoutIdProvided) {
+            $layoutId = $existingLayoutId;
+        }
+        $layoutVersionProvided = array_key_exists('layout_version_id', $payload);
+        $rawVersionValue = $layoutVersionProvided ? $payload['layout_version_id'] : ($existing['layout_version_id'] ?? null);
         $requestedVersion = normalize_layout_identifier($rawVersionValue);
+        $layoutChanged = $layoutIdProvided ? $layoutId !== $existingLayoutId : false;
         if (!$layoutId) {
             $seatingEnabled = 0;
         }
-        $layoutVersionId = ($seatingEnabled && $layoutId) ? ensure_event_layout_version($pdo, $layoutId, $requestedVersion) : null;
+        $layoutVersionId = $existingLayoutVersionId;
+        $snapshotMeta = null;
+        if ($layoutChanged) {
+            if ($existingLayoutId) {
+                $snapshotMeta = create_event_seating_snapshot($pdo, $eventId, 'pre_layout_change');
+            }
+            $layoutVersionId = $layoutId ? ensure_event_layout_version($pdo, $layoutId, $requestedVersion) : null;
+        } elseif ($layoutVersionProvided && $layoutId) {
+            $layoutVersionId = ensure_event_layout_version($pdo, $layoutId, $requestedVersion);
+        } elseif (!$layoutId) {
+            $layoutVersionId = null;
+        }
 
         $categoryTags = $payload['category_tags'] ?? $existing['category_tags'];
         if (is_array($categoryTags)) {
@@ -3017,6 +3521,15 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             }
             $seatRequestOverride = $rawOverride !== '' ? $rawOverride : null;
         }
+        $seriesScheduleLabel = array_key_exists('series_schedule_label', $payload)
+            ? normalize_series_meta_field($payload['series_schedule_label'])
+            : ($existingMeta['schedule_label'] ?? null);
+        $seriesSummary = array_key_exists('series_summary', $payload)
+            ? normalize_series_meta_field($payload['series_summary'])
+            : ($existingMeta['summary'] ?? null);
+        $seriesFooter = array_key_exists('series_footer_note', $payload)
+            ? normalize_series_meta_field($payload['series_footer_note'])
+            : ($existingMeta['footer_note'] ?? null);
 
         $contactPhoneRaw = $payload['contact_phone_raw'] ?? $payload['contact_phone'] ?? $existing['contact_phone_raw'];
         $contactPhoneNormalized = normalize_phone_number($contactPhoneRaw);
@@ -3024,10 +3537,24 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $endString = $endDt ? $endDt->format('Y-m-d H:i:s') : null;
         $publishAt = $payload['publish_at'] ?? $existing['publish_at'];
 
-        $doorTimeInput = array_key_exists('door_time', $payload) ? $payload['door_time'] : $existing['door_time'];
-        $doorTime = normalize_door_time_input($doorTimeInput);
-        if ($doorTime === null) {
-            return Response::error('door_time is required and must include a valid date and time.', 422);
+        $doorTimeInputProvided = array_key_exists('door_time', $payload);
+        $doorTimeInput = $doorTimeInputProvided ? $payload['door_time'] : $existing['door_time'];
+        if ($allowMissingSchedule && !$doorTimeInputProvided) {
+            $doorTime = $existing['door_time'];
+        } else {
+            $doorTime = normalize_door_time_input($doorTimeInput);
+            if ($doorTime === null) {
+                return Response::error('door_time is required and must include a valid date and time.', 422);
+            }
+        }
+
+        $changeNoteInput = array_key_exists('change_note', $payload) ? trim((string) $payload['change_note']) : '';
+        $changeNote = $changeNoteInput !== '' ? $changeNoteInput : 'updated via API';
+        if ($layoutChanged && $snapshotMeta) {
+            $snapshotLabel = sprintf('snapshot #%d', $snapshotMeta['id']);
+            $changeNote = $changeNoteInput !== ''
+                ? ($changeNoteInput . ' (' . $snapshotLabel . ')')
+                : ('layout changed (' . $snapshotLabel . ')');
         }
 
         $updateColumns = [
@@ -3072,7 +3599,7 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             $updateColumns['contact_notes'] = $payload['contact_notes'] ?? $existing['contact_notes'];
         }
         $updateColumns['seat_request_email_override'] = $seatRequestOverride;
-        $updateColumns['change_note'] = $payload['change_note'] ?? 'updated via API';
+        $updateColumns['change_note'] = $changeNote;
         $updateColumns['updated_by'] = 'api';
         $assignments = implode(', ', array_map(function ($col) {
             return "{$col} = ?";
@@ -3089,14 +3616,109 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             'venue' => $venueCode,
             'category_id' => $categoryId,
             'seating_enabled' => (bool) $seatingEnabled,
+            'seating_snapshot_id' => $snapshotMeta['id'] ?? null,
+            'layout_id' => $layoutId,
+            'layout_version_id' => $layoutVersionId,
         ]);
-        Response::success(['id' => $eventId, 'slug' => $slug]);
+        save_event_series_meta($pdo, $eventId, $seriesScheduleLabel, $seriesSummary, $seriesFooter);
+        Response::success([
+            'id' => $eventId,
+            'slug' => $slug,
+            'seating_snapshot_id' => $snapshotMeta['id'] ?? null,
+        ]);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
             error_log('PUT /api/events/:id error: ' . $e->getMessage());
         }
         $errorExtra = APP_DEBUG ? ['error' => $e->getMessage()] : [];
         Response::error('Failed to update event', 500, $errorExtra);
+    }
+});
+
+$router->add('GET', '/api/events/:id/seating-snapshots', function (Request $request, $params) {
+    try {
+        $pdo = Database::connection();
+        if (!event_seating_snapshots_table_exists($pdo)) {
+            return Response::success(['snapshots' => []]);
+        }
+        $eventId = (int) $params['id'];
+        $limit = isset($request->query['limit']) ? (int) $request->query['limit'] : 5;
+        if ($limit < 1) {
+            $limit = 1;
+        }
+        if ($limit > 25) {
+            $limit = 25;
+        }
+        $stmt = $pdo->prepare("SELECT id, layout_id, layout_version_id, snapshot_type, reserved_seats, pending_seats, hold_seats, notes, created_by, created_at FROM event_seating_snapshots WHERE event_id = ? ORDER BY id DESC LIMIT {$limit}");
+        $stmt->execute([$eventId]);
+        $snapshots = [];
+        while ($row = $stmt->fetch()) {
+            $snapshots[] = [
+                'id' => (int) $row['id'],
+                'snapshot_type' => $row['snapshot_type'],
+                'layout_id' => $row['layout_id'] !== null ? (int) $row['layout_id'] : null,
+                'layout_version_id' => $row['layout_version_id'] !== null ? (int) $row['layout_version_id'] : null,
+                'reserved_seats' => $row['reserved_seats'] ? (json_decode($row['reserved_seats'], true) ?: []) : [],
+                'pending_seats' => $row['pending_seats'] ? (json_decode($row['pending_seats'], true) ?: []) : [],
+                'hold_seats' => $row['hold_seats'] ? (json_decode($row['hold_seats'], true) ?: []) : [],
+                'notes' => $row['notes'] ?? null,
+                'created_by' => $row['created_by'] ?? null,
+                'created_at' => $row['created_at'],
+            ];
+        }
+        Response::success(['snapshots' => $snapshots]);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('GET /api/events/:id/seating-snapshots error: ' . $e->getMessage());
+        }
+        Response::error('Failed to load seating snapshots', 500);
+    }
+});
+
+$router->add('POST', '/api/events/:id/restore-seating-snapshot', function (Request $request, $params) {
+    $eventId = (int) $params['id'];
+    $payload = read_json_body($request);
+    $snapshotId = isset($payload['snapshot_id']) ? (int) $payload['snapshot_id'] : 0;
+    if ($snapshotId <= 0) {
+        return Response::error('snapshot_id is required', 400);
+    }
+    try {
+        $pdo = Database::connection();
+        if (!event_seating_snapshots_table_exists($pdo)) {
+            return Response::error('Seating snapshots are not enabled', 400);
+        }
+        $stmt = $pdo->prepare('SELECT * FROM event_seating_snapshots WHERE id = ? AND event_id = ? LIMIT 1');
+        $stmt->execute([$snapshotId, $eventId]);
+        $snapshot = $stmt->fetch();
+        if (!$snapshot) {
+            return Response::error('Snapshot not found', 404);
+        }
+        $pdo->beginTransaction();
+        $preSnapshot = create_event_seating_snapshot($pdo, $eventId, 'manual', 'Pre-restore checkpoint');
+        $result = restore_event_seating_from_snapshot($pdo, $eventId, $snapshot);
+        $pdo->commit();
+        record_audit('seating.snapshot.restore', 'event', $eventId, [
+            'snapshot_id' => $snapshotId,
+            'pre_restore_snapshot_id' => $preSnapshot['id'] ?? null,
+            'conflicts' => $result['conflicts'],
+        ]);
+        Response::success([
+            'restored' => true,
+            'snapshot_id' => $snapshotId,
+            'pre_restore_snapshot_id' => $preSnapshot['id'] ?? null,
+            'layout_id' => $result['layout_id'],
+            'layout_version_id' => $result['layout_version_id'],
+            'seating_enabled' => $result['seating_enabled'],
+            'details' => $result,
+        ]);
+    } catch (Throwable $e) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        if (APP_DEBUG) {
+            error_log('POST /api/events/:id/restore-seating-snapshot error: ' . $e->getMessage());
+        }
+        Response::error('Failed to restore seating snapshot', 500);
     }
 });
 
@@ -3319,6 +3941,12 @@ $router->add('GET', '/api/seating/event/:eventId', function ($request, $params) 
     $pdo = Database::connection();
     expire_stale_holds($pdo);
     $eventId = (int) $params['eventId'];
+    $eventMetaStmt = $pdo->prepare('SELECT seating_enabled FROM events WHERE id = ? LIMIT 1');
+    $eventMetaStmt->execute([$eventId]);
+    $eventMeta = $eventMetaStmt->fetch();
+    if (!$eventMeta) {
+        return Response::error('Event not found', 404);
+    }
     [$layoutData, $stagePosition, $stageSize, $canvasSettings] = fetch_layout_for_event($eventId);
     $stmt = $pdo->prepare('SELECT selected_seats, status, hold_expires_at FROM seat_requests WHERE event_id = ?');
     $stmt->execute([$eventId]);
@@ -3362,6 +3990,7 @@ $router->add('GET', '/api/seating/event/:eventId', function ($request, $params) 
         'pendingSeats' => array_keys($pending),
         'holdSeats' => array_keys($holds),
         'finalizedSeats' => array_keys($finalized),
+        'seatingEnabled' => (int)($eventMeta['seating_enabled'] ?? 0) === 1,
     ]);
 });
 
@@ -3479,7 +4108,10 @@ $router->add('GET', '/api/layout-history/:id', function ($request, $params) {
 });
 
 $router->add('GET', '/api/seating-layouts', function () {
-    $stmt = Database::run('SELECT id, name, description, is_default, layout_data, stage_position, stage_size, canvas_settings, created_at, updated_at FROM seating_layouts ORDER BY is_default DESC, name ASC');
+    $pdo = Database::connection();
+    $optional = layout_optional_select_clause($pdo, 'seating_layouts');
+    $sql = "SELECT id, name, description, is_default, layout_data, {$optional}, created_at, updated_at FROM seating_layouts ORDER BY is_default DESC, name ASC";
+    $stmt = $pdo->query($sql);
     $layouts = [];
     while ($row = $stmt->fetch()) {
         $row['layout_data'] = $row['layout_data'] ? json_decode($row['layout_data'], true) : null;
@@ -3492,7 +4124,10 @@ $router->add('GET', '/api/seating-layouts', function () {
 });
 
 $router->add('GET', '/api/seating-layouts/default', function () {
-    $stmt = Database::run('SELECT id, name, description, is_default, layout_data, stage_position, stage_size, canvas_settings, created_at, updated_at FROM seating_layouts WHERE is_default = 1 LIMIT 1');
+    $pdo = Database::connection();
+    $optional = layout_optional_select_clause($pdo, 'seating_layouts');
+    $sql = "SELECT id, name, description, is_default, layout_data, {$optional}, created_at, updated_at FROM seating_layouts WHERE is_default = 1 LIMIT 1";
+    $stmt = $pdo->query($sql);
     $row = $stmt->fetch();
     if (!$row) {
         return Response::error('No default layout found', 404);
@@ -3505,7 +4140,11 @@ $router->add('GET', '/api/seating-layouts/default', function () {
 });
 
 $router->add('GET', '/api/seating-layouts/:id', function ($request, $params) {
-    $stmt = Database::run('SELECT id, name, description, is_default, layout_data, stage_position, stage_size, canvas_settings, created_at, updated_at FROM seating_layouts WHERE id = ?', [$params['id']]);
+    $pdo = Database::connection();
+    $optional = layout_optional_select_clause($pdo, 'seating_layouts');
+    $sql = "SELECT id, name, description, is_default, layout_data, {$optional}, created_at, updated_at FROM seating_layouts WHERE id = ?";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$params['id']]);
     $row = $stmt->fetch();
     if (!$row) {
         return Response::error('Layout not found', 404);

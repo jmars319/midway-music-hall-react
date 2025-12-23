@@ -162,6 +162,19 @@ CREATE TABLE IF NOT EXISTS events (
   CONSTRAINT fk_events_category FOREIGN KEY (category_id) REFERENCES event_categories(id) ON DELETE SET NULL
 );
 
+-- Recurring series metadata (optional public-facing copy for masters)
+CREATE TABLE IF NOT EXISTS event_series_meta (
+  event_id INT PRIMARY KEY,
+  schedule_label VARCHAR(255) DEFAULT NULL,
+  summary TEXT,
+  footer_note TEXT,
+  created_by VARCHAR(191) DEFAULT NULL,
+  updated_by VARCHAR(191) DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_series_meta_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+);
+
 -- Recurrence rules (one per series master event)
 CREATE TABLE IF NOT EXISTS event_recurrence_rules (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -251,7 +264,22 @@ CREATE TABLE IF NOT EXISTS seat_requests (
   selected_seats JSON NOT NULL,
   total_seats INT DEFAULT 0,
   special_requests TEXT,
-  status ENUM('hold','pending','finalized','approved','denied','cancelled') DEFAULT 'hold',
+  status ENUM(
+    'new',
+    'contacted',
+    'waiting',
+    'confirmed',
+    'declined',
+    'closed',
+    'spam',
+    'expired',
+    'hold',
+    'pending',
+    'approved',
+    'denied',
+    'finalized',
+    'cancelled'
+  ) DEFAULT 'new',
   hold_expires_at DATETIME DEFAULT NULL,
   finalized_at DATETIME DEFAULT NULL,
   cutoff_override TINYINT(1) DEFAULT 0,
@@ -266,6 +294,22 @@ CREATE TABLE IF NOT EXISTS seat_requests (
   INDEX idx_seat_requests_hold (hold_expires_at),
   CONSTRAINT fk_seat_requests_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE SET NULL,
   CONSTRAINT fk_seat_requests_layout_version FOREIGN KEY (layout_version_id) REFERENCES seating_layout_versions(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_seating_snapshots (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  event_id INT NOT NULL,
+  layout_id INT DEFAULT NULL,
+  layout_version_id BIGINT DEFAULT NULL,
+  snapshot_type ENUM('pre_layout_change','manual','pre_disable') NOT NULL DEFAULT 'pre_layout_change',
+  reserved_seats JSON NOT NULL,
+  pending_seats JSON DEFAULT NULL,
+  hold_seats JSON DEFAULT NULL,
+  notes VARCHAR(255) DEFAULT NULL,
+  created_by VARCHAR(191) DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_seating_snapshot_event (event_id, created_at),
+  CONSTRAINT fk_event_snapshot_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
 );
 
 -- Layout history snapshots for undo/redo support

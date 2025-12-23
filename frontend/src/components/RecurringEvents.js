@@ -70,7 +70,7 @@ export default function RecurringEvents({ series = [] }) {
           style={{ '--recur-cols': String(pickBalancedColumns(series.length, 4)) }}
         >
           {series.map((item, idx) => {
-            const { master, nextOccurrence, upcomingOccurrences, happeningThisWeek, scheduleLabel, summary } = item || {};
+            const { master, nextOccurrence, upcomingOccurrences, happeningThisWeek, scheduleLabel, summary, footerNote } = item || {};
             const safeMaster = master || {};
             const upcoming = Array.isArray(upcomingOccurrences) ? upcomingOccurrences : [];
             const fallbackKey = [
@@ -144,6 +144,9 @@ export default function RecurringEvents({ series = [] }) {
                       );})}
                     </div>
                   </div>
+                ) : null}
+                {footerNote ? (
+                  <p className="text-sm text-gray-400 border-t border-gray-800 pt-3 mt-4">{footerNote}</p>
                 ) : null}
               </article>
             );

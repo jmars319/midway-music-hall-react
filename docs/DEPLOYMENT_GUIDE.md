@@ -2,6 +2,8 @@
 > PageSpeed posture is documented in `PAGESPEED_TRADEOFFS.md`; treat those decisions as locked unless leadership explicitly revisits them.
 
 > **Canonical Notice:** This file is the single source of truth for deployments. `DEPLOY.md`, `DEPLOY_SMOKE_TEST.md`, and other historical docs remain for reference but are marked legacy—always start here.
+>
+> 👉 Need the short version? See **`OPS_CHECKLIST.md`** for the operator notes, verification commands, phpMyAdmin migration reminder, and smoke checks, then return here for full context.
 
 The live stack is GoDaddy shared hosting (Apache/PHP) behind Cloudflare SSL. The production docroot is `public_html/midwaymusichall.net/`. Our React SPA lives at the root, and the PHP API is served from `/api`.
 

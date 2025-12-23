@@ -14,7 +14,8 @@ ALTER TABLE media
 -- Seating layouts already include stage metadata via previous migrations; ensure columns exist
 ALTER TABLE seating_layouts
   ADD COLUMN IF NOT EXISTS stage_position JSON DEFAULT NULL,
-  ADD COLUMN IF NOT EXISTS stage_size JSON DEFAULT NULL;
+  ADD COLUMN IF NOT EXISTS stage_size JSON DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS canvas_settings JSON DEFAULT NULL;
 
 -- Versioned seating chart snapshots
 CREATE TABLE IF NOT EXISTS seating_layout_versions (
@@ -25,12 +26,16 @@ CREATE TABLE IF NOT EXISTS seating_layout_versions (
   layout_data JSON NOT NULL,
   stage_position JSON DEFAULT NULL,
   stage_size JSON DEFAULT NULL,
+  canvas_settings JSON DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   created_by VARCHAR(191) DEFAULT NULL,
   change_note VARCHAR(255) DEFAULT NULL,
   CONSTRAINT fk_layout_versions_layout FOREIGN KEY (layout_id) REFERENCES seating_layouts(id) ON DELETE CASCADE,
   UNIQUE KEY uniq_layout_version (layout_id, version_number)
 );
+
+ALTER TABLE seating_layout_versions
+  ADD COLUMN IF NOT EXISTS canvas_settings JSON DEFAULT NULL;
 
 -- Events table extensions
 ALTER TABLE events
@@ -91,6 +96,18 @@ ALTER TABLE events
   ADD CONSTRAINT IF NOT EXISTS fk_events_series_master FOREIGN KEY (series_master_id) REFERENCES events(id) ON DELETE SET NULL,
   ADD CONSTRAINT IF NOT EXISTS fk_events_hero_media FOREIGN KEY (hero_image_id) REFERENCES media(id) ON DELETE SET NULL,
   ADD CONSTRAINT IF NOT EXISTS fk_events_poster_media FOREIGN KEY (poster_image_id) REFERENCES media(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS event_series_meta (
+  event_id INT PRIMARY KEY,
+  schedule_label VARCHAR(255) DEFAULT NULL,
+  summary TEXT,
+  footer_note TEXT,
+  created_by VARCHAR(191) DEFAULT NULL,
+  updated_by VARCHAR(191) DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_series_meta_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+);
 
 -- Recurrence tables
 CREATE TABLE IF NOT EXISTS event_recurrence_rules (
@@ -160,7 +177,22 @@ ALTER TABLE seat_requests
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at;
 
 ALTER TABLE seat_requests
-  MODIFY COLUMN status ENUM('hold','pending','approved','denied','finalized','cancelled') DEFAULT 'hold';
+  MODIFY COLUMN status ENUM(
+    'new',
+    'contacted',
+    'waiting',
+    'confirmed',
+    'declined',
+    'closed',
+    'spam',
+    'expired',
+    'hold',
+    'pending',
+    'approved',
+    'denied',
+    'finalized',
+    'cancelled'
+  ) DEFAULT 'new';
 
 ALTER TABLE seat_requests
   ADD INDEX IF NOT EXISTS idx_seat_requests_event (event_id),
@@ -169,3 +201,19 @@ ALTER TABLE seat_requests
 ALTER TABLE seat_requests
   ADD CONSTRAINT IF NOT EXISTS fk_seat_requests_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE SET NULL,
   ADD CONSTRAINT IF NOT EXISTS fk_seat_requests_layout_version FOREIGN KEY (layout_version_id) REFERENCES seating_layout_versions(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS event_seating_snapshots (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  event_id INT NOT NULL,
+  layout_id INT DEFAULT NULL,
+  layout_version_id BIGINT DEFAULT NULL,
+  snapshot_type ENUM('pre_layout_change','manual','pre_disable') NOT NULL DEFAULT 'pre_layout_change',
+  reserved_seats JSON NOT NULL,
+  pending_seats JSON DEFAULT NULL,
+  hold_seats JSON DEFAULT NULL,
+  notes VARCHAR(255) DEFAULT NULL,
+  created_by VARCHAR(191) DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_seating_snapshot_event (event_id, created_at),
+  CONSTRAINT fk_event_snapshot_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+);
