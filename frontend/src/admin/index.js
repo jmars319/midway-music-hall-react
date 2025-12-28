@@ -12,3 +12,4 @@ export { default as SuggestionsModule } from './SuggestionsModule';
 export { default as MediaManager } from './MediaManager';
 export { default as SettingsModule } from './SettingsModule';
 export { default as AdminUsersModule } from './AdminUsersModule';
+export { default as PaymentSettingsModule } from './PaymentSettingsModule';

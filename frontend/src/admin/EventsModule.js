@@ -152,6 +152,18 @@ const formatPriceDisplay = (event) => {
   return formatPrice(event.ticket_price) || formatPrice(event.door_price) || 'TBD';
 };
 
+const normalizePaymentConfig = (config = {}) => ({
+  scope: config.scope || 'category',
+  category_id: config.category_id ?? null,
+  enabled: Boolean(config.enabled),
+  provider_label: config.provider_label || '',
+  button_text: config.button_text || 'Pay Online',
+  payment_url: config.payment_url || '',
+  limit_seats: Number(config.limit_seats) > 0 ? Number(config.limit_seats) : 2,
+  over_limit_message: config.over_limit_message || '',
+  fine_print: config.fine_print || '',
+});
+
 const resolveSeatRoutingInfo = (event = {}) => {
   const email = event.seat_request_target_email || DEFAULT_STAFF_INBOX;
   const sourceKey = event.seat_request_target_source || 'default';
@@ -186,6 +198,8 @@ const initialForm = {
   series_summary: '',
   series_footer_note: '',
   image_url: '',
+  hero_image_id: null,
+  poster_image_id: null,
   ticket_price: '',
   door_price: '',
   age_restriction: 'All Ages',
@@ -199,12 +213,16 @@ const initialForm = {
   contact_email: '',
   contact_notes: '',
   seating_enabled: false,
+  payment_enabled: false,
 };
 
 export default function EventsModule(){
   const [events, setEvents] = useState([]);
   const [layouts, setLayouts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [paymentConfigs, setPaymentConfigs] = useState({ categories: {}, global: null });
+  const [paymentSettingsAvailable, setPaymentSettingsAvailable] = useState(true);
+  const [paymentSettingsError, setPaymentSettingsError] = useState('');
   const [categoryError, setCategoryError] = useState('');
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -370,6 +388,41 @@ export default function EventsModule(){
     }
   }, []);
 
+  const fetchPaymentSettings = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/payment-settings`);
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || 'Unable to load payment settings');
+      }
+      if (!data.has_table) {
+        setPaymentSettingsAvailable(false);
+        setPaymentConfigs({ categories: {}, global: null });
+        setPaymentSettingsError('');
+        return;
+      }
+      setPaymentSettingsAvailable(true);
+      const lookup = { categories: {}, global: null };
+      (data.payment_settings || []).forEach((setting) => {
+        if (!setting || typeof setting !== 'object') {
+          return;
+        }
+        const normalized = normalizePaymentConfig(setting);
+        if (normalized.scope === 'global') {
+          lookup.global = normalized;
+        } else if (normalized.category_id) {
+          lookup.categories[Number(normalized.category_id)] = normalized;
+        }
+      });
+      setPaymentConfigs(lookup);
+      setPaymentSettingsError('');
+    } catch (err) {
+      console.error('Failed to load payment settings', err);
+      setPaymentSettingsError(err instanceof Error ? err.message : 'Unable to load payment settings');
+      setPaymentConfigs({ categories: {}, global: null });
+    }
+  }, []);
+
   useEffect(() => {
     fetchLayouts();
   }, []);
@@ -377,6 +430,10 @@ export default function EventsModule(){
   useEffect(() => {
     fetchCategories();
   }, [fetchCategories]);
+
+  useEffect(() => {
+    fetchPaymentSettings();
+  }, [fetchPaymentSettings]);
 
   useEffect(() => {
     fetchEvents();
@@ -819,6 +876,26 @@ export default function EventsModule(){
     if (!editing) return null;
     return resolveSeatRoutingInfo(editing);
   }, [editing]);
+
+  const activePaymentConfig = useMemo(() => {
+    if (!paymentSettingsAvailable) {
+      return null;
+    }
+    const categoryId = formData.category_id ? Number(formData.category_id) : null;
+    if (categoryId && paymentConfigs.categories[categoryId] && paymentConfigs.categories[categoryId].enabled) {
+      return paymentConfigs.categories[categoryId];
+    }
+    if (paymentConfigs.global && paymentConfigs.global.enabled) {
+      return paymentConfigs.global;
+    }
+    return null;
+  }, [formData.category_id, paymentConfigs, paymentSettingsAvailable]);
+
+  useEffect(() => {
+    if (!activePaymentConfig && formData.payment_enabled) {
+      setFormData((prev) => ({ ...prev, payment_enabled: false }));
+    }
+  }, [activePaymentConfig, formData.payment_enabled]);
 
   const snapshotPreviewLists = useMemo(() => {
     if (!snapshotPreviewState.snapshot) return null;
@@ -1298,9 +1375,14 @@ export default function EventsModule(){
       contact_email: event.contact_email || '',
       contact_notes: event.contact_notes || '',
       seating_enabled: Boolean(event.seating_enabled),
+      payment_enabled: Boolean(event.payment_enabled),
     });
     setImageFile(null);
-    setImagePreview(event.image_url ? getImageUrlSync(event.image_url) : null);
+    const previewSource = event.effective_image?.src
+      || event.effective_image?.file_url
+      || event.image_url
+      || '';
+    setImagePreview(previewSource ? getImageUrlSync(previewSource) : null);
     setLayoutConfirmState({ open: false, pendingValue: '' });
     setShowForm(true);
   };
@@ -1320,7 +1402,7 @@ export default function EventsModule(){
   const clearImage = () => {
     setImageFile(null);
     setImagePreview(null);
-    setFormData(prev => ({ ...prev, image_url: '' }));
+    setFormData(prev => ({ ...prev, image_url: '', hero_image_id: null, poster_image_id: null }));
   };
 
   const copySnapshotPayload = useCallback(async (snapshot) => {
@@ -1462,6 +1544,10 @@ export default function EventsModule(){
       return;
     }
     const nextValue = type === 'checkbox' ? checked : value;
+    if (name === 'image_url') {
+      setFormData((prev) => ({ ...prev, image_url: nextValue, poster_image_id: null, hero_image_id: null }));
+      return;
+    }
     setFormData((prev) => ({ ...prev, [name]: nextValue }));
   };
 
@@ -1563,9 +1649,10 @@ const parseJsonSafely = (payload) => {
 
 const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reject) => {
   const formDataUpload = new FormData();
-  formDataUpload.append('image', file);
+  formDataUpload.append('file', file);
+  formDataUpload.append('category', 'gallery');
   const xhr = new XMLHttpRequest();
-  xhr.open('POST', `${API_BASE}/upload-image`);
+  xhr.open('POST', `${API_BASE}/media`);
   xhr.upload.onprogress = (event) => {
     if (event.lengthComputable) {
       const percent = Math.round((event.loaded / event.total) * 100);
@@ -1642,6 +1729,8 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
     setError('');
     try {
       let finalImageUrl = formData.image_url;
+      let posterImageId = formData.poster_image_id || null;
+      let heroImageId = formData.hero_image_id || null;
 
       // If a new image file is selected, upload it
       if (imageFile) {
@@ -1650,8 +1739,26 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
           setImageUploadProcessing(false);
           setImageUploadProgress(0);
           const uploadData = await uploadImageWithProgress(imageFile);
-          if (uploadData.success && uploadData.url) {
+          if (uploadData.success && uploadData.media) {
+            const media = uploadData.media;
+            finalImageUrl = media.optimized_path || media.file_url || media.url || finalImageUrl;
+            posterImageId = media.id || posterImageId;
+            if (!heroImageId && posterImageId) {
+              heroImageId = posterImageId;
+            }
+            const previewUrl = media.optimized_path || media.webp_path || media.file_url || media.url || '';
+            if (previewUrl) {
+              setImagePreview(getImageUrlSync(previewUrl));
+            }
+            setFormData((prev) => ({
+              ...prev,
+              image_url: finalImageUrl,
+              poster_image_id: posterImageId,
+              hero_image_id: heroImageId,
+            }));
+          } else if (uploadData.success && uploadData.url) {
             finalImageUrl = uploadData.url;
+            setFormData((prev) => ({ ...prev, image_url: finalImageUrl }));
           } else {
             throw new Error('Upload failed');
           }
@@ -1666,9 +1773,19 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
 
       const method = editing ? 'PUT' : 'POST';
       const url = editing ? `${API_BASE}/events/${editing.id}` : `${API_BASE}/events`;
-      const payload = { ...formData, image_url: finalImageUrl };
+      const payload = { ...formData, image_url: finalImageUrl, poster_image_id: posterImageId, hero_image_id: heroImageId };
       payload.ticket_price = normalizePriceInput(payload.ticket_price);
       payload.door_price = normalizePriceInput(payload.door_price);
+      if (typeof payload.ticket_price === 'number') {
+        payload.min_ticket_price = payload.ticket_price;
+      } else if (payload.ticket_price === null) {
+        payload.min_ticket_price = null;
+      }
+      if (typeof payload.door_price === 'number') {
+        payload.max_ticket_price = payload.door_price;
+      } else if (payload.door_price === null) {
+        payload.max_ticket_price = payload.ticket_price ?? null;
+      }
       const parsedLayoutId = formData.layout_id === '' ? null : Number(formData.layout_id);
       const normalizedLayoutId = Number.isFinite(parsedLayoutId) && parsedLayoutId > 0 ? parsedLayoutId : null;
       payload.layout_id = normalizedLayoutId;
@@ -1676,6 +1793,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       payload.category_id = Number.isFinite(parsedCategoryId) && parsedCategoryId > 0 ? parsedCategoryId : null;
       payload.seat_request_email_override = (payload.seat_request_email_override || '').trim() || null;
       payload.seating_enabled = formData.seating_enabled ? 1 : 0;
+      payload.payment_enabled = formData.payment_enabled ? 1 : 0;
       payload.venue_code = (payload.venue_code || 'MMH').toUpperCase();
       const originalLayoutKey = editing?.layout_id ? String(editing.layout_id) : '';
       const newLayoutKey = normalizedLayoutId ? String(normalizedLayoutId) : '';
@@ -2494,6 +2612,75 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                     : 'Leave blank to use the Beach Bands inbox for beach shows or the main staff inbox for everything else.'}
                 </p>
               </div>
+
+              {paymentSettingsAvailable ? (
+                <div className="md:col-span-2 rounded-2xl border border-indigo-700/40 bg-indigo-950/20 p-4 space-y-3">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold text-white">Payment Link</h3>
+                      <p className="text-sm text-gray-400">
+                        {activePaymentConfig
+                          ? `Uses the ${activePaymentConfig.provider_label || 'custom'} payment link saved in Payment Settings.`
+                          : 'No payment configuration detected for this category.'}
+                      </p>
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-sm text-gray-200">
+                      <input
+                        type="checkbox"
+                        name="payment_enabled"
+                        checked={!!formData.payment_enabled}
+                        onChange={handleChange}
+                        disabled={!activePaymentConfig}
+                        className="h-4 w-4 rounded bg-gray-700"
+                      />
+                      <span>Enable for this event</span>
+                    </label>
+                  </div>
+                  {paymentSettingsError && (
+                    <p className="text-xs text-red-400">{paymentSettingsError}</p>
+                  )}
+                  {activePaymentConfig ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-300">
+                      <div>
+                        <p className="text-xs text-gray-400 uppercase tracking-wide">Provider</p>
+                        <p className="text-white font-medium">{activePaymentConfig.provider_label || 'Custom link'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400 uppercase tracking-wide">Seat limit</p>
+                        <p className="text-white font-medium">{activePaymentConfig.limit_seats} seats</p>
+                      </div>
+                      <div className="md:col-span-2">
+                        <p className="text-xs text-gray-400 uppercase tracking-wide">Button text</p>
+                        <p className="text-white font-medium">{activePaymentConfig.button_text}</p>
+                      </div>
+                      <div className="md:col-span-2">
+                        <p className="text-xs text-gray-400 uppercase tracking-wide">Payment URL</p>
+                        <p className="text-white font-mono break-all">{activePaymentConfig.payment_url || 'Not set'}</p>
+                      </div>
+                      {activePaymentConfig.over_limit_message && (
+                        <div className="md:col-span-2">
+                          <p className="text-xs text-gray-400 uppercase tracking-wide">Over-limit message</p>
+                          <p className="text-white">{activePaymentConfig.over_limit_message}</p>
+                        </div>
+                      )}
+                      {activePaymentConfig.fine_print && (
+                        <div className="md:col-span-2">
+                          <p className="text-xs text-gray-400 uppercase tracking-wide">Fine print</p>
+                          <p className="text-white">{activePaymentConfig.fine_print}</p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400">
+                      Configure payment links under <span className="font-semibold text-white">Payment Settings</span> to make this option available.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="md:col-span-2 rounded-2xl border border-amber-600/40 bg-amber-950/20 p-4 text-sm text-amber-100">
+                  Payment links are unavailable until the Payment Settings migration runs.
+                </div>
+              )}
 
               {editorFlags.showRecurringPanel ? (
                 <div className="md:col-span-2 rounded-2xl border border-blue-700/40 bg-blue-950/20 p-4 space-y-4">
