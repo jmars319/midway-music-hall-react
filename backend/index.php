@@ -28,6 +28,55 @@ function normalize_rows(array $rows, callable $normalizer): array
     return array_map($normalizer, $rows);
 }
 
+function normalize_nullable_text($value): ?string
+{
+    if ($value === null) {
+        return null;
+    }
+    if (is_string($value)) {
+        $trimmed = trim($value);
+        return $trimmed === '' ? null : $trimmed;
+    }
+    if (is_scalar($value)) {
+        $trimmed = trim((string) $value);
+        return $trimmed === '' ? null : $trimmed;
+    }
+    return null;
+}
+
+function normalize_nullable_decimal($value): ?string
+{
+    if ($value === null) {
+        return null;
+    }
+    if (is_string($value)) {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+        $value = $trimmed;
+    }
+    if ($value === '') {
+        return null;
+    }
+    if (!is_numeric($value)) {
+        return null;
+    }
+    return number_format((float) $value, 2, '.', '');
+}
+
+function normalize_nullable_int($value): ?int
+{
+    if ($value === null || $value === '' || $value === false) {
+        return null;
+    }
+    if (!is_numeric($value)) {
+        return null;
+    }
+    $int = (int) $value;
+    return $int > 0 ? $int : null;
+}
+
 function parse_selected_seats($value): array
 {
     if (is_array($value)) {
@@ -140,7 +189,9 @@ function save_uploaded_file(array $file): ?array
     $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
     $mime = finfo_file($finfo, $file['tmp_name']);
-    finfo_close($finfo);
+    if (PHP_VERSION_ID < 80500 && function_exists('finfo_close')) {
+        finfo_close($finfo);
+    }
     $originalName = $file['name'] ?? 'upload';
     $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
     $fileSize = (int) ($file['size'] ?? 0);
@@ -687,6 +738,128 @@ function event_categories_table_exists(PDO $pdo): bool
     return $exists;
 }
 
+function payment_settings_table_exists(PDO $pdo): bool
+{
+    static $exists = null;
+    if ($exists !== null) {
+        return $exists;
+    }
+    try {
+        $pdo->query('SELECT 1 FROM payment_settings LIMIT 1');
+        $exists = true;
+    } catch (Throwable $error) {
+        $exists = false;
+        if (APP_DEBUG) {
+            error_log('payment_settings_table_exists failure: ' . $error->getMessage());
+        }
+    }
+    return $exists;
+}
+
+function fetch_payment_settings_rows(PDO $pdo): array
+{
+    if (!payment_settings_table_exists($pdo)) {
+        return [];
+    }
+    try {
+        $sql = "SELECT ps.*, ec.name AS category_name, ec.slug AS category_slug
+            FROM payment_settings ps
+            LEFT JOIN event_categories ec ON ec.id = ps.category_id
+            ORDER BY CASE WHEN ps.scope = 'global' THEN 0 ELSE 1 END, ec.name ASC, ps.id ASC";
+        $stmt = $pdo->query($sql);
+        $rows = $stmt->fetchAll() ?: [];
+        foreach ($rows as &$row) {
+            $row['enabled'] = !empty($row['enabled']);
+            $row['limit_seats'] = (int) ($row['limit_seats'] ?? 2);
+            if ($row['limit_seats'] <= 0) {
+                $row['limit_seats'] = 2;
+            }
+        }
+        unset($row);
+        return $rows;
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('fetch_payment_settings_rows failure: ' . $error->getMessage());
+        }
+        return [];
+    }
+}
+
+function load_payment_settings_lookup(PDO $pdo): array
+{
+    $lookup = ['global' => null, 'categories' => []];
+    if (!payment_settings_table_exists($pdo)) {
+        return $lookup;
+    }
+    try {
+        $stmt = $pdo->query('SELECT scope, category_id, enabled, provider_label, payment_url, button_text, limit_seats, over_limit_message, fine_print, updated_at FROM payment_settings');
+        $rows = $stmt->fetchAll() ?: [];
+        foreach ($rows as $row) {
+            $row['limit_seats'] = (int) ($row['limit_seats'] ?? 2);
+            if ($row['limit_seats'] <= 0) {
+                $row['limit_seats'] = 2;
+            }
+            if (($row['scope'] ?? 'category') === 'global') {
+                if ($lookup['global'] === null) {
+                    $lookup['global'] = $row;
+                }
+                continue;
+            }
+            $categoryId = isset($row['category_id']) ? (int) $row['category_id'] : null;
+            if ($categoryId) {
+                $lookup['categories'][$categoryId] = $row;
+            }
+        }
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('load_payment_settings_lookup failure: ' . $error->getMessage());
+        }
+    }
+    return $lookup;
+}
+
+function resolve_event_payment_option(array $event, array $lookup): ?array
+{
+    $paymentEnabled = !empty($event['payment_enabled']);
+    if (!$paymentEnabled) {
+        return null;
+    }
+    $categoryId = isset($event['category_id']) ? (int) $event['category_id'] : null;
+    $candidate = null;
+    if ($categoryId && isset($lookup['categories'][$categoryId])) {
+        $candidate = $lookup['categories'][$categoryId];
+    }
+    if ((!$candidate || empty($candidate['enabled'])) && !empty($lookup['global'])) {
+        $candidate = $lookup['global'];
+    }
+    if (!$candidate || empty($candidate['enabled'])) {
+        return null;
+    }
+    $paymentUrl = trim((string) ($candidate['payment_url'] ?? ''));
+    if ($paymentUrl === '') {
+        return null;
+    }
+    $limitSeats = (int) ($candidate['limit_seats'] ?? 2);
+    if ($limitSeats <= 0) {
+        $limitSeats = 2;
+    }
+    $buttonText = trim((string) ($candidate['button_text'] ?? ''));
+    if ($buttonText === '') {
+        $buttonText = 'Pay Online';
+    }
+    return [
+        'scope' => $candidate['scope'] ?? 'category',
+        'category_id' => $candidate['category_id'] ?? null,
+        'provider_label' => $candidate['provider_label'] ?? null,
+        'button_text' => $buttonText,
+        'payment_url' => $paymentUrl,
+        'limit_seats' => $limitSeats,
+        'over_limit_message' => $candidate['over_limit_message'] ?? null,
+        'fine_print' => $candidate['fine_print'] ?? null,
+        'updated_at' => $candidate['updated_at'] ?? null,
+    ];
+}
+
 function event_seating_snapshots_table_exists(PDO $pdo): bool
 {
     static $exists = null;
@@ -1011,6 +1184,206 @@ function build_single_image_variant(?string $fileUrl): ?array
         'webp_srcset' => $derived['webp_srcset'] ?? null,
         'fallback_original' => $derived['fallback_original'] ?? $normalized,
     ];
+}
+
+function normalize_event_image_urls(array &$rows): array
+{
+    $imageLookup = [];
+    $imageUrls = [];
+    foreach ($rows as $index => $row) {
+        $imageUrl = trim((string) ($row['image_url'] ?? ''));
+        if ($imageUrl === '') {
+            continue;
+        }
+        $normalizedUrl = normalize_existing_upload_url($imageUrl);
+        if ($normalizedUrl) {
+            $rows[$index]['image_url'] = $normalizedUrl;
+            $imageUrls[] = $normalizedUrl;
+        } else {
+            $rows[$index]['image_url'] = null;
+        }
+    }
+    if (!$imageUrls) {
+        return $imageLookup;
+    }
+    $variants = build_image_variants($imageUrls);
+    foreach ($variants as $variant) {
+        $key = $variant['file_url'] ?? $variant['original'] ?? null;
+        if ($key) {
+            $imageLookup[$key] = $variant;
+        }
+    }
+    return $imageLookup;
+}
+
+function load_media_assets_by_ids(array $ids): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), function ($value) {
+        return $value > 0;
+    })));
+    if (empty($ids)) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $map = [];
+    try {
+        $stmt = Database::run("SELECT * FROM media WHERE id IN ({$placeholders})", $ids);
+        while ($row = $stmt->fetch()) {
+            $id = (int) ($row['id'] ?? 0);
+            if ($id <= 0) {
+                continue;
+            }
+            $variant = build_single_image_variant($row['file_url'] ?? null);
+            $map[$id] = [
+                'id' => $id,
+                'file_url' => $row['file_url'] ?? null,
+                'width' => $row['width'] ?? null,
+                'height' => $row['height'] ?? null,
+                'alt_text' => $row['alt_text'] ?? null,
+                'caption' => $row['caption'] ?? null,
+                'variant' => $variant,
+            ];
+        }
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('load_media_assets_by_ids failure: ' . $error->getMessage());
+        }
+    }
+    return $map;
+}
+
+function build_image_bundle(?array $variant, array $meta): ?array
+{
+    if (!$variant) {
+        return null;
+    }
+    return [
+        'variant' => $variant,
+        'meta' => $meta,
+    ];
+}
+
+function format_effective_image_payload(array $variant, array $meta): array
+{
+    $fileUrl = $meta['file_url'] ?? $variant['original'] ?? $variant['fallback_original'] ?? null;
+    $resolved = $variant['webp'] ?? $variant['optimized'] ?? $fileUrl ?? $variant['fallback_original'] ?? null;
+    return [
+        'source' => $meta['source'] ?? 'unknown',
+        'media_id' => $meta['media_id'] ?? null,
+        'file_url' => $fileUrl,
+        'optimized_url' => $variant['optimized'] ?? null,
+        'webp_url' => $variant['webp'] ?? null,
+        'optimized_srcset' => $variant['optimized_srcset'] ?? null,
+        'webp_srcset' => $variant['webp_srcset'] ?? null,
+        'fallback_url' => $variant['fallback_original'] ?? null,
+        'src' => $resolved,
+        'width' => $meta['width'] ?? ($variant['intrinsic_width'] ?? null),
+        'height' => $meta['height'] ?? ($variant['intrinsic_height'] ?? null),
+        'alt_text' => $meta['alt_text'] ?? null,
+        'caption' => $meta['caption'] ?? null,
+    ];
+}
+
+function build_media_bundle_for_event(array $row, array $mediaAssets, string $columnKey, string $sourceLabel): ?array
+{
+    $id = isset($row[$columnKey]) ? (int) $row[$columnKey] : 0;
+    if ($id <= 0 || empty($mediaAssets[$id]['variant'])) {
+        return null;
+    }
+    $asset = $mediaAssets[$id];
+    return build_image_bundle($asset['variant'], [
+        'source' => $sourceLabel,
+        'media_id' => $asset['id'],
+        'file_url' => $asset['file_url'],
+        'width' => $asset['width'],
+        'height' => $asset['height'],
+        'alt_text' => $asset['alt_text'],
+        'caption' => $asset['caption'],
+    ]);
+}
+
+function build_legacy_image_bundle(array $row, array $imageLookup): ?array
+{
+    $imageUrl = trim((string) ($row['image_url'] ?? ''));
+    if ($imageUrl === '' || !isset($imageLookup[$imageUrl])) {
+        return null;
+    }
+    return build_image_bundle($imageLookup[$imageUrl], [
+        'source' => 'event_image_url',
+        'file_url' => $imageUrl,
+        'width' => $row['image_intrinsic_width'] ?? null,
+        'height' => $row['image_intrinsic_height'] ?? null,
+    ]);
+}
+
+function build_default_image_bundle(?array $variant, ?string $fileUrl): ?array
+{
+    if (!$variant) {
+        return null;
+    }
+    return build_image_bundle($variant, [
+        'source' => 'default_setting',
+        'file_url' => $fileUrl,
+    ]);
+}
+
+function enrich_event_rows_with_images(array $rows): array
+{
+    if (!$rows) {
+        return $rows;
+    }
+    $imageLookup = normalize_event_image_urls($rows);
+    $mediaIds = [];
+    foreach ($rows as $row) {
+        $heroId = isset($row['hero_image_id']) ? (int) $row['hero_image_id'] : 0;
+        $posterId = isset($row['poster_image_id']) ? (int) $row['poster_image_id'] : 0;
+        if ($heroId > 0) {
+            $mediaIds[$heroId] = true;
+        }
+        if ($posterId > 0) {
+            $mediaIds[$posterId] = true;
+        }
+    }
+    $mediaAssets = load_media_assets_by_ids(array_keys($mediaIds));
+    $settings = fetch_business_settings();
+    $defaultUrl = normalize_existing_upload_url($settings['default_event_image'] ?? '');
+    $defaultVariant = $defaultUrl ? build_single_image_variant($defaultUrl) : null;
+
+    foreach ($rows as &$row) {
+        $heroBundle = build_media_bundle_for_event($row, $mediaAssets, 'hero_image_id', 'hero_media');
+        $posterBundle = build_media_bundle_for_event($row, $mediaAssets, 'poster_image_id', 'poster_media');
+        $legacyBundle = build_legacy_image_bundle($row, $imageLookup);
+        $defaultBundle = build_default_image_bundle($defaultVariant, $defaultUrl);
+
+        $row['hero_image_media'] = $heroBundle ? format_effective_image_payload($heroBundle['variant'], $heroBundle['meta']) : null;
+        $row['poster_image_media'] = $posterBundle ? format_effective_image_payload($posterBundle['variant'], $posterBundle['meta']) : null;
+
+        $chosen = $heroBundle ?? $posterBundle ?? $legacyBundle ?? $defaultBundle;
+        if ($chosen) {
+            $variant = $chosen['variant'];
+            $meta = $chosen['meta'];
+            $row['image_variants'] = $variant;
+            $row['image_variant_source'] = $meta['source'] ?? null;
+            $row['resolved_image_url'] = $variant['webp'] ?? $variant['optimized'] ?? $variant['original'] ?? $variant['fallback_original'] ?? null;
+            $row['image_webp_srcset'] = $variant['webp_srcset'] ?? null;
+            $row['image_optimized_srcset'] = $variant['optimized_srcset'] ?? null;
+            $row['image_intrinsic_width'] = $meta['width'] ?? ($variant['intrinsic_width'] ?? null);
+            $row['image_intrinsic_height'] = $meta['height'] ?? ($variant['intrinsic_height'] ?? null);
+            $row['effective_image'] = format_effective_image_payload($variant, $meta);
+        } else {
+            $row['image_variants'] = null;
+            $row['image_variant_source'] = null;
+            $row['resolved_image_url'] = null;
+            $row['image_webp_srcset'] = null;
+            $row['image_optimized_srcset'] = null;
+            $row['image_intrinsic_width'] = $row['image_intrinsic_width'] ?? null;
+            $row['image_intrinsic_height'] = $row['image_intrinsic_height'] ?? null;
+            $row['effective_image'] = null;
+        }
+    }
+    unset($row);
+
+    return $rows;
 }
 
 function log_admin_session_state(string $message): void
@@ -2259,6 +2632,7 @@ function list_events(Request $request, ?string $scopeOverride = null): array
     $pdo = Database::connection();
     $hasCategoryTable = event_categories_table_exists($pdo);
     $hasSeriesMeta = event_series_meta_table_exists($pdo);
+    $paymentLookup = load_payment_settings_lookup($pdo);
     $params = [];
     $conditions = [];
     $includeDeleted = !empty($request->query['include_deleted']);
@@ -2408,47 +2782,9 @@ function list_events(Request $request, ?string $scopeOverride = null): array
                 error_log('[events] Admin scope returning events without schedule metadata; ids=' . $preview . (count($missingIds) > 10 ? '...' : ''));
             }
         }
-        $imageLookup = [];
-        $imageUrls = [];
-        foreach ($rows as $index => $row) {
-            $imageUrl = trim((string) ($row['image_url'] ?? ''));
-            if ($imageUrl === '') {
-                continue;
-            }
-            $normalizedUrl = normalize_existing_upload_url($imageUrl);
-            if ($normalizedUrl) {
-                $rows[$index]['image_url'] = $normalizedUrl;
-                $imageUrls[] = $normalizedUrl;
-            } else {
-                $rows[$index]['image_url'] = null;
-            }
-        }
-        if ($imageUrls) {
-            $variants = build_image_variants($imageUrls);
-            foreach ($variants as $variant) {
-                $key = $variant['file_url'] ?? $variant['original'] ?? null;
-                if ($key) {
-                    $imageLookup[$key] = $variant;
-                }
-            }
-        }
+        $rows = enrich_event_rows_with_images($rows);
         foreach ($rows as &$row) {
-            $imageUrl = trim((string) ($row['image_url'] ?? ''));
-            $variant = null;
-            $variantSource = null;
-            if ($imageUrl !== '' && isset($imageLookup[$imageUrl])) {
-                $variant = $imageLookup[$imageUrl];
-                $variantSource = 'event_image';
-            }
-            if ($variant) {
-                $row['image_variants'] = $variant;
-                $row['image_variant_source'] = $variantSource;
-                $row['resolved_image_url'] = $variant['webp'] ?? $variant['optimized'] ?? $variant['original'];
-                $row['image_webp_srcset'] = $variant['webp_srcset'] ?? null;
-                $row['image_optimized_srcset'] = $variant['optimized_srcset'] ?? null;
-                $row['image_intrinsic_width'] = $variant['intrinsic_width'] ?? null;
-                $row['image_intrinsic_height'] = $variant['intrinsic_height'] ?? null;
-            }
+            $row['payment_option'] = resolve_event_payment_option($row, $paymentLookup);
         }
         unset($row);
         return $rows;
@@ -3007,6 +3343,7 @@ $router->add('GET', '/api/events/:id', function ($request, $params) {
     $pdo = Database::connection();
     $hasCategoryTable = event_categories_table_exists($pdo);
     $hasSeriesMeta = event_series_meta_table_exists($pdo);
+    $paymentLookup = load_payment_settings_lookup($pdo);
     $seriesMetaSelect = $hasSeriesMeta ? ', esm.schedule_label AS series_schedule_label, esm.summary AS series_summary, esm.footer_note AS series_footer_note' : '';
     $seriesMetaJoin = $hasSeriesMeta ? ' LEFT JOIN event_series_meta esm ON esm.event_id = e.id' : '';
     if ($hasCategoryTable) {
@@ -3026,6 +3363,11 @@ $router->add('GET', '/api/events/:id', function ($request, $params) {
         [$targetEmail, $targetSource] = determine_seat_request_recipient($event);
         $event['seat_request_target_email'] = $targetEmail;
         $event['seat_request_target_source'] = $targetSource;
+        $event['payment_option'] = resolve_event_payment_option($event, $paymentLookup);
+        $enriched = enrich_event_rows_with_images([$event]);
+        if (!empty($enriched[0])) {
+            $event = $enriched[0];
+        }
     }
     Response::success(['event' => $event]);
 });
@@ -3044,6 +3386,146 @@ $router->add('GET', '/api/event-categories', function () {
             error_log('GET /api/event-categories error: ' . $e->getMessage());
         }
         Response::error('Failed to fetch categories', 500);
+    }
+});
+
+$router->add('GET', '/api/admin/payment-settings', function () {
+    try {
+        $pdo = Database::connection();
+        if (!payment_settings_table_exists($pdo)) {
+            return Response::success([
+                'has_table' => false,
+                'payment_settings' => [],
+                'categories' => [],
+            ]);
+        }
+        $settings = fetch_payment_settings_rows($pdo);
+        $categories = [];
+        if (event_categories_table_exists($pdo)) {
+            $categoryStmt = $pdo->query('SELECT id, name, slug, is_active FROM event_categories ORDER BY name ASC');
+            $categories = $categoryStmt->fetchAll() ?: [];
+        }
+        Response::success([
+            'has_table' => true,
+            'payment_settings' => $settings,
+            'categories' => $categories,
+        ]);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('GET /api/admin/payment-settings error: ' . $e->getMessage());
+        }
+        Response::error('Failed to load payment settings', 500);
+    }
+});
+
+$router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
+    try {
+        $pdo = Database::connection();
+        if (!payment_settings_table_exists($pdo)) {
+            return Response::error('Payment settings not available', 500);
+        }
+        $payload = read_json_body($request);
+        $scope = strtolower(trim((string) ($payload['scope'] ?? 'category')));
+        if (!in_array($scope, ['global', 'category'], true)) {
+            return Response::error('Invalid scope value', 422);
+        }
+        $categoryId = null;
+        if ($scope === 'category') {
+            $categoryId = normalize_category_id($payload['category_id'] ?? null);
+            if (!$categoryId) {
+                return Response::error('category_id is required for category scope', 422);
+            }
+            $categoryRow = fetch_event_category_by_id($pdo, $categoryId);
+            if (!$categoryRow) {
+                return Response::error('Category not found', 404);
+            }
+        }
+        $enabled = !empty($payload['enabled']);
+        $limitSeats = (int) ($payload['limit_seats'] ?? 2);
+        if ($limitSeats <= 0) {
+            $limitSeats = 2;
+        }
+        $paymentUrlInput = trim((string) ($payload['payment_url'] ?? ''));
+        if ($enabled && $paymentUrlInput === '') {
+            return Response::error('payment_url is required when enabled', 422);
+        }
+        if ($paymentUrlInput !== '' && !preg_match('#^https?://#i', $paymentUrlInput)) {
+            return Response::error('payment_url must start with http:// or https://', 422);
+        }
+        $buttonText = trim((string) ($payload['button_text'] ?? ''));
+        if ($buttonText === '') {
+            $buttonText = 'Pay Online';
+        }
+        $providerLabel = normalize_nullable_text($payload['provider_label'] ?? null);
+        $overLimitMessage = normalize_nullable_text($payload['over_limit_message'] ?? null);
+        if ($enabled && !$overLimitMessage) {
+            $overLimitMessage = 'Please contact our staff to arrange payment for larger groups.';
+        }
+        $finePrint = normalize_nullable_text($payload['fine_print'] ?? null);
+        $actor = audit_log_actor();
+
+        $scopeCategoryKey = $scope === 'category' ? $categoryId : null;
+        $existingStmt = $pdo->prepare('SELECT id FROM payment_settings WHERE scope = ? AND ((category_id IS NULL AND ? IS NULL) OR category_id = ?) LIMIT 1');
+        $existingStmt->execute([$scope, $scopeCategoryKey, $scopeCategoryKey]);
+        $existingId = (int) $existingStmt->fetchColumn();
+        $storedPaymentUrl = $paymentUrlInput === '' ? null : $paymentUrlInput;
+
+        if ($existingId) {
+            $update = $pdo->prepare('UPDATE payment_settings SET category_id = ?, enabled = ?, provider_label = ?, payment_url = ?, button_text = ?, limit_seats = ?, over_limit_message = ?, fine_print = ?, updated_by = ?, updated_at = NOW() WHERE id = ?');
+            $update->execute([
+                $scopeCategoryKey,
+                $enabled ? 1 : 0,
+                $providerLabel,
+                $storedPaymentUrl,
+                $buttonText,
+                $limitSeats,
+                $overLimitMessage,
+                $finePrint,
+                $actor,
+                $existingId,
+            ]);
+            $settingId = $existingId;
+        } else {
+            $insert = $pdo->prepare('INSERT INTO payment_settings (scope, category_id, enabled, provider_label, payment_url, button_text, limit_seats, over_limit_message, fine_print, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            $insert->execute([
+                $scope,
+                $scopeCategoryKey,
+                $enabled ? 1 : 0,
+                $providerLabel,
+                $storedPaymentUrl,
+                $buttonText,
+                $limitSeats,
+                $overLimitMessage,
+                $finePrint,
+                $actor,
+                $actor,
+            ]);
+            $settingId = (int) $pdo->lastInsertId();
+        }
+
+        record_audit('payment_settings.save', 'payment_settings', $settingId, [
+            'scope' => $scope,
+            'category_id' => $scopeCategoryKey,
+            'enabled' => $enabled,
+            'limit_seats' => $limitSeats,
+        ]);
+
+        $fetch = $pdo->prepare("SELECT ps.*, ec.name AS category_name, ec.slug AS category_slug FROM payment_settings ps LEFT JOIN event_categories ec ON ec.id = ps.category_id WHERE ps.id = ? LIMIT 1");
+        $fetch->execute([$settingId]);
+        $row = $fetch->fetch() ?: null;
+        if ($row) {
+            $row['enabled'] = !empty($row['enabled']);
+            $row['limit_seats'] = (int) ($row['limit_seats'] ?? 2);
+            if ($row['limit_seats'] <= 0) {
+                $row['limit_seats'] = 2;
+            }
+        }
+        Response::success(['payment_setting' => $row]);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('PUT /api/admin/payment-settings error: ' . $e->getMessage());
+        }
+        Response::error('Failed to save payment settings', 500);
     }
 });
 
@@ -3308,6 +3790,9 @@ $router->add('POST', '/api/events', function (Request $request) {
         $seriesSummary = normalize_series_meta_field($payload['series_summary'] ?? null);
         $seriesFooter = normalize_series_meta_field($payload['series_footer_note'] ?? null);
 
+        $hasPaymentEnabledColumn = events_table_has_column($pdo, 'payment_enabled');
+        $paymentEnabled = $hasPaymentEnabledColumn && !empty($payload['payment_enabled']) ? 1 : 0;
+
         $contactPhoneRaw = $payload['contact_phone_raw'] ?? $payload['contact_phone'] ?? null;
         $contactPhoneNormalized = normalize_phone_number($contactPhoneRaw);
         $startString = $startDt ? $startDt->format('Y-m-d H:i:s') : null;
@@ -3359,6 +3844,9 @@ $router->add('POST', '/api/events', function (Request $request) {
         if ($hasContactNotesColumn) {
             $insertColumns['contact_notes'] = $payload['contact_notes'] ?? null;
         }
+        if ($hasPaymentEnabledColumn) {
+            $insertColumns['payment_enabled'] = $paymentEnabled;
+        }
         $insertColumns['seat_request_email_override'] = $seatRequestOverride;
         $insertColumns['change_note'] = 'created via API';
         $insertColumns['created_by'] = 'api';
@@ -3392,6 +3880,7 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $pdo = Database::connection();
         $hasCategoryTable = event_categories_table_exists($pdo);
         $hasContactNotesColumn = events_table_has_column($pdo, 'contact_notes');
+        $hasPaymentEnabledColumn = events_table_has_column($pdo, 'payment_enabled');
         $eventId = (int)$params['id'];
         $existingStmt = $pdo->prepare('SELECT * FROM events WHERE id = ? LIMIT 1');
         $existingStmt->execute([$eventId]);
@@ -3495,6 +3984,15 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             $decoded = json_decode($categoryTags, true);
             $categoryTags = $decoded ? json_encode($decoded) : $existing['category_tags'];
         }
+
+        $valueOrExisting = static function (string $key, ?callable $transform = null) use ($payload, $existing) {
+            if (array_key_exists($key, $payload)) {
+                $value = $payload[$key];
+                return $transform ? $transform($value) : $value;
+            }
+            return $existing[$key] ?? null;
+        };
+
         $categoryId = $hasCategoryTable ? normalize_category_id($existing['category_id'] ?? null) : null;
         if ($hasCategoryTable) {
             if (array_key_exists('category_id', $payload)) {
@@ -3531,11 +4029,15 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             ? normalize_series_meta_field($payload['series_footer_note'])
             : ($existingMeta['footer_note'] ?? null);
 
-        $contactPhoneRaw = $payload['contact_phone_raw'] ?? $payload['contact_phone'] ?? $existing['contact_phone_raw'];
+        $contactPhoneRaw = $existing['contact_phone_raw'] ?? null;
+        if (array_key_exists('contact_phone_raw', $payload)) {
+            $contactPhoneRaw = normalize_nullable_text($payload['contact_phone_raw']);
+        } elseif (array_key_exists('contact_phone', $payload)) {
+            $contactPhoneRaw = normalize_nullable_text($payload['contact_phone']);
+        }
         $contactPhoneNormalized = normalize_phone_number($contactPhoneRaw);
         $startString = $startDt ? $startDt->format('Y-m-d H:i:s') : null;
         $endString = $endDt ? $endDt->format('Y-m-d H:i:s') : null;
-        $publishAt = $payload['publish_at'] ?? $existing['publish_at'];
 
         $doorTimeInputProvided = array_key_exists('door_time', $payload);
         $doorTimeInput = $doorTimeInputProvided ? $payload['door_time'] : $existing['door_time'];
@@ -3557,46 +4059,58 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
                 : ('layout changed (' . $snapshotLabel . ')');
         }
 
+        $paymentEnabled = null;
+        if ($hasPaymentEnabledColumn) {
+            if (array_key_exists('payment_enabled', $payload)) {
+                $paymentEnabled = !empty($payload['payment_enabled']) ? 1 : 0;
+            } else {
+                $paymentEnabled = (int) ($existing['payment_enabled'] ?? 0);
+            }
+        }
+
         $updateColumns = [
             'artist_name' => $artist,
             'title' => $title,
             'slug' => $slug,
-            'description' => $payload['description'] ?? $existing['description'],
-            'notes' => $payload['notes'] ?? $existing['notes'],
-            'genre' => $payload['genre'] ?? $existing['genre'],
+            'description' => $valueOrExisting('description', 'normalize_nullable_text'),
+            'notes' => $valueOrExisting('notes', 'normalize_nullable_text'),
+            'genre' => $valueOrExisting('genre', 'normalize_nullable_text'),
             'category_tags' => $categoryTags,
             'category_id' => $categoryId,
-            'image_url' => $payload['image_url'] ?? $existing['image_url'],
-            'hero_image_id' => $payload['hero_image_id'] ?? $existing['hero_image_id'],
-            'poster_image_id' => $payload['poster_image_id'] ?? $existing['poster_image_id'],
-            'ticket_price' => $payload['ticket_price'] ?? $existing['ticket_price'],
-            'door_price' => $payload['door_price'] ?? $existing['door_price'],
-            'min_ticket_price' => $payload['min_ticket_price'] ?? $existing['min_ticket_price'],
-            'max_ticket_price' => $payload['max_ticket_price'] ?? $existing['max_ticket_price'],
+            'image_url' => $valueOrExisting('image_url', 'normalize_nullable_text'),
+            'hero_image_id' => $valueOrExisting('hero_image_id', 'normalize_nullable_int'),
+            'poster_image_id' => $valueOrExisting('poster_image_id', 'normalize_nullable_int'),
+            'ticket_price' => $valueOrExisting('ticket_price', 'normalize_nullable_decimal'),
+            'door_price' => $valueOrExisting('door_price', 'normalize_nullable_decimal'),
+            'min_ticket_price' => $valueOrExisting('min_ticket_price', 'normalize_nullable_decimal'),
+            'max_ticket_price' => $valueOrExisting('max_ticket_price', 'normalize_nullable_decimal'),
             'ticket_type' => $ticketType,
             'seating_enabled' => $seatingEnabled,
             'venue_code' => $venueCode,
-            'venue_section' => $payload['venue_section'] ?? $existing['venue_section'],
+            'venue_section' => $valueOrExisting('venue_section', 'normalize_nullable_text'),
             'timezone' => $timezone,
             'start_datetime' => $startString,
             'end_datetime' => $endString,
             'door_time' => $doorTime,
             'event_date' => $startDt ? $startDt->format('Y-m-d') : ($payload['event_date'] ?? $existing['event_date']),
             'event_time' => $startDt ? $startDt->format('H:i:s') : ($payload['event_time'] ?? $existing['event_time']),
-            'age_restriction' => $payload['age_restriction'] ?? $existing['age_restriction'],
+            'age_restriction' => $valueOrExisting('age_restriction', 'normalize_nullable_text'),
             'status' => $status,
             'visibility' => $visibility,
-            'publish_at' => $publishAt,
+            'publish_at' => array_key_exists('publish_at', $payload) ? $payload['publish_at'] : $existing['publish_at'],
             'layout_id' => $layoutId,
             'layout_version_id' => $layoutVersionId,
-            'ticket_url' => $payload['ticket_url'] ?? $existing['ticket_url'],
-            'contact_name' => $payload['contact_name'] ?? $existing['contact_name'],
+            'ticket_url' => $valueOrExisting('ticket_url', 'normalize_nullable_text'),
+            'contact_name' => $valueOrExisting('contact_name', 'normalize_nullable_text'),
             'contact_phone_raw' => $contactPhoneRaw,
             'contact_phone_normalized' => $contactPhoneNormalized,
-            'contact_email' => $payload['contact_email'] ?? $existing['contact_email'],
+            'contact_email' => $valueOrExisting('contact_email', 'normalize_nullable_text'),
         ];
         if ($hasContactNotesColumn) {
-            $updateColumns['contact_notes'] = $payload['contact_notes'] ?? $existing['contact_notes'];
+            $updateColumns['contact_notes'] = $valueOrExisting('contact_notes', 'normalize_nullable_text');
+        }
+        if ($hasPaymentEnabledColumn && $paymentEnabled !== null) {
+            $updateColumns['payment_enabled'] = $paymentEnabled;
         }
         $updateColumns['seat_request_email_override'] = $seatRequestOverride;
         $updateColumns['change_note'] = $changeNote;
