@@ -1,3 +1,8 @@
+-- DEPRECATED MIGRATION
+-- Retained for historical reference only.
+-- Do NOT run in new deployments.
+-- Canonical schema is maintained via non-deprecated migrations.
+
 -- Expands seat request statuses to support the full lifecycle (new/contacted/waiting/etc.).
 -- Run with: mysql -uUSER -pPASS midway_music_hall < database/20250221_update_seat_request_status.sql
 

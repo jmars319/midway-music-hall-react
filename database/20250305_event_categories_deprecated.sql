@@ -1,3 +1,8 @@
+-- DEPRECATED MIGRATION
+-- Retained for historical reference only.
+-- Do NOT run in new deployments.
+-- Canonical schema is maintained via non-deprecated migrations.
+
 -- Adds event_categories table and backfills existing events with system categories.
 -- Run with: mysql -uUSER -pPASS midway_music_hall < database/20250305_event_categories.sql
 

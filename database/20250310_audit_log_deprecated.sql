@@ -1,3 +1,8 @@
+-- DEPRECATED MIGRATION
+-- Retained for historical reference only.
+-- Do NOT run in new deployments.
+-- Canonical schema is maintained via non-deprecated migrations.
+
 -- Adds audit_log table for recording admin activity.
 -- Run with: mysql -uUSER -pPASS midway_music_hall < database/20250310_audit_log.sql
 

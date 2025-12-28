@@ -1,3 +1,8 @@
+-- DEPRECATED MIGRATION
+-- Retained for historical reference only.
+-- Do NOT run in new deployments.
+-- Canonical schema is maintained via non-deprecated migrations.
+
 -- Adds archive metadata for events.
 -- Safe to run multiple times (IF NOT EXISTS).
 

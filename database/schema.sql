@@ -100,6 +100,27 @@ CREATE TABLE IF NOT EXISTS event_categories (
   UNIQUE KEY uniq_event_categories_slug (slug)
 );
 
+-- Payment settings per category or as a global default
+CREATE TABLE IF NOT EXISTS payment_settings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  scope ENUM('global','category') NOT NULL DEFAULT 'category',
+  category_id INT DEFAULT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 0,
+  provider_label VARCHAR(191) DEFAULT NULL,
+  payment_url VARCHAR(500) DEFAULT NULL,
+  button_text VARCHAR(191) DEFAULT 'Pay Online',
+  limit_seats INT NOT NULL DEFAULT 2,
+  over_limit_message TEXT,
+  fine_print TEXT,
+  created_by VARCHAR(191) DEFAULT NULL,
+  updated_by VARCHAR(191) DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_payment_category (category_id),
+  KEY idx_payment_scope (scope),
+  CONSTRAINT fk_payment_category FOREIGN KEY (category_id) REFERENCES event_categories(id) ON DELETE CASCADE
+);
+
 -- Events table (stores both single events and recurrence masters)
 CREATE TABLE IF NOT EXISTS events (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -143,6 +164,7 @@ CREATE TABLE IF NOT EXISTS events (
   contact_email VARCHAR(255),
   contact_notes TEXT,
   seat_request_email_override VARCHAR(255) DEFAULT NULL,
+  payment_enabled TINYINT(1) DEFAULT 0,
   change_note VARCHAR(255),
   created_by VARCHAR(191),
   updated_by VARCHAR(191),
