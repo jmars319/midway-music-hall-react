@@ -104,6 +104,14 @@ ADMIN_SESSION_COOKIE_SECURE=true
 
 ## 6. Database creation + import (phpMyAdmin)
 
+### Migration Policy (Locked)
+- Canonical migrations are the plain `.sql` files in `database/`.
+- Deprecated scripts end with `_deprecated.sql`, remain for history, and are never executed.
+- All schema changes are run manually through phpMyAdmin with “Allow multiple statements” enabled.
+- Apply canonical migrations in order every time; the current release order is:
+  1. `database/20250326_payment_settings.sql`
+  2. `database/20251212_schema_upgrade.sql`
+
 1. **Create DB + user** (cPanel → MySQL Databases):
    - Create database (e.g., `midway_live`).
    - Create user (e.g., `midway_user`), assign strong password.
@@ -115,7 +123,7 @@ ADMIN_SESSION_COOKIE_SECURE=true
    - Run import.
 
 3. **Compatibility issues**:
-   - If MariaDB rejects `ADD COLUMN IF NOT EXISTS` or other 5.7+ syntax, run `database/20251212_schema_upgrade_compat.sql` (already includes compatibility routines) using phpMyAdmin’s **Import** with “Allow multiple statements” turned on.
+   - If MariaDB rejects `ADD COLUMN IF NOT EXISTS` or other 5.7+ syntax, rerun the canonical scripts (listed above). Each wraps statements in stored procedures so re-importing is safe.
    - For timeouts, split the `_nodb` seed file into chunks (categories/events/seat maps) and import sequentially.
 
 4. **Verification queries** (phpMyAdmin → SQL):
@@ -128,6 +136,24 @@ ADMIN_SESSION_COOKIE_SECURE=true
 5. Update `api/.env` DB credentials to match the new database/user.
 
 6. If you must run migrations manually (e.g., data hotfixes), run `php -f api/cli/migrate.php` over SSH. Avoid phpMyAdmin for incremental migrations unless necessary.
+
+---
+
+## Final Verification Run Order
+Run `database/20250326_payment_settings.sql` and `database/20251212_schema_upgrade.sql` in phpMyAdmin before running:
+```bash
+cd frontend && npm run lint
+cd frontend && npm run build
+bash ./scripts/dev-start.sh
+bash ./scripts/dev-verify-admin-api.sh
+bash ./scripts/dev-verify-payment-settings.sh
+bash ./scripts/dev-verify-seating-guardrails.sh
+bash ./scripts/dev-verify-recurring-events-api.sh  # if present
+bash ./scripts/dev-verify-event-images.sh
+bash ./scripts/dev-verify-clearable-fields.sh
+bash ./scripts/dev-stop.sh
+```
+Reminder: schema upgrade → verification scripts → deploy backend → deploy frontend.
 
 ---
 
@@ -188,7 +214,7 @@ Document each step in `DEPLOYMENT_STATUS.md`.
 | **SPA routes 404** | Verify `.htaccess` resides in `public_html/midwaymusichall.net/`. Re-upload repo version. Clear Cloudflare cache. |
 | **/api routes return 404/download files** | Ensure `api/` folder exists and contains `index.php`; `.htaccess` must route `/api/` requests. Check file permissions (644/755). |
 | **phpMyAdmin import timeout** | Use `_nodb` seed file; if still timing out, split file and import pieces. Alternatively, use SSH `mysql` CLI. |
-| **MariaDB syntax errors (IF NOT EXISTS)** | Run `database/20251212_schema_upgrade_compat.sql` via phpMyAdmin. It wraps statements in stored procedures to avoid unsupported clauses. |
+| **MariaDB syntax errors (IF NOT EXISTS)** | Re-run the canonical scripts (`database/20250326_payment_settings.sql`, then `database/20251212_schema_upgrade.sql`) via phpMyAdmin. Each script wraps DDL in helper procedures so re-importing is safe. |
 
 ---
 

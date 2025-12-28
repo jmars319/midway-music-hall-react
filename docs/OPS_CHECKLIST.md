@@ -25,12 +25,46 @@ bash scripts/make-deploy-zips.sh && bash scripts/check-deploy-zips.sh
 
 ---
 
+## Migration Policy (Locked)
+- Canonical migrations are plain `.sql` files and the only scripts executed in dev or production.
+- Deprecated migrations end with `_deprecated.sql`, remain for history only, and must never be executed.
+- All schema updates run manually through phpMyAdmin with “Allow multiple statements” enabled.
+- Apply canonical migration files exactly in the order listed below; this order is non-negotiable.
+
+**Canonical order for this release**
+1. `database/20250326_payment_settings.sql`
+2. `database/20251212_schema_upgrade.sql`
+
+Each script is idempotent—rerunning them is safe and expected if phpMyAdmin reports recoverable errors.
+
+---
+
+## Final Verification Run Order
+Run the canonical schema upgrade in phpMyAdmin first, then execute:
+```bash
+cd frontend && npm run lint
+cd frontend && npm run build
+bash ./scripts/dev-start.sh
+bash ./scripts/dev-verify-admin-api.sh
+bash ./scripts/dev-verify-payment-settings.sh
+bash ./scripts/dev-verify-seating-guardrails.sh
+bash ./scripts/dev-verify-recurring-events-api.sh  # if present
+bash ./scripts/dev-verify-event-images.sh
+bash ./scripts/dev-verify-clearable-fields.sh
+bash ./scripts/dev-stop.sh
+```
+Reminder: phpMyAdmin schema upgrade → verification scripts → deploy backend → deploy frontend.
+
+---
+
 ## Production Migration (phpMyAdmin)
-1. **Prefer compat upgrade**: run `database/20251212_schema_upgrade_compat.sql` against the production DB.
-2. Confirm the following tables exist afterward (ignore “already exists” warnings):
+1. Import `database/20250326_payment_settings.sql`.
+2. Import `database/20251212_schema_upgrade.sql`.
+3. Confirm the following tables exist afterward (ignore “already exists” warnings):
+   - `payment_settings`
    - `event_series_meta`
    - `event_seating_snapshots`
-3. If phpMyAdmin warns about unsupported clauses, rerun the compat file; it is idempotent.
+4. If phpMyAdmin warns about unsupported clauses, rerun the same canonical file; each helper procedure guards against duplicates.
 
 ---
 
@@ -73,6 +107,7 @@ bash scripts/dev-verify-seating-guardrails.sh
 bash scripts/make-deploy-zips.sh && bash scripts/check-deploy-zips.sh
 
 # phpMyAdmin migration
--- Run in production DB
-SOURCE database/20251212_schema_upgrade_compat.sql;
+-- Run in production DB, exact order
+SOURCE database/20250326_payment_settings.sql;
+SOURCE database/20251212_schema_upgrade.sql;
 ```

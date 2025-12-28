@@ -21,20 +21,23 @@ Use this guide when preparing or refreshing the production database on GoDaddy. 
 3. Click **Import**.
 4. Choose `database/20250320_full_seed_nodb.sql`. This file contains schema + seed data but **no `CREATE DATABASE` / `USE` statements**, making it safe for phpMyAdmin.
 5. Leave the default format (SQL) and click **Go**.
-6. Wait for the success message. If any warning mentions unsupported clauses, see the compat section below and re-run the relevant scripts.
+6. Wait for the success message. If any warning mentions unsupported clauses, re-run the canonical scripts listed below.
 
 > **CLI alternative:** If you have shell access and want the script to create the DB automatically, run `mysql -uUSER -p < database/20250320_full_seed.sql`. This version includes `CREATE DATABASE` and `USE` statements; do **not** run it inside phpMyAdmin.
 
 ---
 
-## 3. Compat migrations (run if the host lacks `ADD COLUMN IF NOT EXISTS`)
+## 3. Canonical migrations (run in order)
 
-| Feature | Primary migration | Compat migration |
-|---------|------------------|------------------|
-| Audit Log table | `database/20250310_audit_log.sql` | `database/20250310_audit_log_compat.sql` |
-| Category seat-request overrides (`event_categories`, `events`) | `database/20250312_seat_request_overrides.sql` | `database/20250312_seat_request_overrides_compat.sql` |
+- Canonical migrations are the plain `.sql` files under `database/`.
+- Scripts ending with `_deprecated.sql` are archival only—never execute them.
+- If phpMyAdmin reports an error or drops the connection, simply re-run the canonical file; each one is idempotent and guarded by helper procedures.
 
-If phpMyAdmin errors on the primary script, import the `_compat` version instead (it performs the same changes using statements supported on older MySQL builds).
+**Required order (current release)**
+1. `database/20250326_payment_settings.sql`
+2. `database/20251212_schema_upgrade.sql`
+
+Run them immediately after the `_nodb` seed import to ensure all tables/columns exist.
 
 ---
 
@@ -109,10 +112,28 @@ Expected output: counts greater than zero for each slug, confirming the backfill
 ## 7. Post-import checklist
 
 - [ ] Import completed with no fatal errors.
-- [ ] Compat scripts run if phpMyAdmin complained about `IF NOT EXISTS`.
+- [ ] Canonical scripts (`20250326_payment_settings.sql`, `20251212_schema_upgrade.sql`) ran without fatal errors; rerun if phpMyAdmin complained about `IF NOT EXISTS`.
 - [ ] Verification queries returned expected data counts.
 - [ ] `.env` updated with DB credentials.
 - [ ] Admin login works locally against the new database.
 - [ ] `[email:skip]` logs appear when seat-request actions run (confirms email safety).
 
 Only move on to DNS cutover after `DEPLOY_SMOKE_TEST.md` passes. Real email delivery can be tested later by flipping `SEND_EMAILS=true` **only** in production once staff is ready.
+
+---
+
+## Final Verification Run Order
+After applying schema upgrades in phpMyAdmin, run:
+```bash
+cd frontend && npm run lint
+cd frontend && npm run build
+bash ./scripts/dev-start.sh
+bash ./scripts/dev-verify-admin-api.sh
+bash ./scripts/dev-verify-payment-settings.sh
+bash ./scripts/dev-verify-seating-guardrails.sh
+bash ./scripts/dev-verify-recurring-events-api.sh  # if present
+bash ./scripts/dev-verify-event-images.sh
+bash ./scripts/dev-verify-clearable-fields.sh
+bash ./scripts/dev-stop.sh
+```
+Reminder: schema upgrade → verification scripts → deploy backend → deploy frontend.

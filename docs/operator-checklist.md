@@ -2,12 +2,16 @@
 
 ## 1. Schema upgrade
 1. Export the current database before making changes.
-2. Apply `database/20251212_schema_upgrade_compat.sql` against the production schema (`midway_music_hall`). This compatibility script wraps every `ALTER TABLE`/`CREATE` in helper procedures so it can be rerun safely even if some changes (e.g., media width/height) were applied manually.
+2. Migration policy (locked):
+   - Canonical migrations are the plain `.sql` files listed below.
+   - Files ending with `_deprecated.sql` are for history only—do **not** execute them.
+   - Always enable “Allow multiple statements” in phpMyAdmin and re-run canonical scripts in order if any step fails (they are idempotent).
+3. Run the canonical scripts in this exact order:
    ```bash
-   mysql -u <user> -p'<password>' -h <host> midway_music_hall < database/20251212_schema_upgrade_compat.sql
+   mysql -u <user> -p'<password>' -h <host> midway_music_hall < database/20250326_payment_settings.sql
+   mysql -u <user> -p'<password>' -h <host> midway_music_hall < database/20251212_schema_upgrade.sql
    ```
-   - The script automatically defines helper stored procedures, performs the upgrade, and then you can re-run without errors if you need to.
-   - Leave `database/20251212_schema_upgrade.sql` in place for reference only; do not run it directly on MySQL 8/9 because `ADD COLUMN IF NOT EXISTS` is not portable.
+   - These scripts define helper stored procedures internally so repeat executions are safe and required when MariaDB applies partial changes.
 
 ## 2. Import authoritative events
 1. Ensure `frontend/src/data/events.json` contains the latest single-page source of truth.
@@ -54,3 +58,21 @@ Run these via the React app + admin panel (staging first, then production):
    - Compare the single-page placeholder schedule against the new `/api/public/events` payload to ensure all events (including recurring beach bands) are present.
 
 Document any discrepancies found during validation before pushing changes to production.
+
+---
+
+## Final Verification Run Order
+Before deploying, apply the schema upgrade via phpMyAdmin, then run:
+```bash
+cd frontend && npm run lint
+cd frontend && npm run build
+bash ./scripts/dev-start.sh
+bash ./scripts/dev-verify-admin-api.sh
+bash ./scripts/dev-verify-payment-settings.sh
+bash ./scripts/dev-verify-seating-guardrails.sh
+bash ./scripts/dev-verify-recurring-events-api.sh  # if present
+bash ./scripts/dev-verify-event-images.sh
+bash ./scripts/dev-verify-clearable-fields.sh
+bash ./scripts/dev-stop.sh
+```
+Reminder: schema upgrade → verification scripts → deploy backend → deploy frontend.
