@@ -277,11 +277,26 @@ export const resolveEventImageConfig = (event, fallback) => {
   if (!event) {
     return buildImageVariant(null, fallback);
   }
-  const variant = buildImageVariant(event.image_variants || null, fallback || event.resolved_image_url || event.image_url || null);
-  const width = variant.width || event.image_intrinsic_width || null;
-  const height = variant.height || event.image_intrinsic_height || null;
+  const effective = event.effective_image || null;
+  const effectiveVariantInput = effective
+    ? {
+        original: effective.file_url || effective.src || effective.fallback_url || null,
+        optimized: effective.optimized_url || null,
+        webp: effective.webp_url || null,
+        optimized_srcset: effective.optimized_srcset || null,
+        webp_srcset: effective.webp_srcset || null,
+        fallback_original: effective.fallback_url || effective.file_url || effective.src || null,
+      }
+    : null;
+  const variant = buildImageVariant(
+    event.image_variants || effectiveVariantInput,
+    fallback || effective?.src || event.resolved_image_url || event.image_url || null
+  );
+  const width = variant.width || event.image_intrinsic_width || effective?.width || null;
+  const height = variant.height || event.image_intrinsic_height || effective?.height || null;
   const aspectRatio = variant.aspectRatio || (width && height ? width / height : null);
   const resolvedSrc = variant.src
+    || prefixAssetUrl(effective?.src)
     || prefixAssetUrl(event.resolved_image_url)
     || prefixAssetUrl(event.image_url)
     || variant.fallback;

@@ -28,6 +28,8 @@ export default function EventSeatingModal({ event, onClose }) {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const paymentOption = event?.payment_option || null;
+  const [paymentPanelDismissed, setPaymentPanelDismissed] = useState(false);
   const [stagePosition, setStagePosition] = useState({ x: 50, y: 10 });
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
   const [canvasSettings, setCanvasSettings] = useState({ width: 1200, height: 800 });
@@ -118,6 +120,7 @@ export default function EventSeatingModal({ event, onClose }) {
     setSelectedSeats([]);
     setShowContactForm(false);
     setShowCancelConfirm(false);
+    setPaymentPanelDismissed(false);
   }, [event.id]);
 
   useEffect(() => {
@@ -127,6 +130,12 @@ export default function EventSeatingModal({ event, onClose }) {
     });
   }, [holdSet, pendingSet, reservedSet]);
   /* eslint-enable react-hooks/exhaustive-deps */
+
+  useEffect(() => {
+    if (!showContactForm) {
+      setPaymentPanelDismissed(false);
+    }
+  }, [showContactForm, event.id]);
 
   const fetchEventSeating = async () => {
     setLoading(true);
@@ -351,6 +360,10 @@ export default function EventSeatingModal({ event, onClose }) {
       r.pos_y !== undefined
   );
 
+  const paymentSeatLimit = paymentOption?.limit_seats ?? 2;
+  const showPaymentPanel = showContactForm && paymentOption && !paymentPanelDismissed;
+  const paymentOverLimit = showPaymentPanel && selectedSeats.length > paymentSeatLimit;
+
   return (
     <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4" role="presentation">
       <div
@@ -436,6 +449,50 @@ export default function EventSeatingModal({ event, onClose }) {
           <div className="flex-1 overflow-y-auto p-6">
             <div className="max-w-2xl mx-auto">
               <h3 className="text-2xl font-bold text-white mb-6">Enter Your Contact Information</h3>
+
+              {showPaymentPanel && (
+                <div className="mb-6 rounded-xl border border-indigo-500/40 bg-indigo-900/30 p-4 space-y-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-indigo-100">
+                        {paymentOverLimit ? 'Selected seats exceed the online payment limit.' : 'Optional payment step'}
+                      </p>
+                      <p className="text-xs text-gray-300">
+                        {paymentOverLimit
+                          ? 'Reach out to staff to pay for larger parties.'
+                          : `You can complete payment with ${paymentOption.provider_label || 'our partner'} after submitting your request.`}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentPanelDismissed(true)}
+                      className="text-xs text-gray-300 hover:text-white underline decoration-dotted"
+                    >
+                      Hide
+                    </button>
+                  </div>
+                  {paymentOverLimit ? (
+                    <p className="text-sm text-gray-100">
+                      {paymentOption.over_limit_message || 'Please call the box office to arrange payment for larger groups.'}
+                    </p>
+                  ) : (
+                    <>
+                      <a
+                        href={paymentOption.payment_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 font-semibold text-white hover:bg-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-300"
+                        aria-label="Open payment link in a new tab"
+                      >
+                        {paymentOption.button_text || 'Pay Online'}
+                      </a>
+                      {paymentOption.fine_print && (
+                        <p className="text-xs text-gray-300">{paymentOption.fine_print}</p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               
               {successMessage && (
                 <div className="p-4 mb-6 bg-green-500/20 border border-green-500 text-green-300 rounded-lg" role="status" aria-live="polite">
