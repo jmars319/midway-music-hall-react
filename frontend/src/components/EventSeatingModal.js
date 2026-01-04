@@ -34,7 +34,10 @@ export default function EventSeatingModal({ event, onClose }) {
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
   const [canvasSettings, setCanvasSettings] = useState({ width: 1200, height: 800 });
   const [seatingEnabled, setSeatingEnabled] = useState(() => Number(event.seating_enabled) === 1);
+  const [mapTransform, setMapTransform] = useState({ scale: 1, translateX: 0, translateY: 0 });
   const canvasContainerRef = useRef(null);
+  const mapViewportRef = useRef(null);
+  const mapFitRequestedRef = useRef(false);
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const errorResetTimer = useRef(null);
@@ -109,6 +112,17 @@ export default function EventSeatingModal({ event, onClose }) {
   const seatLabelFor = (seatId) => publicSeatLabel(seatLabelMap[seatId] || seatId);
   const canvasWidth = canvasSettings?.width || 1200;
   const canvasHeight = canvasSettings?.height || 800;
+  const hasPositions = useMemo(
+    () =>
+      activeRows.some(
+        (r) =>
+          r.pos_x !== null &&
+          r.pos_y !== null &&
+          r.pos_x !== undefined &&
+          r.pos_y !== undefined
+      ),
+    [activeRows]
+  );
 
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
@@ -121,6 +135,8 @@ export default function EventSeatingModal({ event, onClose }) {
     setShowContactForm(false);
     setShowCancelConfirm(false);
     setPaymentPanelDismissed(false);
+    setMapTransform({ scale: 1, translateX: 0, translateY: 0 });
+    mapFitRequestedRef.current = false;
   }, [event.id]);
 
   useEffect(() => {
@@ -136,6 +152,39 @@ export default function EventSeatingModal({ event, onClose }) {
       setPaymentPanelDismissed(false);
     }
   }, [showContactForm, event.id]);
+
+  const fitSeatsToViewport = useCallback(() => {
+    if (!hasPositions) return;
+    const viewport = mapViewportRef.current;
+    const scrollContainer = canvasContainerRef.current;
+    if (!viewport || !scrollContainer) return;
+    const viewportWidth = viewport.clientWidth || 0;
+    const viewportHeight = viewport.clientHeight || 0;
+    if (!viewportWidth || !viewportHeight) return;
+    const scale = Math.min(viewportWidth / canvasWidth, viewportHeight / canvasHeight, 1);
+    const translateX = scale === 1 ? 0 : (viewportWidth - canvasWidth * scale) / 2;
+    const translateY = scale === 1 ? 0 : (viewportHeight - canvasHeight * scale) / 2;
+    scrollContainer.scrollTop = 0;
+    scrollContainer.scrollLeft = 0;
+    setMapTransform({ scale, translateX, translateY });
+  }, [canvasHeight, canvasWidth, hasPositions]);
+
+  const handleFitSeatsClick = useCallback(() => {
+    mapFitRequestedRef.current = true;
+    fitSeatsToViewport();
+  }, [fitSeatsToViewport]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (mapFitRequestedRef.current) {
+        fitSeatsToViewport();
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [fitSeatsToViewport]);
 
   const fetchEventSeating = async () => {
     setLoading(true);
@@ -351,14 +400,6 @@ export default function EventSeatingModal({ event, onClose }) {
       setSubmitting(false);
     }
   };
-
-  const hasPositions = activeRows.some(
-    (r) =>
-      r.pos_x !== null &&
-      r.pos_y !== null &&
-      r.pos_x !== undefined &&
-      r.pos_y !== undefined
-  );
 
   const paymentSeatLimit = paymentOption?.limit_seats ?? 2;
   const showPaymentPanel = showContactForm && paymentOption && !paymentPanelDismissed;
@@ -620,91 +661,110 @@ export default function EventSeatingModal({ event, onClose }) {
               </div>
             ) : (
               <div className="flex flex-col xl:flex-row gap-4 h-full">
-                <div className="relative flex-1 min-h-[360px] min-w-0">
+                <div className="flex-1 min-w-0 flex flex-col gap-4 min-h-[360px]">
                   <div
-                    className="relative h-full bg-gray-100 dark:bg-gray-900 rounded-xl overflow-auto border border-purple-500/20"
-                    ref={canvasContainerRef}
-                    style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
+                    className="seat-map-viewport seat-map-text-lock bg-gray-100 dark:bg-gray-900 rounded-xl border border-purple-500/20"
+                    ref={mapViewportRef}
                   >
                     <div
-                      className="relative mx-auto"
-                      style={{
-                        width: canvasWidth,
-                        height: canvasHeight,
-                        minWidth: canvasWidth,
-                        minHeight: canvasHeight
-                      }}
+                      className="seat-map-scroll relative w-full h-full"
+                      ref={canvasContainerRef}
+                      style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
                     >
-                      {/* Stage */}
-                      <div 
-                        className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
+                      <div
+                        className="relative mx-auto"
                         style={{
-                          left: `${stagePosition.x}%`,
-                          top: `${stagePosition.y}%`,
-                          transform: 'translate(-50%, -50%)',
-                          width: `${stageSize.width || 200}px`,
-                          height: `${stageSize.height || 80}px`,
-                          pointerEvents: 'none'
+                          width: canvasWidth,
+                          height: canvasHeight,
+                          minWidth: canvasWidth,
+                          minHeight: canvasHeight,
+                          transformOrigin: 'top left',
+                          transform: `scale(${mapTransform.scale}) translate(${mapTransform.translateX}px, ${mapTransform.translateY}px)`
                         }}
                       >
-                        STAGE
-                      </div>
+                        {/* Stage */}
+                        <div 
+                          className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
+                          style={{
+                            left: `${stagePosition.x}%`,
+                            top: `${stagePosition.y}%`,
+                            transform: 'translate(-50%, -50%)',
+                            width: `${stageSize.width || 200}px`,
+                            height: `${stageSize.height || 80}px`,
+                            pointerEvents: 'none'
+                          }}
+                        >
+                          STAGE
+                        </div>
 
-                      {/* Tables */}
-                      {activeRows.map(row => {
-                        if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
-                        return (
-                          <div
-                            key={row.id}
-                            className="absolute"
-                            style={{
-                              left: `${row.pos_x}%`,
-                              top: `${row.pos_y}%`,
-                              transform: `translate(-50%, -50%)`,
-                              padding: '20px',
-                              minWidth: `${row.width || 120}px`,
-                              minHeight: `${row.height || 120}px`,
-                              pointerEvents: 'none'
-                            }}
-                          >
-                            <div className="flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
-                              <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
-                                <TableComponent
-                                  row={row}
-                                  tableShape={row.table_shape || 'table-6'}
-                                  selectedSeats={selectedSeats}
-                                  pendingSeats={pendingSeats}
-                                  holdSeats={holdSeats}
-                                  reservedSeats={reservedSeats}
-                                  seatStatusMap={seatStatusMap}
-                                  onToggleSeat={(seatId, meta = {}) =>
-                                    handleSeatInteraction(seatId, {
-                                      ...meta,
-                                      tableId: row?.id || `${row.section_name}-${row.row_label}`,
-                                      rowLabel: row.row_label,
-                                      section: row.section_name || row.section,
-                                    })
-                                  }
-                                  interactive
-                                  labelFormatter={publicSeatLabel}
-                                />
+                        {/* Tables */}
+                        {activeRows.map(row => {
+                          if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
+                          return (
+                            <div
+                              key={row.id}
+                              className="absolute"
+                              style={{
+                                left: `${row.pos_x}%`,
+                                top: `${row.pos_y}%`,
+                                transform: `translate(-50%, -50%)`,
+                                padding: '20px',
+                                minWidth: `${row.width || 120}px`,
+                                minHeight: `${row.height || 120}px`,
+                                pointerEvents: 'none'
+                              }}
+                            >
+                              <div className="flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
+                                <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
+                                  <TableComponent
+                                    row={row}
+                                    tableShape={row.table_shape || 'table-6'}
+                                    selectedSeats={selectedSeats}
+                                    pendingSeats={pendingSeats}
+                                    holdSeats={holdSeats}
+                                    reservedSeats={reservedSeats}
+                                    seatStatusMap={seatStatusMap}
+                                    onToggleSeat={(seatId, meta = {}) =>
+                                      handleSeatInteraction(seatId, {
+                                        ...meta,
+                                        tableId: row?.id || `${row.section_name}-${row.row_label}`,
+                                        rowLabel: row.row_label,
+                                        section: row.section_name || row.section,
+                                      })
+                                    }
+                                    interactive
+                                    labelFormatter={publicSeatLabel}
+                                  />
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  {!seatingEnabled && (
-                    <div className="pointer-events-none absolute inset-0 flex items-start justify-center p-4">
-                      <div className="mt-6 rounded-xl bg-black/70 text-white border border-amber-400/60 max-w-xl w-full shadow-xl p-4 text-center">
-                        <p className="text-base font-semibold">Seat reservations are temporarily paused.</p>
-                        <p className="text-sm text-amber-100 mt-2">
-                          You can review which seats are already held or reserved, but new requests are disabled while staff finalizes the lineup. Please check back soon or contact the venue for assistance.
-                        </p>
+                          );
+                        })}
                       </div>
                     </div>
-                  )}
+                    {!seatingEnabled && (
+                      <div className="pointer-events-none absolute inset-0 flex items-start justify-center p-4">
+                        <div className="mt-6 rounded-xl bg-black/70 text-white border border-amber-400/60 max-w-xl w-full shadow-xl p-4 text-center">
+                          <p className="text-base font-semibold">Seat reservations are temporarily paused.</p>
+                          <p className="text-sm text-amber-100 mt-2">
+                            You can review which seats are already held or reserved, but new requests are disabled while staff finalizes the lineup. Please check back soon or contact the venue for assistance.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-xs text-gray-400 flex-1 min-w-[200px]">
+                      Drag or pinch inside the map to explore available seats.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleFitSeatsClick}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-purple-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
+                    >
+                      Fit seats to screen
+                    </button>
+                  </div>
                 </div>
                 <aside className="bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-72 flex-shrink-0 max-h-[320px] xl:max-h-[calc(100vh-10rem)] overflow-y-auto">
                   <div className="font-semibold mb-3 text-white">Legend</div>
