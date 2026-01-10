@@ -117,6 +117,50 @@ const sameWeek = (date, now) => {
   return date >= weekStart && date <= weekEnd;
 };
 
+const EVENT_STATUS_MAP = {
+  cancelled: 'https://schema.org/EventCancelled',
+  postponed: 'https://schema.org/EventPostponed',
+  rescheduled: 'https://schema.org/EventRescheduled',
+};
+
+const sanitizeDescription = (value = '') => {
+  if (!value || typeof value !== 'string') {
+    return '';
+  }
+  return value.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+};
+
+const coerceDecimal = (value) => {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const num = typeof value === 'number' ? value : parseFloat(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const resolveEventOffer = (event, baseUrl, startDate) => {
+  const prices = [
+    coerceDecimal(event.ticket_price),
+    coerceDecimal(event.door_price),
+    coerceDecimal(event.min_ticket_price),
+    coerceDecimal(event.max_ticket_price),
+  ].filter((price) => price !== null && price >= 0);
+  const minPrice = prices.length ? Math.min(...prices) : null;
+  return {
+    '@type': 'Offer',
+    priceCurrency: 'USD',
+    price: (minPrice !== null ? minPrice : 0).toFixed(2),
+    availability: 'https://schema.org/InStock',
+    url: event.id ? `${baseUrl}/#event-${event.id}` : baseUrl,
+    validFrom: startDate ? startDate.toISOString() : undefined,
+  };
+};
+
+const resolveEventStatus = (event) => {
+  const status = (event.status || '').toLowerCase();
+  return EVENT_STATUS_MAP[status] || 'https://schema.org/EventScheduled';
+};
+
 const lookupSeriesMetadata = (master) => {
   const override = SERIES_OVERRIDES.find((item) => item.match.test(master.title || master.artist_name || ''));
   const getTrimmed = (value) => (typeof value === 'string' ? value.trim() : '');
@@ -129,7 +173,7 @@ const lookupSeriesMetadata = (master) => {
   return { summary, scheduleLabel, footerNote, overrideKey: override?.key || null };
 };
 
-const getSeriesDisplayName = (event = {}) => event.series_label || event.title || event.artist_name || 'Recurring Series';
+const getSeriesDisplayName = (event = {}) => event.series_label || event.artist_name || event.title || 'Recurring Series';
 
 const normalizeSeriesKey = (value = '') => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'series';
 
@@ -422,6 +466,18 @@ export default function HomePage({ onAdminClick, onNavigate }) {
           ? 'The Gathering Place'
           : 'Midway Music Hall';
       const imageUrl = resolveEventImageUrl(event, `${baseUrl}/og-image.png`);
+      const description =
+        sanitizeDescription(event.description) ||
+        sanitizeDescription(event.notes) ||
+        'Live music event at Midway Music Hall.';
+      const performerName = (event.artist_name || event.title || '').trim();
+      const performer = performerName
+        ? {
+            '@type': 'MusicGroup',
+            name: performerName,
+          }
+        : undefined;
+
       return {
         '@type': 'Event',
         name: event.artist_name || event.title || 'Midway Music Hall Event',
@@ -429,6 +485,10 @@ export default function HomePage({ onAdminClick, onNavigate }) {
         endDate: end ? end.toISOString() : undefined,
         url: event.id ? `${baseUrl}/#event-${event.id}` : baseUrl,
         image: imageUrl,
+        description,
+        eventStatus: resolveEventStatus(event),
+        performer,
+        offers: [resolveEventOffer(event, baseUrl, start)],
         location: {
           '@type': 'Place',
           name: venueName,

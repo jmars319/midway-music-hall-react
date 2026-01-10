@@ -76,7 +76,7 @@ export default function RecurringEvents({ series = [] }) {
             const fallbackKey = [
               item?.key,
               safeMaster.id,
-              safeMaster.title || safeMaster.artist_name,
+              safeMaster.artist_name || safeMaster.title,
               scheduleLabel,
             ].filter(Boolean).join('|');
             if (process.env.NODE_ENV !== 'production' && idx === 0) {
@@ -90,7 +90,7 @@ export default function RecurringEvents({ series = [] }) {
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h3 className="text-2xl font-semibold text-white">{safeMaster.title || safeMaster.artist_name || 'Recurring Event'}</h3>
+                    <h3 className="text-2xl font-semibold text-white">{safeMaster.artist_name || safeMaster.title || 'Recurring Event'}</h3>
                     <p className="text-gray-300 mt-1">{summary || safeMaster.description || 'Regular gathering at Midway Music Hall.'}</p>
                   </div>
                   <RefreshCw className="h-6 w-6 text-purple-300 flex-shrink-0" />

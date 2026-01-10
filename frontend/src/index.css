@@ -161,3 +161,22 @@ a:focus, button:focus, iframe:focus {
   height: 100%;
   overflow: auto;
 }
+
+@media print {
+  * {
+    color: #000 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    border-color: #999 !important;
+  }
+
+  body {
+    background: #fff !important;
+  }
+
+  a {
+    color: #000 !important;
+    text-decoration: underline !important;
+  }
+}
