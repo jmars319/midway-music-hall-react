@@ -32,11 +32,11 @@ npm start
 
 - **`database/`** - SQL schema and migration scripts
 
-- **`copilot-instructions/`** - Development documentation
+- **`docs/`** - Developer + deployment guides
 
 ## Deployment
 
-See **`DEPLOYMENT_GUIDE.md`** for the authoritative GoDaddy/Cloudflare steps (includes `/api` backend layout, DB import, and smoke tests).
+See **`docs/DEPLOYMENT_GUIDE.md`** for the authoritative GoDaddy/Cloudflare steps (includes `/api` backend layout, DB import, and smoke tests).
 
 **Quick Deploy (summary – still read the guide):**
 1. `cd frontend && npm run build`
@@ -45,7 +45,20 @@ See **`DEPLOYMENT_GUIDE.md`** for the authoritative GoDaddy/Cloudflare steps (in
 4. Upload the root `.htaccess` into `public_html/midwaymusichall.net/.htaccess`
 5. Create/update `api/.env` (keep `SEND_EMAILS=false` until production testing)
 6. Create/import the database using `database/20250320_full_seed_nodb.sql`
-7. Configure Cloudflare DNS + SSL (Full mode) and run `DEPLOY_SMOKE_TEST.md`
+7. Configure Cloudflare DNS + SSL (Full mode) and run the smoke test in `docs/DEPLOYMENT_GUIDE.md`
+
+## Developer Guide
+
+See **`docs/DEVELOPER_GUIDE.md`** for architecture notes, auth/session behavior, seating system details, and API summaries.
+
+## Documentation
+
+- **`docs/SYSTEM_OVERVIEW.md`** - Entry point for full system coverage (public/admin/ops)
+- **`docs/SYSTEM_PUBLIC.md`** - Public features with implementation + rationale
+- **`docs/SYSTEM_ADMIN.md`** - Admin features with implementation + rationale
+- **`docs/SYSTEM_OPS.md`** - Ops, data model, and safeguards
+- **`docs/DEPLOYMENT_GUIDE.md`** - Deployment and operations checklist
+- **`docs/PAGESPEED_TRADEOFFS.md`** - Performance tradeoffs and locked decisions
 
 ## Features
 

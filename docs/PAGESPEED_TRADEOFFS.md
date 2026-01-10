@@ -10,8 +10,8 @@ Midway Music Hall intentionally prioritizes correctness, accessibility, and real
    - *Why we accept this:* visual clarity + branding consistency directly drive bookings and accessibility; marginal byte savings are not worth blurry art.
 
 2. **Cloudflare Email Address Obfuscation**
-   - Cloudflare’s email-protection script stays enabled even though PSI reports it as render-blocking.
-   - *Why we accept this:* reducing scraping/spam and protecting public-facing inboxes trump a small synthetic metric hit.
+   - Cloudflare’s email-protection script remains **disabled** to avoid render-blocking injections that can break mobile rendering.
+   - *Why we accept this:* stability and predictable rendering are more important than the minor spam reduction benefit.
 
 3. **Social / crawler compatibility over bandwidth policing**
    - Hotlink protection remains OFF; OG/Twitter/Discord/Facebook bots must fetch our preview images without friction.
