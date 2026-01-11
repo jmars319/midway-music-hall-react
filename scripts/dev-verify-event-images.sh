@@ -25,7 +25,7 @@ cleanup() {
 trap cleanup EXIT
 
 require_backend_health_once || {
-  echo "ERROR: backend is not running; start dev stack via scripts/dev-start.sh" >&2
+  log_error "backend is not running; start dev stack via scripts/dev-start.sh"
   exit 1
 }
 
@@ -60,7 +60,7 @@ else:
     print(value if value is not None else "")' "$field"
 }
 
-echo "[event-images] uploading test media"
+log_step "[event-images] uploading test media"
 upload_response=$(curl -fsS -H 'Accept: application/json' -F "file=@${tmp_image}" -F 'category=gallery' "${API_BASE}/media")
 created_media_id=$(python3 -c 'import json,sys
 payload=json.load(sys.stdin)
@@ -124,11 +124,11 @@ PY
 event_json=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}")
 assert_effective_source "$event_json" "poster_media"
 
-echo "[event-images] clearing poster reference"
+log_step "[event-images] clearing poster reference"
 clear_payload='{"poster_image_id": null, "hero_image_id": null, "image_url": ""}'
 post_json "PUT" "/events/${created_event_id}" "$clear_payload" >/dev/null
 
 event_json_cleared=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}")
 assert_effective_source "$event_json_cleared" "fallback"
 
-echo "[event-images] verification succeeded"
+log_success "[event-images] verification succeeded"

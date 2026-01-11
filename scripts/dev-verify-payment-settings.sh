@@ -101,7 +101,7 @@ PY
 trap cleanup_resources EXIT
 
 require_backend_health_once || {
-  echo "ERROR: backend is not running; start dev stack via scripts/dev-start.sh" >&2
+  log_error "backend is not running; start dev stack via scripts/dev-start.sh"
   exit 1
 }
 
@@ -131,7 +131,7 @@ post_json() {
     "${API_BASE}${path}"
 }
 
-echo "[payment-verify] locating a category for testing"
+log_step "[payment-verify] locating a category for testing"
 category_response=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/event-categories")
 target_category_id=$(CATEGORY_JSON="$category_response" python3 - <<'PY'
 import json, os
@@ -143,7 +143,7 @@ for item in data.get('categories', []):
 PY
 )
 if [ -z "$target_category_id" ]; then
-  echo "ERROR: no event categories available for testing" >&2
+  log_error "no event categories available for testing"
   exit 1
 fi
 target_category_name=$(CATEGORY_JSON="$category_response" python3 - "$target_category_id" <<'PY'
@@ -157,7 +157,7 @@ for item in data.get('categories', []):
 PY
 )
 
-echo "[payment-verify] capturing original payment config for category ${target_category_name}"
+log_step "[payment-verify] capturing original payment config for category ${target_category_name}"
 payment_response=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/admin/payment-settings")
 has_payment_table=$(PAYMENT_JSON="$payment_response" python3 - <<'PY'
 import json, os
@@ -166,7 +166,7 @@ print('1' if data.get('has_table') else '0')
 PY
 )
 if [ "$has_payment_table" != "1" ]; then
-  echo "ERROR: payment_settings table not detected. Run database/20250326_payment_settings.sql + database/20251212_schema_upgrade.sql before this script." >&2
+  log_error "payment_settings table not detected. Run database/20250326_payment_settings.sql + database/20251212_schema_upgrade.sql before this script."
   exit 1
 fi
 original_payment_config_b64=$(PAYMENT_JSON="$payment_response" python3 - "$target_category_id" <<'PY'
@@ -286,7 +286,7 @@ JSON
 )
   response=$(post_json "POST" "/seating-layouts" "$payload")
   created_layout_id=$(json_field "$response" id)
-  echo "[payment-verify] created seating layout ${created_layout_id}"
+  log_success "[payment-verify] created seating layout ${created_layout_id}"
 }
 
 create_event() {
@@ -316,7 +316,7 @@ JSON
   response=$(post_json "POST" "/events" "$payload")
   event_id=$(json_field "$response" id)
   created_event_ids+=("$event_id")
-  echo "[payment-verify] created event ${event_id} (${label})" >&2
+  log_info "[payment-verify] created event ${event_id} (${label})"
   printf '%s\n' "$event_id"
 }
 
@@ -364,16 +364,16 @@ event_two_id=$(create_event "Verify Payment Disabled" "false")
 
 events_payload=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/public/events?limit=500&timeframe=all&archived=all")
 assert_payment_state "$events_payload" "$event_one_id" "1" "2"
-echo "[payment-verify] payment config present for event ${event_one_id}"
+log_success "[payment-verify] payment config present for event ${event_one_id}"
 assert_payment_state "$events_payload" "$event_two_id" "0" "0"
-echo "[payment-verify] payment config omitted for event ${event_two_id} (payment disabled)"
+log_success "[payment-verify] payment config omitted for event ${event_two_id} (payment disabled)"
 
-echo "[payment-verify] disabling payment config for category"
+log_step "[payment-verify] disabling payment config for category"
 put_payment_config "false" "$TEST_PAYMENT_URL" "$TEST_BUTTON" 2 "$TEST_OVER_LIMIT" "$TEST_FINE_PRINT" "Test Provider"
 
 event_three_id=$(create_event "Verify Config Disabled" "true")
 events_payload_disabled=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/public/events?limit=500&timeframe=all&archived=all")
 assert_payment_state "$events_payload_disabled" "$event_three_id" "0" "0"
-echo "[payment-verify] payment config suppressed when category config disabled"
+log_success "[payment-verify] payment config suppressed when category config disabled"
 
-echo "[payment-verify] completed successfully"
+log_success "[payment-verify] completed successfully"

@@ -10,7 +10,7 @@ PID_FILE="$DEV_DIR/frontend.pid"
 LOG_FILE="$DEV_DIR/frontend.log"
 
 if [ ! -f "$PID_FILE" ]; then
-  echo "not running"
+  log_info "not running"
   exit 0
 fi
 
@@ -23,7 +23,7 @@ done < "$PID_FILE"
 
 if [ "${#pid_list[@]}" -eq 0 ]; then
   rm -f "$PID_FILE"
-  echo "not running"
+  log_info "not running"
   exit 0
 fi
 
@@ -37,7 +37,7 @@ done
 
 if [ "$alive_found" -eq 0 ]; then
   rm -f "$PID_FILE"
-  echo "not running"
+  log_info "not running"
   exit 0
 fi
 
@@ -72,4 +72,4 @@ for pid in "${pid_list[@]}"; do
 done
 
 rm -f "$PID_FILE"
-echo "stopped"
+log_success "stopped"

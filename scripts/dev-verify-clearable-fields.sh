@@ -17,7 +17,7 @@ cleanup_event() {
 trap cleanup_event EXIT
 
 require_backend_health_once || {
-  echo "ERROR: backend is not running; start dev stack via scripts/dev-start.sh" >&2
+  log_error "backend is not running; start dev stack via scripts/dev-start.sh"
   exit 1
 }
 
@@ -51,15 +51,15 @@ create_payload=$(cat <<JSON
 JSON
 )
 
-echo "[clearable] creating temporary event"
+log_step "[clearable] creating temporary event"
 create_response=$(post_json "POST" "/events" "$create_payload")
 created_event_id=$(printf '%s' "$create_response" | python3 -c 'import json,sys;data=json.load(sys.stdin);print(data.get("id"))')
 if [ -z "$created_event_id" ]; then
-  echo "ERROR: failed to create event" >&2
+  log_error "failed to create event"
   exit 1
 fi
 
-echo "[clearable] setting fields to non-null values"
+log_step "[clearable] setting fields to non-null values"
 set_payload=$(cat <<JSON
 {
   "contact_notes": "test-notes",
@@ -133,7 +133,7 @@ PY
 set_state_json=$(fetch_event)
 assert_state "$set_state_json" "set"
 
-echo "[clearable] clearing fields via empty payload"
+log_step "[clearable] clearing fields via empty payload"
 clear_payload=$(cat <<JSON
 {
   "contact_notes": "",
@@ -151,4 +151,4 @@ post_json "PUT" "/events/${created_event_id}" "$clear_payload" >/dev/null
 cleared_json=$(fetch_event)
 assert_state "$cleared_json" "cleared"
 
-echo "[clearable] verification succeeded"
+log_success "[clearable] verification succeeded"

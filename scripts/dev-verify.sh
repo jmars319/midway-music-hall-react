@@ -5,31 +5,31 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck disable=SC1090
 . "$ROOT_DIR/scripts/dev-common.sh"
 
-echo "[verify] stopping any running servers (safe)"
+log_step "[verify] stopping any running servers (safe)"
 "$ROOT_DIR/scripts/dev-stop.sh" >/dev/null 2>&1 || true
 
-echo "[verify] starting dev stack"
+log_step "[verify] starting dev stack"
 "$ROOT_DIR/scripts/dev-start.sh"
 
-echo "[verify] backend health direct"
+log_step "[verify] backend health direct"
 require_backend_health_once
 
-echo "[verify] frontend root reachable"
+log_step "[verify] frontend root reachable"
 require_frontend_home_once
 
-echo "[verify] proxy path reachable"
+log_step "[verify] proxy path reachable"
 require_proxy_health_once
 
-echo "[verify] restarting stack"
+log_step "[verify] restarting stack"
 "$ROOT_DIR/scripts/dev-restart.sh"
 
-echo "[verify] backend health after restart"
+log_step "[verify] backend health after restart"
 require_backend_health_once
 
-echo "[verify] proxy health after restart"
+log_step "[verify] proxy health after restart"
 require_proxy_health_once
 
-echo "[verify] stopping dev stack"
+log_step "[verify] stopping dev stack"
 "$ROOT_DIR/scripts/dev-stop.sh"
 
-echo "[verify] complete"
+log_success "[verify] complete"

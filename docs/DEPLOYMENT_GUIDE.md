@@ -34,6 +34,7 @@ Optional packaging:
 bash scripts/make-deploy-zips.sh
 bash scripts/check-deploy-zips.sh
 ```
+Note: `scripts/make-deploy-zips.sh` runs the frontend build automatically before creating the zips.
 
 ## Upload steps (cPanel)
 1. Upload and extract the contents of `frontend/build/` into `public_html/midwaymusichall.net/`.

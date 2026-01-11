@@ -3,15 +3,28 @@ set -euo pipefail
 
 # Usage: run from repo root: bash scripts/make-deploy-zips.sh
 
-echo "Step 1: Safety checks and removing old deployment zips"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC1090
+. "$ROOT_DIR/scripts/script-utils.sh"
+
+log_step "Step 1: Build frontend"
+if [ ! -d "$ROOT_DIR/frontend" ]; then
+  log_error "frontend/ directory not found. Aborting."
+  exit 1
+fi
+pushd "$ROOT_DIR/frontend" >/dev/null
+npm run build
+popd >/dev/null
+
+log_step "Step 2: Safety checks and removing old deployment zips"
 # Remove existing deployment zips (explicit names and legacy patterns)
 rm -f backend-deploy.zip frontend-deploy.zip frontend-build.zip \
       deploy-backend.zip deploy-frontend.zip \
       backend-deploy-*.zip frontend-deploy-*.zip deploy-*.zip || true
 
-echo "Step 2: Create deploy-backend.zip (backend files at zip root)"
+log_step "Step 3: Create deploy-backend.zip (backend files at zip root)"
 if [ ! -d backend ]; then
-  echo "Error: backend/ directory not found. Aborting."
+  log_error "backend/ directory not found. Aborting."
   exit 1
 fi
 pushd backend >/dev/null
@@ -19,9 +32,9 @@ pushd backend >/dev/null
 zip -r --symlinks ../deploy-backend.zip . -x "*.env*" "*/.env*" "uploads/*" "uploads/**" "*.DS_Store" "*/.DS_Store"
 popd >/dev/null
 
-echo "Step 3: Create deploy-frontend.zip (include frontend/build/ contents + .htaccess at zip root)"
+log_step "Step 4: Create deploy-frontend.zip (include frontend/build/ contents + .htaccess at zip root)"
 if [ ! -d frontend/build ]; then
-  echo "Error: frontend/build/ not found. Build the frontend first. Aborting."
+  log_error "frontend/build/ not found. Build the frontend first. Aborting."
   exit 1
 fi
 pushd frontend/build >/dev/null
@@ -34,16 +47,16 @@ if [ -f .htaccess ]; then
   # -j strips path so the file is placed at zip root
   zip -j deploy-frontend.zip .htaccess
 else
-  echo "Warning: .htaccess not found at repo root; deploy-frontend.zip will not include it."
+  log_warn ".htaccess not found at repo root; deploy-frontend.zip will not include it."
 fi
 
-echo "Step 4: Verification output"
+log_step "Step 5: Verification output"
 ls -lh deploy-backend.zip deploy-frontend.zip || true
 
-echo "--- deploy-backend.zip listing (first ~30 lines) ---"
+log_info "--- deploy-backend.zip listing (first ~30 lines) ---"
 unzip -l deploy-backend.zip | head -n 30 || true
 
-echo "--- deploy-frontend.zip listing (first ~30 lines) ---"
+log_info "--- deploy-frontend.zip listing (first ~30 lines) ---"
 unzip -l deploy-frontend.zip | head -n 30 || true
 
-echo "Done. Created deploy-backend.zip and deploy-frontend.zip"
+log_success "Done. Created deploy-backend.zip and deploy-frontend.zip"

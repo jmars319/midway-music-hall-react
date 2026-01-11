@@ -6,6 +6,9 @@ if [ -z "${ROOT_DIR:-}" ]; then
   exit 1
 fi
 
+# shellcheck disable=SC1090
+. "$ROOT_DIR/scripts/script-utils.sh"
+
 DEV_DIR="${DEV_DIR:-$ROOT_DIR/.dev}"
 mkdir -p "$DEV_DIR"
 
@@ -43,11 +46,11 @@ frontend_proxy_health_url() {
 }
 
 log_backend_config() {
-  echo "[dev-backend] host=$(backend_url) root=${DEV_BACKEND_ROOT} health=${DEV_BACKEND_HEALTH_PATH}"
+  log_info "[dev-backend] host=$(backend_url) root=${DEV_BACKEND_ROOT} health=${DEV_BACKEND_HEALTH_PATH}"
 }
 
 log_frontend_config() {
-  echo "[dev-frontend] host=$(frontend_url) dir=${DEV_FRONTEND_DIR} proxy=http://localhost:${DEV_BACKEND_PORT}"
+  log_info "[dev-frontend] host=$(frontend_url) dir=${DEV_FRONTEND_DIR} proxy=http://localhost:${DEV_BACKEND_PORT}"
 }
 
 pids_on_port() {
@@ -132,11 +135,11 @@ ensure_proxy_matches() {
   local package_json="$ROOT_DIR/$DEV_FRONTEND_DIR/package.json"
   local expected="http://localhost:${DEV_BACKEND_PORT}"
   if [ ! -f "$package_json" ]; then
-    echo "ERROR: Cannot find ${package_json} to verify CRA proxy."
+    log_error "Cannot find ${package_json} to verify CRA proxy."
     exit 3
   fi
   if ! command -v node >/dev/null 2>&1; then
-    echo "ERROR: node is required to verify CRA proxy configuration."
+    log_error "node is required to verify CRA proxy configuration."
     exit 3
   fi
   local proxy_value
@@ -153,11 +156,11 @@ try {
 NODE
 )
   if [ -z "$proxy_value" ]; then
-    echo "ERROR: CRA proxy missing in ${package_json}. Expected ${expected}. Fix proxy or set DEV_BACKEND_PORT."
+    log_error "CRA proxy missing in ${package_json}. Expected ${expected}. Fix proxy or set DEV_BACKEND_PORT."
     exit 3
   fi
   if [ "$proxy_value" != "$expected" ]; then
-    echo "ERROR: CRA proxy mismatch (${proxy_value} != ${expected}). Update ${package_json} or DEV_BACKEND_PORT."
+    log_error "CRA proxy mismatch (${proxy_value} != ${expected}). Update ${package_json} or DEV_BACKEND_PORT."
     exit 3
   fi
 }
@@ -165,11 +168,11 @@ NODE
 ensure_relative_api_config() {
   local api_config="$ROOT_DIR/$DEV_FRONTEND_DIR/src/apiConfig.js"
   if [ ! -f "$api_config" ]; then
-    echo "ERROR: Cannot find ${api_config} to verify API configuration."
+    log_error "Cannot find ${api_config} to verify API configuration."
     exit 3
   fi
   if ! grep -q "return '/api';" "$api_config"; then
-    echo "ERROR: frontend/src/apiConfig.js does not appear to return '/api' as the default; update it to keep dev proxy working."
+    log_error "frontend/src/apiConfig.js does not appear to return '/api' as the default; update it to keep dev proxy working."
     exit 3
   fi
 }
@@ -207,7 +210,7 @@ verify_proxy_chain() {
   local url
   url="$(frontend_proxy_health_url)"
   if ! curl -fsS --max-time 3 -H 'Accept: application/json' "$url" >/dev/null 2>&1; then
-    echo "ERROR: frontend proxy check failed via ${url}. Ensure CRA proxy and backend are running."
+    log_error "frontend proxy check failed via ${url}. Ensure CRA proxy and backend are running."
     return 1
   fi
   return 0
@@ -215,7 +218,7 @@ verify_proxy_chain() {
 
 require_backend_health_once() {
   if ! curl -fsS --max-time 3 -H 'Accept: application/json' "$(backend_health_url)" >/dev/null 2>&1; then
-    echo "ERROR: Backend health check failed at $(backend_health_url)"
+    log_error "Backend health check failed at $(backend_health_url)"
     return 1
   fi
   return 0
@@ -223,7 +226,7 @@ require_backend_health_once() {
 
 require_frontend_home_once() {
   if ! curl -fsS --max-time 3 "$(frontend_url)/" >/dev/null 2>&1; then
-    echo "ERROR: Frontend check failed at $(frontend_url)/"
+    log_error "Frontend check failed at $(frontend_url)/"
     return 1
   fi
   return 0
@@ -231,7 +234,7 @@ require_frontend_home_once() {
 
 require_proxy_health_once() {
   if ! curl -fsS --max-time 3 -H 'Accept: application/json' "$(frontend_proxy_health_url)" >/dev/null 2>&1; then
-    echo "ERROR: Proxy check failed at $(frontend_proxy_health_url)"
+    log_error "Proxy check failed at $(frontend_proxy_health_url)"
     return 1
   fi
   return 0

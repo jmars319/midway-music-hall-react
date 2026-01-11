@@ -25,7 +25,7 @@ cleanup_resources() {
 trap cleanup_resources EXIT
 
 require_backend_health_once || {
-  echo "ERROR: backend is not running; start dev stack via scripts/dev-start.sh" >&2
+  log_error "backend is not running; start dev stack via scripts/dev-start.sh"
   exit 1
 }
 
@@ -85,12 +85,12 @@ layout_payload=$(cat <<JSON
 JSON
 )
 
-echo "[admin-api] creating seating layout"
+log_step "[admin-api] creating seating layout"
 layout_response=$(post_json "POST" "/seating-layouts" "$layout_payload")
 created_layout_id="$(json_field "$layout_response" id)"
-echo "[admin-api] created layout ${created_layout_id}"
+log_success "[admin-api] created layout ${created_layout_id}"
 
-echo "[admin-api] updating layout metadata"
+log_step "[admin-api] updating layout metadata"
 update_layout_payload=$(cat <<JSON
 {
   "name": "${layout_name} Updated",
@@ -138,12 +138,12 @@ event_payload=$(cat <<JSON
 JSON
 )
 
-echo "[admin-api] creating event"
+log_step "[admin-api] creating event"
 event_create_response=$(post_json "POST" "/events" "$event_payload")
 created_event_id="$(json_field "$event_create_response" id)"
-echo "[admin-api] created event ${created_event_id}"
+log_success "[admin-api] created event ${created_event_id}"
 
-echo "[admin-api] updating event layout + notes"
+log_step "[admin-api] updating event layout + notes"
 event_update_payload=$(cat <<JSON
 {
   "layout_id": ${created_layout_id},
@@ -155,7 +155,7 @@ JSON
 )
 post_json "PUT" "/events/${created_event_id}" "$event_update_payload" >/dev/null
 
-echo "[admin-api] fetching event by id"
+log_step "[admin-api] fetching event by id"
 curl -fsS -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}" >/dev/null
 
-echo "[admin-api] verification flow completed successfully"
+log_success "[admin-api] verification flow completed successfully"

@@ -8,7 +8,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 API_BASE="$(backend_url)/api"
 
 require_backend_health_once || {
-  echo "ERROR: backend is not running; start the dev stack before running this script." >&2
+  log_error "backend is not running; start the dev stack before running this script."
   exit 1
 }
 
@@ -82,7 +82,7 @@ JSON
 
 create_response=$(post_json "POST" "/events" "$create_payload")
 event_id="$(json_field "$create_response" id)"
-echo "[recurring-api] created event ${event_id}"
+log_success "[recurring-api] created event ${event_id}"
 
 php -r "if (!isset(\$_SERVER['REQUEST_METHOD'])) { \$_SERVER['REQUEST_METHOD'] = 'CLI'; } require \$argv[1]; \$pdo = \\Midway\\Backend\\Database::connection(); \$stmt = \$pdo->prepare('UPDATE events SET is_series_master = 1, start_datetime = NULL, end_datetime = NULL, event_date = NULL, event_time = NULL, door_time = NULL WHERE id = ?'); \$stmt->execute([(int) \$argv[2]]);" "$ROOT_DIR/backend/bootstrap.php" "$event_id"
 
@@ -102,8 +102,8 @@ footer_value="$(json_field "$event_response" 'event.series_footer_note')"
 schedule_value="$(json_field "$event_response" 'event.series_schedule_label')"
 
 if [ "$summary_value" != "Updated recurring summary" ] || [ "$footer_value" != "Updated footer note" ] || [ "$schedule_value" != "Updated schedule label" ]; then
-  echo "ERROR: recurring metadata did not round-trip through API." >&2
+  log_error "recurring metadata did not round-trip through API."
   exit 1
 fi
 
-echo "[recurring-api] metadata round-trip verified"
+log_success "[recurring-api] metadata round-trip verified"

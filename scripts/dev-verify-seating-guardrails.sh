@@ -8,7 +8,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 API_BASE="$(backend_url)/api"
 
 require_backend_health_once || {
-  echo "ERROR: backend is not running; start the dev stack before running this script." >&2
+  log_error "backend is not running; start the dev stack before running this script."
   exit 1
 }
 
@@ -84,7 +84,7 @@ primary_layout_id="${layout_pair%%,*}"
 alternate_layout_id="${layout_pair##*,}"
 
 if [ -z "$primary_layout_id" ] || [ -z "$alternate_layout_id" ]; then
-  echo "ERROR: unable to resolve seating layouts." >&2
+  log_error "unable to resolve seating layouts."
   exit 1
 fi
 
@@ -118,7 +118,7 @@ trap cleanup EXIT
 
 create_response=$(post_json "POST" "/events" "$create_payload")
 event_id="$(json_field "$create_response" id)"
-echo "[seating-guardrails] created event ${event_id}"
+log_success "[seating-guardrails] created event ${event_id}"
 
 layout_version_id="$(php -r "
 if (!isset(\$_SERVER['REQUEST_METHOD'])) { \$_SERVER['REQUEST_METHOD'] = 'CLI'; }
@@ -131,7 +131,7 @@ echo \$row ? ((int) \$row['layout_version_id']) : 0;
 " "$event_id")"
 
 if [ -z "$layout_version_id" ] || [ "$layout_version_id" = "0" ]; then
-  echo "ERROR: event missing layout_version_id" >&2
+  log_error "event missing layout_version_id"
   exit 1
 fi
 
@@ -169,7 +169,7 @@ layout_after_toggle="$(json_field "$event_payload" 'event.layout_id')"
 version_after_toggle="$(json_field "$event_payload" 'event.layout_version_id')"
 
 if [ "$layout_after_toggle" != "$primary_layout_id" ] || [ "$version_after_toggle" != "$layout_version_id" ]; then
-  echo "ERROR: layout fields changed after seating_enabled toggles." >&2
+  log_error "layout fields changed after seating_enabled toggles."
   exit 1
 fi
 
@@ -177,7 +177,7 @@ post_toggle_requests="$(count_metric 'seat_requests' "$event_id")"
 post_toggle_seating="$(count_metric 'seating' "$event_id")"
 
 if [ "$post_toggle_requests" != "$initial_requests_count" ] || [ "$post_toggle_seating" != "$initial_seating_count" ]; then
-  echo "ERROR: seating data changed after seating_enabled toggles." >&2
+  log_error "seating data changed after seating_enabled toggles."
   exit 1
 fi
 
@@ -186,7 +186,7 @@ change_response=$(post_json "PUT" "/events/${event_id}" "$change_payload")
 snapshot_id="$(json_field "$change_response" 'seating_snapshot_id')"
 
 if [ "$snapshot_id" = "null" ] || [ -z "$snapshot_id" ]; then
-  echo "ERROR: layout change did not report a snapshot id." >&2
+  log_error "layout change did not report a snapshot id."
   exit 1
 fi
 
@@ -203,7 +203,7 @@ echo \$row['snapshot_type'] . '|' . (in_array('Guardrail-A-1', \$reserved, true)
 " "$snapshot_id" "$event_id")"
 
 if [[ "$snapshot_check" != pre_layout_change* ]] || [[ "$snapshot_check" != *has_seat ]]; then
-  echo "ERROR: snapshot validation failed (${snapshot_check})." >&2
+  log_error "snapshot validation failed (${snapshot_check})."
   exit 1
 fi
 
@@ -211,12 +211,12 @@ post_change_requests="$(count_metric 'seat_requests' "$event_id")"
 post_change_seating="$(count_metric 'seating' "$event_id")"
 
 if [ "$post_change_requests" != "$initial_requests_count" ] || [ "$post_change_seating" != "$initial_seating_count" ]; then
-  echo "ERROR: seating data changed after layout switch." >&2
+  log_error "seating data changed after layout switch."
   exit 1
 fi
 
-echo "[seating-guardrails] seating toggles left layout + reservations intact"
-echo "[seating-guardrails] snapshot #${snapshot_id} captured before layout change"
+log_success "[seating-guardrails] seating toggles left layout + reservations intact"
+log_info "[seating-guardrails] snapshot #${snapshot_id} captured before layout change"
 
 php -r "
 if (!isset(\$_SERVER['REQUEST_METHOD'])) { \$_SERVER['REQUEST_METHOD'] = 'CLI'; }
@@ -227,7 +227,7 @@ require '$ROOT_DIR/backend/bootstrap.php';
 " "$event_id"
 
 if [ "$(count_metric 'seat_requests' "$event_id")" != "0" ]; then
-  echo "ERROR: failed to wipe seat_requests prior to restore test." >&2
+  log_error "failed to wipe seat_requests prior to restore test."
   exit 1
 fi
 
@@ -236,19 +236,19 @@ restore_response=$(post_json "POST" "/events/${event_id}/restore-seating-snapsho
 restored_flag="$(json_field "$restore_response" 'restored')"
 
 if [ "$restored_flag" != "true" ]; then
-  echo "ERROR: restore endpoint failed: $restore_response" >&2
+  log_error "restore endpoint failed: $restore_response"
   exit 1
 fi
 
 restored_layout="$(json_field "$restore_response" 'layout_id')"
 if [ "$restored_layout" != "$primary_layout_id" ]; then
-  echo "ERROR: restore did not realign layout_id (expected $primary_layout_id, got $restored_layout)." >&2
+  log_error "restore did not realign layout_id (expected $primary_layout_id, got $restored_layout)."
   exit 1
 fi
 
 restored_requests="$(count_metric 'seat_requests' "$event_id")"
 if [ "$restored_requests" -lt "$initial_requests_count" ]; then
-  echo "ERROR: restore did not repopulate seat_requests (have $restored_requests, expected >= $initial_requests_count)." >&2
+  log_error "restore did not repopulate seat_requests (have $restored_requests, expected >= $initial_requests_count)."
   exit 1
 fi
 
@@ -262,8 +262,8 @@ PYCODE
 )"
 
 if [ "$conflict_count" != "0" ]; then
-  echo "ERROR: restore reported unexpected conflicts: $restore_response" >&2
+  log_error "restore reported unexpected conflicts: $restore_response"
   exit 1
 fi
 
-echo "[seating-guardrails] restore endpoint rebuilt reservations and layout successfully"
+log_success "[seating-guardrails] restore endpoint rebuilt reservations and layout successfully"

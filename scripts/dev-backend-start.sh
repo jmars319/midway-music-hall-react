@@ -15,7 +15,7 @@ existing_pids=$(collect_pids_from_file "$PID_FILE")
 if [ -n "$existing_pids" ]; then
   for existing in $existing_pids; do
     if kill -0 "$existing" >/dev/null 2>&1; then
-      echo "[dev-backend] already running (pid $existing)"
+      log_warn "[dev-backend] already running (pid $existing)"
       exit 0
     fi
   done
@@ -24,18 +24,18 @@ fi
 
 if port_in_use "$DEV_BACKEND_PORT"; then
   listeners=$(pids_on_port "$DEV_BACKEND_PORT")
-  echo "ERROR: port ${DEV_BACKEND_PORT} already in use by PID(s): ${listeners:-unknown}."
+  log_error "port ${DEV_BACKEND_PORT} already in use by PID(s): ${listeners:-unknown}."
   exit 2
 fi
 
-echo "[dev-backend] launching php -S ${DEV_BACKEND_HOST}:${DEV_BACKEND_PORT} -t ${DEV_BACKEND_ROOT}"
+log_step "[dev-backend] launching php -S ${DEV_BACKEND_HOST}:${DEV_BACKEND_PORT} -t ${DEV_BACKEND_ROOT}"
 cd "$ROOT_DIR"
 nohup php -S "${DEV_BACKEND_HOST}:${DEV_BACKEND_PORT}" -t "$DEV_BACKEND_ROOT" >"$LOG_FILE" 2>&1 &
 pid=$!
 
 if wait_for_backend_ready; then
   write_pid_file "$pid" "$DEV_BACKEND_PORT" "$PID_FILE"
-  echo "[dev-backend] started (pid $pid)"
+  log_success "[dev-backend] started (pid $pid)"
   exit 0
 fi
 
@@ -46,5 +46,5 @@ if kill -0 "$pid" >/dev/null 2>&1; then
     kill -9 "$pid" >/dev/null 2>&1 || true
   fi
 fi
-echo "ERROR: backend failed to become ready at $(backend_health_url)"
+log_error "backend failed to become ready at $(backend_health_url)"
 exit 2

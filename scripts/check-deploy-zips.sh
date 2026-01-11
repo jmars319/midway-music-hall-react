@@ -1,26 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC1090
+. "$ROOT_DIR/scripts/script-utils.sh"
+
 fail() {
-  echo "ERROR: $1" >&2
+  log_error "$1"
   exit 1
 }
 
 if [ "$#" -ne 0 ]; then
-  echo "Usage: bash scripts/check-deploy-zips.sh" >&2
+  log_error "Usage: bash scripts/check-deploy-zips.sh"
   exit 2
 fi
 
 BACKEND_ZIP=deploy-backend.zip
 FRONTEND_ZIP=deploy-frontend.zip
 
-echo "Checking existence of deploy zips..."
+log_step "Checking existence of deploy zips..."
 [ -f "$BACKEND_ZIP" ] || fail "$BACKEND_ZIP not found in repo root"
 [ -f "$FRONTEND_ZIP" ] || fail "$FRONTEND_ZIP not found in repo root"
 
 list_and_brief() {
   local z=$1
-  echo "--- $z (brief listing) ---"
+  log_info "--- $z (brief listing) ---"
   # show first ~40 lines and the final totals line from unzip -l
   unzip -l "$z" | { head -n 40; echo '...'; unzip -l "$z" | tail -n 1; } || true
 }
@@ -36,7 +40,7 @@ zip_list() {
 }
 
 echo
-echo "Running content checks..."
+log_step "Running content checks..."
 
 # Backend checks
 backend_names=$(zip_list "$BACKEND_ZIP")
@@ -61,7 +65,7 @@ if ! printf "%s\n" "$backend_names" | grep -xq 'index.php'; then
   fail "$BACKEND_ZIP must contain index.php at the archive root"
 fi
 
-echo "OK: $BACKEND_ZIP passed basic checks"
+log_success "$BACKEND_ZIP passed basic checks"
 
 # Frontend checks
 frontend_names=$(zip_list "$FRONTEND_ZIP")
@@ -86,7 +90,7 @@ if printf "%s\n" "$frontend_names" | grep -E -q '(^|/)\.DS_Store$'; then
   fail "$FRONTEND_ZIP contains .DS_Store (forbidden)"
 fi
 
-echo "OK: $FRONTEND_ZIP passed basic checks"
+log_success "$FRONTEND_ZIP passed basic checks"
 
 echo
-echo "All checks passed."
+log_success "All checks passed."

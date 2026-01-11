@@ -17,7 +17,7 @@ existing_pids=$(collect_pids_from_file "$PID_FILE")
 if [ -n "$existing_pids" ]; then
   for existing in $existing_pids; do
     if kill -0 "$existing" >/dev/null 2>&1; then
-      echo "[dev-frontend] already running (pid $existing)"
+      log_warn "[dev-frontend] already running (pid $existing)"
       exit 0
     fi
   done
@@ -26,19 +26,19 @@ fi
 
 if port_in_use "$DEV_FRONTEND_PORT"; then
   listeners=$(pids_on_port "$DEV_FRONTEND_PORT")
-  echo "ERROR: port ${DEV_FRONTEND_PORT} already in use by PID(s): ${listeners:-unknown}. Maybe another dev server is running."
+  log_error "port ${DEV_FRONTEND_PORT} already in use by PID(s): ${listeners:-unknown}. Maybe another dev server is running."
   exit 2
 fi
 
 cd "$ROOT_DIR/$DEV_FRONTEND_DIR"
-echo "[dev-frontend] launching npm start"
+log_step "[dev-frontend] launching npm start"
 nohup npm start >"$LOG_FILE" 2>&1 &
 pid=$!
 sleep 0.5
 
 if wait_for_frontend_ready && kill -0 "$pid" >/dev/null 2>&1; then
   write_pid_file "$pid" "$DEV_FRONTEND_PORT" "$PID_FILE"
-  echo "[dev-frontend] started (pid $pid)"
+  log_success "[dev-frontend] started (pid $pid)"
   exit 0
 fi
 
@@ -49,5 +49,5 @@ if kill -0 "$pid" >/dev/null 2>&1; then
     kill -9 "$pid" >/dev/null 2>&1 || true
   fi
 fi
-echo "ERROR: frontend failed to become ready at $(frontend_url)/"
+log_error "frontend failed to become ready at $(frontend_url)/"
 exit 3
