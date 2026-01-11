@@ -46,6 +46,10 @@ This document covers public-facing features, their implementation, and why they 
 - **What:** Interactive seat selection for seating-enabled events.
 - **How:** `EventSeatingModal.js` fetches `/api/seating/event/:eventId`, renders `SeatingChart.js`, and submits `POST /api/seat-requests`. Seat availability is enforced by `frontend/src/utils/seatAvailability.js` and backend conflict checks/transactions.
 - **Why:** Paid reservations without double-booking.
+### Mobile seat-selection mode
+- **What:** A mobile-first layout that guarantees a usable seating map viewport and always-visible primary actions.
+- **How:** `EventSeatingModal.js` enables mobile mode when seat selection is active and `(max-width: 640px)` or coarse pointer conditions match; it clamps the map viewport height and constrains the action bar with internal scroll. Event details are collapsed by default behind a toggle with `aria-expanded`.
+- **Why:** Large accessibility font sizes on mobile must not obscure the map or action buttons.
 
 ## Payment links in seat requests
 - **What:** Payment CTA and fine print for eligible events.
