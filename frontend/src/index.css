@@ -162,6 +162,54 @@ a:focus, button:focus, iframe:focus {
   overflow: auto;
 }
 
+.seatingMapViewport {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+}
+
+.seatingMapCanvasWrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.seat-selection-mobile .seatingMapViewport {
+  height: clamp(240px, 55vh, 560px);
+  min-height: 240px;
+}
+
+.seat-selection-mobile .seat-map-column {
+  min-height: 0;
+}
+
+.seat-selection-mobile .seat-legend-panel {
+  max-height: 180px;
+}
+
+.seat-selection-mobile .seat-action-bar {
+  max-height: 32vh;
+  overflow-y: auto;
+}
+
+.seat-selection-mobile .seat-event-details-panel {
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.seat-selection-mobile .seat-event-details-panel.is-collapsed {
+  max-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 @media print {
   * {
     color: #000 !important;
