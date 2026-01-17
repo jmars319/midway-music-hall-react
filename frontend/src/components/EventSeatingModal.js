@@ -484,6 +484,16 @@ export default function EventSeatingModal({ event, onClose }) {
   const paymentSeatLimit = paymentOption?.limit_seats ?? 2;
   const showPaymentPanel = showContactForm && paymentOption && !paymentPanelDismissed;
   const paymentOverLimit = showPaymentPanel && selectedSeats.length > paymentSeatLimit;
+  const legendList = (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+      {legendItems.map((item) => (
+        <div className="flex items-center gap-2 min-w-0" key={item.key}>
+          <span className={`w-6 h-6 rounded ${item.className}`} />
+          <span className="text-sm text-gray-100 break-words">{item.label}</span>
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4" role="presentation">
@@ -863,18 +873,19 @@ export default function EventSeatingModal({ event, onClose }) {
                       Fit seats to screen
                     </button>
                   </div>
+                  {isMobileSeatMode && (
+                    <details className="seat-legend-panel seat-legend-panel--mobile bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full">
+                      <summary className="seat-legend-toggle font-semibold text-white">Legend</summary>
+                      <div className="mt-3 seat-legend-content">{legendList}</div>
+                    </details>
+                  )}
                 </div>
-                <aside className="bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-72 flex-shrink-0 max-h-[320px] xl:max-h-[calc(100vh-10rem)] overflow-y-auto seat-legend-panel">
-                  <div className="font-semibold mb-3 text-white">Legend</div>
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                    {legendItems.map((item) => (
-                      <div className="flex items-center gap-2 min-w-0" key={item.key}>
-                        <span className={`w-6 h-6 rounded ${item.className}`} />
-                        <span className="text-sm text-gray-100 break-words">{item.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </aside>
+                {!isMobileSeatMode && (
+                  <aside className="bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-72 flex-shrink-0 max-h-[320px] xl:max-h-[calc(100vh-10rem)] overflow-y-auto seat-legend-panel">
+                    <div className="font-semibold mb-3 text-white">Legend</div>
+                    {legendList}
+                  </aside>
+                )}
               </div>
             )}
           </div>

@@ -154,6 +154,7 @@ a:focus, button:focus, iframe:focus {
   height: 55vh;
   min-height: 320px;
   max-height: 520px;
+  touch-action: pan-x pan-y pinch-zoom;
 }
 
 .seat-map-scroll {
@@ -176,7 +177,7 @@ a:focus, button:focus, iframe:focus {
   height: 100%;
   overflow: auto;
   overscroll-behavior: contain;
-  touch-action: pan-x pan-y;
+  touch-action: pan-x pan-y pinch-zoom;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -191,6 +192,24 @@ a:focus, button:focus, iframe:focus {
 
 .seat-selection-mobile .seat-legend-panel {
   max-height: 180px;
+}
+
+.seat-selection-mobile .seat-legend-panel--mobile {
+  max-height: none;
+}
+
+.seat-legend-toggle {
+  cursor: pointer;
+  list-style: none;
+}
+
+.seat-legend-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.seat-legend-content {
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .seat-selection-mobile .seat-action-bar {
