@@ -77,6 +77,14 @@ const DEFAULT_CONTENT = {
     mark: null,
     default_event: null,
   },
+  announcement: {
+    enabled: false,
+    message: '',
+    label: '',
+    link_url: '',
+    link_text: '',
+    severity: 'info',
+  },
   settings: {
     beach_price_label: '',
     beach_price_note: '',
@@ -140,6 +148,10 @@ const normalizeSiteContent = (value) => {
     social: { ...DEFAULT_CONTENT.social, ...(safe.social || {}) },
     review: { ...DEFAULT_CONTENT.review, ...(safe.review || {}) },
     branding: { ...DEFAULT_CONTENT.branding, ...(safe.branding || {}) },
+    announcement: {
+      ...DEFAULT_CONTENT.announcement,
+      ...((safe.announcement && typeof safe.announcement === 'object') ? safe.announcement : {}),
+    },
     settings: { ...DEFAULT_CONTENT.settings, ...((safe.settings && typeof safe.settings === 'object') ? safe.settings : {}) },
   };
   normalized.contacts = Array.isArray(safe.contacts) ? safe.contacts : DEFAULT_CONTENT.contacts;
@@ -147,6 +159,10 @@ const normalizeSiteContent = (value) => {
   normalized.box_office_note = safe.box_office_note || DEFAULT_CONTENT.box_office_note;
   normalized.beach_price_label = normalized.settings.beach_price_label || safe.beach_price_label || '';
   normalized.beach_price_note = normalized.settings.beach_price_note || safe.beach_price_note || '';
+  normalized.announcement.enabled = Boolean(normalized.announcement.enabled);
+  normalized.announcement.severity = ['info', 'warning', 'urgent'].includes(normalized.announcement.severity)
+    ? normalized.announcement.severity
+    : 'info';
   return normalized;
 };
 

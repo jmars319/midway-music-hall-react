@@ -532,6 +532,22 @@ function normalize_door_time_input($value): ?string
     }
 }
 
+function build_event_start_datetime(?string $eventDate, ?string $eventTime, string $timezone): ?DateTimeImmutable
+{
+    if (!$eventDate || !$eventTime) {
+        return null;
+    }
+    $candidate = trim($eventDate . ' ' . $eventTime);
+    if ($candidate === '') {
+        return null;
+    }
+    try {
+        return new DateTimeImmutable($candidate, new DateTimeZone($timezone));
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
 function event_time_candidate(string $alias = 'e'): string
 {
     return "NULLIF(TRIM(SUBSTRING_INDEX({$alias}.event_time, '-', 1)), '')";
@@ -539,6 +555,7 @@ function event_time_candidate(string $alias = 'e'): string
 
 function event_start_expression(string $alias = 'e'): string
 {
+    // start_datetime is the canonical event start; keep it in sync with event_date/event_time/timezone.
     $timeCandidate = event_time_candidate($alias);
     $twentyFour = "STR_TO_DATE(CONCAT({$alias}.event_date, ' ', $timeCandidate), '%Y-%m-%d %H:%i:%s')";
     $twentyFourShort = "STR_TO_DATE(CONCAT({$alias}.event_date, ' ', $timeCandidate), '%Y-%m-%d %H:%i')";
@@ -2665,11 +2682,11 @@ function list_events(Request $request, ?string $scopeOverride = null): array
     }
     if ($hasArchivedColumn) {
         if ($archivedFilterRaw === '1') {
-            $conditions[] = 'e.archived_at IS NOT NULL';
+            $conditions[] = '(e.archived_at IS NOT NULL OR e.status = \'archived\')';
         } elseif ($archivedFilterRaw === 'all') {
             // no-op
         } else {
-            $conditions[] = 'e.archived_at IS NULL';
+            $conditions[] = '(e.archived_at IS NULL AND e.status != \'archived\')';
         }
     } else {
         if ($archivedFilterRaw === '1') {
@@ -3196,6 +3213,45 @@ $router->add('POST', '/api/admin/users', function (Request $request) {
     }
 });
 
+$router->add('POST', '/api/events/archive-past', function () {
+    try {
+        $pdo = Database::connection();
+        $hasArchivedColumn = events_table_has_column($pdo, 'archived_at');
+        $endExpr = event_end_expression('e');
+        $hasScheduleExpr = event_has_schedule_expression('e');
+        $conditions = [
+            'e.deleted_at IS NULL',
+            $hasScheduleExpr,
+            "{$endExpr} < NOW()",
+            "e.status = 'published'",
+            "e.visibility = 'public'",
+        ];
+        if ($hasArchivedColumn) {
+            $conditions[] = 'e.archived_at IS NULL';
+        } else {
+            $conditions[] = "e.status != 'archived'";
+        }
+        $where = 'WHERE ' . implode(' AND ', $conditions);
+        if ($hasArchivedColumn) {
+            $sql = "UPDATE events e SET archived_at = NOW(), status = 'archived', visibility = 'private' {$where}";
+        } else {
+            $sql = "UPDATE events e SET status = 'archived', visibility = 'private' {$where}";
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute();
+        record_audit('event.archive.auto', 'event', null, [
+            'count' => $stmt->rowCount(),
+            'has_archived_column' => $hasArchivedColumn,
+        ]);
+        Response::success(['archived' => $stmt->rowCount()]);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('POST /api/events/archive-past error: ' . $e->getMessage());
+        }
+        Response::error('Failed to auto-archive past events', 500);
+    }
+});
+
 $router->add('POST', '/api/events/:id/archive', function ($request, $params) {
     $targetId = (int) $params['id'];
     $pdo = Database::connection();
@@ -3714,17 +3770,26 @@ $router->add('POST', '/api/events', function (Request $request) {
         }
         $title = trim((string)($payload['title'] ?? $artist));
         $timezone = $payload['timezone'] ?? 'America/New_York';
+        $eventDate = isset($payload['event_date']) ? trim((string) $payload['event_date']) : null;
+        $eventTime = isset($payload['event_time']) ? trim((string) $payload['event_time']) : null;
+        $eventDate = $eventDate !== '' ? $eventDate : null;
+        $eventTime = $eventTime !== '' ? $eventTime : null;
         $startInput = $payload['start_datetime'] ?? null;
-        if (!$startInput && !empty($payload['event_date']) && !empty($payload['event_time'])) {
-            $startInput = $payload['event_date'] . ' ' . $payload['event_time'];
+        $startDt = null;
+        if ($eventDate && $eventTime) {
+            $startDt = build_event_start_datetime($eventDate, $eventTime, $timezone);
+            if (!$startDt) {
+                return Response::error('Invalid event_date or event_time value', 422);
+            }
+        } elseif ($startInput) {
+            try {
+                $startDt = new DateTimeImmutable($startInput, new DateTimeZone($timezone));
+            } catch (Throwable $e) {
+                return Response::error('Invalid event_date or event_time value', 422);
+            }
         }
-        if (!$startInput) {
+        if (!$startDt) {
             return Response::error('event_date and event_time are required', 422);
-        }
-        try {
-            $startDt = new DateTimeImmutable($startInput, new DateTimeZone($timezone));
-        } catch (Throwable $e) {
-            return Response::error('Invalid event_date or event_time value', 422);
         }
         $endInput = $payload['end_datetime'] ?? null;
         $endDt = null;
@@ -3746,6 +3811,14 @@ $router->add('POST', '/api/events', function (Request $request) {
         $ticketType = in_array($payload['ticket_type'] ?? 'general_admission', ['general_admission','reserved_seating','hybrid'], true) ? $payload['ticket_type'] : 'general_admission';
         $status = in_array($payload['status'] ?? 'draft', ['draft','published','archived'], true) ? $payload['status'] : 'draft';
         $visibility = in_array($payload['visibility'] ?? 'public', ['public','private'], true) ? $payload['visibility'] : 'public';
+        $hasArchivedColumn = events_table_has_column($pdo, 'archived_at');
+        $archivedAt = null;
+        if ($status === 'archived') {
+            $visibility = 'private';
+            if ($hasArchivedColumn) {
+                $archivedAt = mysql_now();
+            }
+        }
         $rawLayoutId = array_key_exists('layout_id', $payload) ? $payload['layout_id'] : null;
         $layoutId = normalize_layout_identifier($rawLayoutId);
         $rawRequestedVersion = array_key_exists('layout_version_id', $payload) ? $payload['layout_version_id'] : null;
@@ -3847,6 +3920,9 @@ $router->add('POST', '/api/events', function (Request $request) {
         if ($hasPaymentEnabledColumn) {
             $insertColumns['payment_enabled'] = $paymentEnabled;
         }
+        if ($hasArchivedColumn) {
+            $insertColumns['archived_at'] = $archivedAt;
+        }
         $insertColumns['seat_request_email_override'] = $seatRequestOverride;
         $insertColumns['change_note'] = 'created via API';
         $insertColumns['created_by'] = 'api';
@@ -3916,16 +3992,40 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         }
         $title = trim((string)($payload['title'] ?? $existing['title'] ?? $artist));
         $timezone = $payload['timezone'] ?? $existing['timezone'] ?? 'America/New_York';
+        $eventDateInput = array_key_exists('event_date', $payload) ? trim((string) $payload['event_date']) : null;
+        $eventTimeInput = array_key_exists('event_time', $payload) ? trim((string) $payload['event_time']) : null;
+        $eventDate = $eventDateInput !== null ? ($eventDateInput !== '' ? $eventDateInput : null) : ($existing['event_date'] ?? null);
+        $eventTime = $eventTimeInput !== null ? ($eventTimeInput !== '' ? $eventTimeInput : null) : ($existing['event_time'] ?? null);
         $startInput = $payload['start_datetime'] ?? null;
-        if (!$startInput && !empty($payload['event_date']) && !empty($payload['event_time'])) {
-            $startInput = $payload['event_date'] . ' ' . $payload['event_time'];
+        $shouldRecomputeStart = array_key_exists('event_date', $payload)
+            || array_key_exists('event_time', $payload)
+            || array_key_exists('timezone', $payload)
+            || array_key_exists('start_datetime', $payload);
+        $startDt = null;
+        if ($shouldRecomputeStart) {
+            if ($eventDate && $eventTime) {
+                $startDt = build_event_start_datetime($eventDate, $eventTime, $timezone);
+                if (!$startDt && !$allowMissingSchedule) {
+                    return Response::error('Invalid event_date or event_time value', 422);
+                }
+            } elseif ($startInput) {
+                try {
+                    $startDt = new DateTimeImmutable($startInput, new DateTimeZone($timezone));
+                } catch (Throwable $e) {
+                    return Response::error('Invalid event_date or event_time value', 422);
+                }
+            }
+        } else {
+            try {
+                $startDt = $existing['start_datetime']
+                    ? new DateTimeImmutable($existing['start_datetime'], new DateTimeZone($timezone))
+                    : null;
+            } catch (Throwable $e) {
+                return Response::error('Invalid event_date or event_time value', 422);
+            }
         }
-        try {
-            $startDt = $startInput
-                ? new DateTimeImmutable($startInput, new DateTimeZone($timezone))
-                : ($existing['start_datetime'] ? new DateTimeImmutable($existing['start_datetime'], new DateTimeZone($timezone)) : null);
-        } catch (Throwable $e) {
-            return Response::error('Invalid event_date or event_time value', 422);
+        if (!$startDt && $eventDate && $eventTime) {
+            $startDt = build_event_start_datetime($eventDate, $eventTime, $timezone);
         }
         if (!$startDt && !$allowMissingSchedule) {
             return Response::error('event_date and event_time are required', 422);
@@ -3948,6 +4048,19 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $ticketType = in_array($payload['ticket_type'] ?? $existing['ticket_type'] ?? 'general_admission', ['general_admission','reserved_seating','hybrid'], true) ? ($payload['ticket_type'] ?? $existing['ticket_type']) : ($existing['ticket_type'] ?? 'general_admission');
         $status = in_array($payload['status'] ?? $existing['status'] ?? 'draft', ['draft','published','archived'], true) ? ($payload['status'] ?? $existing['status']) : ($existing['status'] ?? 'draft');
         $visibility = in_array($payload['visibility'] ?? $existing['visibility'] ?? 'public', ['public','private'], true) ? ($payload['visibility'] ?? $existing['visibility']) : ($existing['visibility'] ?? 'public');
+        $hasArchivedColumn = events_table_has_column($pdo, 'archived_at');
+        $archivedAt = $existing['archived_at'] ?? null;
+        $touchArchivedAt = false;
+        if ($hasArchivedColumn && array_key_exists('status', $payload)) {
+            if ($status === 'archived') {
+                $archivedAt = mysql_now();
+                $visibility = 'private';
+                $touchArchivedAt = true;
+            } else {
+                $archivedAt = null;
+                $touchArchivedAt = true;
+            }
+        }
         $seatingEnabled = array_key_exists('seating_enabled', $payload) ? (!empty($payload['seating_enabled']) ? 1 : 0) : (int) $existing['seating_enabled'];
         $existingLayoutId = normalize_layout_identifier($existing['layout_id'] ?? null);
         $existingLayoutVersionId = normalize_layout_identifier($existing['layout_version_id'] ?? null);
@@ -4037,6 +4150,8 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         }
         $contactPhoneNormalized = normalize_phone_number($contactPhoneRaw);
         $startString = $startDt ? $startDt->format('Y-m-d H:i:s') : null;
+        $resolvedEventDate = $startDt ? $startDt->format('Y-m-d') : ($eventDateInput !== null ? $eventDate : ($existing['event_date'] ?? null));
+        $resolvedEventTime = $startDt ? $startDt->format('H:i:s') : ($eventTimeInput !== null ? $eventTime : ($existing['event_time'] ?? null));
         $endString = $endDt ? $endDt->format('Y-m-d H:i:s') : null;
 
         $doorTimeInputProvided = array_key_exists('door_time', $payload);
@@ -4092,8 +4207,8 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             'start_datetime' => $startString,
             'end_datetime' => $endString,
             'door_time' => $doorTime,
-            'event_date' => $startDt ? $startDt->format('Y-m-d') : ($payload['event_date'] ?? $existing['event_date']),
-            'event_time' => $startDt ? $startDt->format('H:i:s') : ($payload['event_time'] ?? $existing['event_time']),
+            'event_date' => $resolvedEventDate,
+            'event_time' => $resolvedEventTime,
             'age_restriction' => $valueOrExisting('age_restriction', 'normalize_nullable_text'),
             'status' => $status,
             'visibility' => $visibility,
@@ -4108,6 +4223,9 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         ];
         if ($hasContactNotesColumn) {
             $updateColumns['contact_notes'] = $valueOrExisting('contact_notes', 'normalize_nullable_text');
+        }
+        if ($hasArchivedColumn && $touchArchivedAt) {
+            $updateColumns['archived_at'] = $archivedAt;
         }
         if ($hasPaymentEnabledColumn && $paymentEnabled !== null) {
             $updateColumns['payment_enabled'] = $paymentEnabled;
@@ -5624,6 +5742,21 @@ $router->add('GET', '/api/site-content', function () {
         ];
         $beachPriceLabel = trim((string)($settings['beach_price_label'] ?? ''));
         $beachPriceNote = trim((string)($settings['beach_price_note'] ?? ''));
+        $announcementRaw = decode_settings_json($settings, 'announcement_banner', []);
+        $announcement = [
+            'enabled' => !empty($announcementRaw['enabled']),
+            'message' => trim((string)($announcementRaw['message'] ?? '')),
+            'label' => trim((string)($announcementRaw['label'] ?? '')),
+            'link_url' => trim((string)($announcementRaw['link_url'] ?? '')),
+            'link_text' => trim((string)($announcementRaw['link_text'] ?? '')),
+            'severity' => in_array(($announcementRaw['severity'] ?? 'info'), ['info', 'warning', 'urgent'], true)
+                ? $announcementRaw['severity']
+                : 'info',
+        ];
+        if ($announcement['link_url'] === '' || $announcement['link_text'] === '') {
+            $announcement['link_url'] = '';
+            $announcement['link_text'] = '';
+        }
 
         Response::success([
             'content' => [
@@ -5636,6 +5769,7 @@ $router->add('GET', '/api/site-content', function () {
                 'social' => $social,
                 'review' => $review,
                 'branding' => $branding,
+                'announcement' => $announcement,
                 'beach_price_label' => $beachPriceLabel,
                 'beach_price_note' => $beachPriceNote,
                 'settings' => [

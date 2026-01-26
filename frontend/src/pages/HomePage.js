@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Navigation from '../components/Navigation';
+import AnnouncementBanner from '../components/AnnouncementBanner';
 import Hero from '../components/Hero';
 import FeaturedEvents from '../components/FeaturedEvents';
 import RecurringEvents from '../components/RecurringEvents';
@@ -520,6 +521,7 @@ export default function HomePage({ onAdminClick, onNavigate }) {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <Navigation />
+      <AnnouncementBanner />
 
       <main id="main" role="main">
         <Hero />

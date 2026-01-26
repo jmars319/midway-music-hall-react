@@ -599,7 +599,7 @@ export default function EventsModule(){
   };
 
   const normalizeEventStatus = (event) => (event?.status || 'draft').toLowerCase();
-  const isEventArchived = (event) => Boolean(event?.archived_at);
+  const isEventArchived = (event) => Boolean(event?.archived_at) || (event?.status || '').toLowerCase() === 'archived';
   const buildSearchText = (event, extras = []) => {
     const haystack = [
       event.artist_name,
@@ -972,6 +972,7 @@ export default function EventsModule(){
     const eventStatus = event.status || 'draft';
     const isArchived = Boolean(event.archived_at);
     const isPublished = eventStatus === 'published';
+    const statusValue = isArchived ? 'archived' : (eventStatus === 'published' ? 'published' : 'draft');
     const statusClasses = isPublished
       ? 'bg-green-500/15 text-green-200 border border-green-500/30'
       : isArchived
@@ -1103,6 +1104,18 @@ export default function EventsModule(){
         </div>
 
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+          <div className="flex items-center gap-2 bg-gray-900/60 border border-gray-800 rounded px-3 py-2">
+            <label className="text-[10px] uppercase tracking-wide text-gray-400">Status</label>
+            <select
+              value={statusValue}
+              onChange={(e) => handleStatusChange(event, e.target.value, statusValue, e.target)}
+              className="bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700"
+            >
+              <option value="draft">Draft</option>
+              <option value="published">Published</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
           <button
             onClick={() => duplicateEvent(event)}
             className="inline-flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded"
@@ -1111,10 +1124,10 @@ export default function EventsModule(){
           </button>
           {isArchived ? (
             <button
-              onClick={() => restoreEvent(event)}
+              onClick={() => handleStatusChange(event, 'draft', statusValue)}
               className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
             >
-              <ArchiveIcon className="h-4 w-4" /> Restore
+              <ArchiveIcon className="h-4 w-4" /> Restore Draft
             </button>
           ) : (
             <>
@@ -1885,12 +1898,15 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       const data = await res.json();
       if (data && data.success) {
         fetchEvents();
+        return true;
       } else {
         alert(data?.message || failureMessage);
+        return false;
       }
     } catch (err) {
       console.error('Event update error', err);
       alert(failureMessage);
+      return false;
     }
   };
 
@@ -1907,37 +1923,74 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
   };
 
   const archiveEvent = async (event) => {
-    if (!window.confirm(`Archive "${event.artist_name || event.title || 'this event'}"?`)) return;
+    if (!window.confirm(`Archive "${event.artist_name || event.title || 'this event'}"?`)) {
+      return false;
+    }
     try {
       const res = await fetch(`${API_BASE}/events/${event.id}/archive`, { method: 'POST' });
       const data = await res.json();
       if (data && data.success) {
         fetchEvents();
+        return true;
       } else {
         alert(data?.message || 'Failed to archive event');
+        return false;
       }
     } catch (err) {
       console.error('Archive error', err);
       alert('Failed to archive event');
+      return false;
     }
   };
 
-  const restoreEvent = async (event) => {
+  const restoreEvent = async (event, nextStatus = 'draft') => {
+    const statusValue = nextStatus === 'published' ? 'published' : 'draft';
+    const visibilityValue = statusValue === 'published' ? 'public' : 'private';
     try {
       const res = await fetch(`${API_BASE}/events/${event.id}/restore`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'draft', visibility: 'private' }),
+        body: JSON.stringify({ status: statusValue, visibility: visibilityValue }),
       });
       const data = await res.json();
       if (data && data.success) {
         fetchEvents();
+        return true;
       } else {
         alert(data?.message || 'Failed to restore event');
+        return false;
       }
     } catch (err) {
       console.error('Restore error', err);
       alert('Failed to restore event');
+      return false;
+    }
+  };
+
+  const handleStatusChange = async (event, nextStatus, currentStatus, selectEl) => {
+    if (nextStatus === currentStatus) {
+      return;
+    }
+    const eventTitle = event.artist_name || event.title || 'this event';
+    let success = false;
+    if (nextStatus === 'archived') {
+      success = await archiveEvent(event);
+    } else if (currentStatus === 'archived') {
+      const targetLabel = nextStatus === 'published' ? 'Published (public)' : 'Draft (private)';
+      if (!window.confirm(`Restore "${eventTitle}" to ${targetLabel}?`)) {
+        if (selectEl) {
+          selectEl.value = currentStatus;
+        }
+        return;
+      }
+      success = await restoreEvent(event, nextStatus);
+    } else if (nextStatus === 'published') {
+      success = await updateEventFields(event.id, { status: 'published', visibility: 'public' }, 'Failed to publish event');
+    } else {
+      success = await updateEventFields(event.id, { status: 'draft', visibility: 'private' }, 'Failed to unpublish event');
+    }
+    if (!success && selectEl) {
+      selectEl.value = currentStatus;
     }
   };
 

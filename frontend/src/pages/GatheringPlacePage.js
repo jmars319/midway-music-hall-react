@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Navigation from '../components/Navigation';
+import AnnouncementBanner from '../components/AnnouncementBanner';
 import Hero from '../components/Hero';
 import Schedule from '../components/Schedule';
 import ArtistSuggestion from '../components/ArtistSuggestion';
@@ -68,6 +69,7 @@ export default function GatheringPlacePage({ onAdminClick, onNavigate }) {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <Navigation />
+      <AnnouncementBanner />
 
       <main id="main" role="main">
         <Hero variant="tgp" ctaTarget="schedule" />

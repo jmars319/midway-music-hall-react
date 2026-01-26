@@ -20,6 +20,15 @@ const emptyLesson = () => ({
   description: '',
 });
 
+const emptyAnnouncement = () => ({
+  enabled: false,
+  message: '',
+  label: '',
+  link_url: '',
+  link_text: '',
+  severity: 'info',
+});
+
 const parseJsonSetting = (value, fallback) => {
   if (!value) return fallback;
   try {
@@ -27,6 +36,24 @@ const parseJsonSetting = (value, fallback) => {
     return Array.isArray(parsed) ? parsed : fallback;
   } catch (err) {
     return fallback;
+  }
+};
+
+const parseAnnouncementSetting = (value) => {
+  if (!value) return emptyAnnouncement();
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object') {
+      return emptyAnnouncement();
+    }
+    return {
+      ...emptyAnnouncement(),
+      ...parsed,
+      enabled: Boolean(parsed.enabled),
+      severity: ['info', 'warning', 'urgent'].includes(parsed.severity) ? parsed.severity : 'info',
+    };
+  } catch (err) {
+    return emptyAnnouncement();
   }
 };
 
@@ -54,6 +81,7 @@ export default function SiteContentModule() {
   });
   const [contacts, setContacts] = useState([emptyContact()]);
   const [lessons, setLessons] = useState([emptyLesson()]);
+  const [announcement, setAnnouncement] = useState(emptyAnnouncement());
 
   const loadSettings = async () => {
     setLoading(true);
@@ -85,6 +113,7 @@ export default function SiteContentModule() {
         setContacts(parsedContacts.length ? parsedContacts : [emptyContact()]);
         const parsedLessons = parseJsonSetting(settings.lessons_json, []);
         setLessons(parsedLessons.length ? parsedLessons : [emptyLesson()]);
+        setAnnouncement(parseAnnouncementSetting(settings.announcement_banner));
       } else {
         setError('Unable to load site content settings.');
       }
@@ -129,6 +158,9 @@ export default function SiteContentModule() {
   const removeLesson = (index) => {
     setLessons((prev) => prev.filter((_, idx) => idx !== index));
   };
+  const updateAnnouncementField = (field, value) => {
+    setAnnouncement((prev) => ({ ...prev, [field]: value }));
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -157,10 +189,28 @@ export default function SiteContentModule() {
         description: lesson.description.trim(),
       }))
       .filter((lesson) => lesson.title);
+    const cleanedAnnouncement = {
+      enabled: Boolean(announcement.enabled),
+      message: announcement.message.trim(),
+      label: announcement.label.trim(),
+      link_url: announcement.link_url.trim(),
+      link_text: announcement.link_text.trim(),
+      severity: ['info', 'warning', 'urgent'].includes(announcement.severity) ? announcement.severity : 'info',
+    };
+    if (cleanedAnnouncement.enabled && !cleanedAnnouncement.message) {
+      setError('Announcement message is required when enabled.');
+      setSaving(false);
+      return;
+    }
+    if (!cleanedAnnouncement.link_url || !cleanedAnnouncement.link_text) {
+      cleanedAnnouncement.link_url = '';
+      cleanedAnnouncement.link_text = '';
+    }
     const payload = {
       ...form,
       site_contacts_json: JSON.stringify(sanitizedContacts),
       lessons_json: JSON.stringify(sanitizedLessons),
+      announcement_banner: JSON.stringify(cleanedAnnouncement),
     };
     try {
       const res = await fetch(`${API_BASE}/settings`, {
@@ -259,6 +309,73 @@ export default function SiteContentModule() {
                 <label className="block text-sm text-gray-300 mb-1">Box office / reservation note</label>
                 <textarea name="box_office_note" value={form.box_office_note} onChange={handleFieldChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" rows="2" />
                 <p className="text-xs text-gray-400 mt-1">Displayed in the footer and “First Time Here” section.</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="bg-gray-800 rounded-xl border border-purple-500/30 p-6 space-y-4">
+            <div>
+              <h2 className="text-xl font-semibold text-white">Announcement banner</h2>
+              <p className="text-sm text-gray-400">Optional banner for weather alerts, ops updates, or major announcements.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="flex items-center gap-2 text-sm text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={announcement.enabled}
+                  onChange={(e) => updateAnnouncementField('enabled', e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-600 bg-gray-800"
+                />
+                Enable announcement banner
+              </label>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Severity</label>
+                <select
+                  value={announcement.severity}
+                  onChange={(e) => updateAnnouncementField('severity', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                >
+                  <option value="info">Info</option>
+                  <option value="warning">Warning</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Label (optional)</label>
+                <input
+                  value={announcement.label}
+                  onChange={(e) => updateAnnouncementField('label', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="Weather Update"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm text-gray-300 mb-1">Message</label>
+                <textarea
+                  value={announcement.message}
+                  onChange={(e) => updateAnnouncementField('message', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  rows="2"
+                  placeholder="We are opening late tonight due to weather."
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Link URL (optional)</label>
+                <input
+                  value={announcement.link_url}
+                  onChange={(e) => updateAnnouncementField('link_url', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="https://midwaymusichall.net"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Link text (optional)</label>
+                <input
+                  value={announcement.link_text}
+                  onChange={(e) => updateAnnouncementField('link_text', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="Read the update"
+                />
               </div>
             </div>
           </section>

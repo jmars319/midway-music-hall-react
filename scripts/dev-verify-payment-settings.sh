@@ -316,7 +316,7 @@ JSON
   response=$(post_json "POST" "/events" "$payload")
   event_id=$(json_field "$response" id)
   created_event_ids+=("$event_id")
-  log_info "[payment-verify] created event ${event_id} (${label})"
+  log_info "[payment-verify] created event ${event_id} (${label})" >&2
   printf '%s\n' "$event_id"
 }
 

@@ -148,6 +148,16 @@ const parseSeatSnapshot = (snapshot) => {
   return [];
 };
 
+const escapeHtml = (value) => {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
 const buildDisplaySeatList = (request) => {
   const seats = parseSeats(request.selected_seats || []);
   if (!seats.length) return [];
@@ -291,6 +301,176 @@ export default function SeatRequestsModule() {
     });
     return Array.from(map.values());
   }, [events, requests]);
+
+  const openPrintView = useCallback(() => {
+    const eventId = filters.eventId && filters.eventId !== 'all' ? Number(filters.eventId) : null;
+    const selectedEvent = eventId ? events.find((ev) => Number(ev.id) === eventId) : null;
+    const showEventColumn = !selectedEvent;
+    const printableRequests = visibleRequests;
+    const eventTitle = selectedEvent ? (selectedEvent.artist_name || selectedEvent.title || `Event ${selectedEvent.id}`) : 'All Events';
+    const eventDateValue = selectedEvent
+      ? (selectedEvent.start_datetime
+        || (selectedEvent.event_date ? `${selectedEvent.event_date} ${selectedEvent.event_time || ''}`.trim() : null))
+      : null;
+    const eventDateLabel = eventDateValue ? formatDateTime(eventDateValue) : '';
+    const timestamp = new Date().toLocaleString();
+    const win = window.open('', 'mmh-seat-requests-print');
+    if (!win) {
+      alert('Pop-up blocked. Please allow pop-ups to print seat requests.');
+      return;
+    }
+    const rowsHtml = printableRequests.length
+      ? printableRequests.map((req) => {
+        const seatLabels = buildDisplaySeatList(req);
+        const seatList = seatLabels.length ? seatLabels.join(', ') : '';
+        const seatCount = req.total_seats || seatLabels.length || '';
+        const contactLines = [req.customer_phone, req.customer_email].filter(Boolean).map(escapeHtml).join('<br />');
+        const notes = [req.special_requests, req.staff_notes].filter(Boolean).map(escapeHtml).join('<br />');
+        const createdAt = formatDateTime(req.created_at);
+        const statusLabel = escapeHtml(req.status || '');
+        const eventLabel = escapeHtml(req.event_title || '');
+        return `
+          <tr>
+            ${showEventColumn ? `<td>${eventLabel}</td>` : ''}
+            <td>${escapeHtml(req.customer_name || '')}</td>
+            <td class="contact-cell">${contactLines}</td>
+            <td>${escapeHtml(seatCount)}</td>
+            <td>${escapeHtml(seatList)}</td>
+            <td>${statusLabel}</td>
+            <td>${escapeHtml(createdAt)}</td>
+            <td>${notes}</td>
+          </tr>
+        `;
+      }).join('')
+      : `<tr><td colspan="${showEventColumn ? 8 : 7}" class="empty">No seat requests match the current filters.</td></tr>`;
+
+    const html = `
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Seat Requests - ${escapeHtml(eventTitle)}</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        font-family: "Helvetica Neue", Arial, sans-serif;
+        margin: 24px;
+        color: #111827;
+        background: #ffffff;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 6px 0;
+      }
+      .meta {
+        font-size: 12px;
+        margin-bottom: 16px;
+        color: #374151;
+      }
+      .toolbar {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      .toolbar button {
+        padding: 6px 12px;
+        border: 1px solid #1f2937;
+        background: #111827;
+        color: #ffffff;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .toolbar label {
+        font-size: 12px;
+        color: #1f2937;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      th, td {
+        border: 1px solid #e5e7eb;
+        padding: 6px 8px;
+        vertical-align: top;
+      }
+      th {
+        text-align: left;
+        background: #f3f4f6;
+        font-weight: 600;
+      }
+      tr:nth-child(even) td {
+        background: #fafafa;
+      }
+      .empty {
+        text-align: center;
+        padding: 12px;
+        color: #6b7280;
+      }
+      .hide-contact .contact-cell,
+      .hide-contact .contact-col {
+        display: none;
+      }
+      @media print {
+        .toolbar {
+          display: none;
+        }
+        body {
+          margin: 0.5in;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar no-print">
+      <button onclick="window.print()">Print</button>
+      <button onclick="window.close()">Close</button>
+      <label>
+        <input type="checkbox" id="toggle-contact" />
+        Hide contact info
+      </label>
+    </div>
+    <h1>Seat Requests - ${escapeHtml(eventTitle)}</h1>
+    <div class="meta">
+      ${selectedEvent ? `Event date: ${escapeHtml(eventDateLabel)}<br />` : ''}
+      Printed: ${escapeHtml(timestamp)}
+    </div>
+    <table>
+      <thead>
+        <tr>
+          ${showEventColumn ? '<th>Event</th>' : ''}
+          <th>Name</th>
+          <th class="contact-col">Contact</th>
+          <th>Seats</th>
+          <th>Seat List</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsHtml}
+      </tbody>
+    </table>
+    <script>
+      const toggle = document.getElementById('toggle-contact');
+      if (toggle) {
+        toggle.addEventListener('change', (event) => {
+          document.body.classList.toggle('hide-contact', event.target.checked);
+        });
+      }
+    </script>
+  </body>
+</html>
+`;
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+  }, [events, filters.eventId, visibleRequests]);
 
   const deleteRequest = async (id) => {
     if (!window.confirm('Delete this seat request?')) return;
@@ -716,6 +896,12 @@ export default function SeatRequestsModule() {
             className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded text-sm hover:bg-purple-700"
           >
             <Plus className="h-4 w-4" /> New Manual Reservation
+          </button>
+          <button
+            onClick={openPrintView}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-700 text-white rounded text-sm hover:bg-gray-600"
+          >
+            <Info className="h-4 w-4" /> Print Seat Requests
           </button>
           <button
             onClick={refresh}

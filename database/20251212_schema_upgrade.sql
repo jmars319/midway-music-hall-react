@@ -93,6 +93,14 @@ BEGIN
 END$$
 DELIMITER ;
 
+-- BUSINESS SETTINGS (CMS key/value store)
+CREATE TABLE IF NOT EXISTS business_settings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  setting_key VARCHAR(191) UNIQUE NOT NULL,
+  setting_value LONGTEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 -- MEDIA TABLE ENHANCEMENTS
 CALL add_column_if_missing(@TARGET_DB, 'media', 'width', 'width INT DEFAULT NULL AFTER file_size');
 CALL add_column_if_missing(@TARGET_DB, 'media', 'height', 'height INT DEFAULT NULL AFTER width');
@@ -177,7 +185,8 @@ CALL add_column_if_missing(@TARGET_DB, 'events', 'event_date', 'event_date DATE 
 CALL add_column_if_missing(@TARGET_DB, 'events', 'event_time', 'event_time TIME DEFAULT NULL AFTER event_date');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'age_restriction', 'age_restriction VARCHAR(50) DEFAULT ''All Ages'' AFTER event_time');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'status', 'status ENUM(''draft'',''published'',''archived'') DEFAULT ''draft'' AFTER age_restriction');
-CALL add_column_if_missing(@TARGET_DB, 'events', 'visibility', 'visibility ENUM(''public'',''private'') DEFAULT ''public'' AFTER status');
+CALL add_column_if_missing(@TARGET_DB, 'events', 'archived_at', 'archived_at DATETIME NULL AFTER status');
+CALL add_column_if_missing(@TARGET_DB, 'events', 'visibility', 'visibility ENUM(''public'',''private'') DEFAULT ''public'' AFTER archived_at');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'publish_at', 'publish_at DATETIME DEFAULT NULL AFTER visibility');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'layout_id', 'layout_id INT DEFAULT NULL AFTER publish_at');
 CALL add_column_if_missing(@TARGET_DB, 'events', 'layout_version_id', 'layout_version_id BIGINT DEFAULT NULL AFTER layout_id');
@@ -198,6 +207,7 @@ CALL add_column_if_missing(@TARGET_DB, 'events', 'updated_at', 'updated_at TIMES
 CALL add_column_if_missing(@TARGET_DB, 'events', 'deleted_at', 'deleted_at DATETIME DEFAULT NULL AFTER updated_at');
 
 CALL add_index_if_missing(@TARGET_DB, 'events', 'idx_events_start', 'ADD INDEX idx_events_start (start_datetime)');
+CALL add_index_if_missing(@TARGET_DB, 'events', 'idx_events_archived_at', 'ADD INDEX idx_events_archived_at (archived_at)');
 CALL add_index_if_missing(@TARGET_DB, 'events', 'idx_events_status', 'ADD INDEX idx_events_status (status)');
 CALL add_index_if_missing(@TARGET_DB, 'events', 'idx_events_venue', 'ADD INDEX idx_events_venue (venue_code)');
 CALL add_index_if_missing(@TARGET_DB, 'events', 'idx_events_slug', 'ADD UNIQUE INDEX idx_events_slug (slug)');

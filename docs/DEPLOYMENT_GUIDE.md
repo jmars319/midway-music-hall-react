@@ -115,6 +115,8 @@ cd frontend && npm run lint
 cd frontend && npm run build
 bash ./scripts/dev-start.sh
 bash ./scripts/dev-verify-admin-api.sh
+bash ./scripts/dev-verify-event-reschedule.sh
+bash ./scripts/dev-verify-announcement-banner.sh
 bash ./scripts/dev-verify-payment-settings.sh
 bash ./scripts/dev-verify-seating-guardrails.sh
 bash ./scripts/dev-verify-recurring-events-api.sh
