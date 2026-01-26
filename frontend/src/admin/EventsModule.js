@@ -159,7 +159,7 @@ const normalizePaymentConfig = (config = {}) => ({
   provider_label: config.provider_label || '',
   button_text: config.button_text || 'Pay Online',
   payment_url: config.payment_url || '',
-  limit_seats: Number(config.limit_seats) > 0 ? Number(config.limit_seats) : 2,
+  limit_seats: Number(config.limit_seats) > 0 ? Number(config.limit_seats) : 6,
   over_limit_message: config.over_limit_message || '',
   fine_print: config.fine_print || '',
 });

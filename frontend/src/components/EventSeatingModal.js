@@ -481,7 +481,7 @@ export default function EventSeatingModal({ event, onClose }) {
     }
   };
 
-  const paymentSeatLimit = paymentOption?.limit_seats ?? 2;
+  const paymentSeatLimit = paymentOption?.limit_seats ?? 6;
   const showPaymentPanel = showContactForm && paymentOption && !paymentPanelDismissed;
   const paymentOverLimit = showPaymentPanel && selectedSeats.length > paymentSeatLimit;
   const legendList = (

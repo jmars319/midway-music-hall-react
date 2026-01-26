@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, RefreshCcw, Save } from 'lucide-react';
 import { API_BASE } from '../apiConfig';
 
-const DEFAULT_LIMIT = 2;
+const DEFAULT_LIMIT = 6;
 const scopeKey = (scope, categoryId) => (scope === 'category' ? `category-${categoryId}` : 'global');
 const defaultOverLimitCopy = (limit) => `For parties over ${limit} seats, please contact our staff to arrange payment.`;
 

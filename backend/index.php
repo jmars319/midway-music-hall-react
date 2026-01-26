@@ -579,7 +579,11 @@ function event_end_expression(string $alias = 'e', int $fallbackHours = 4): stri
 {
     $startExpr = event_start_expression($alias);
     $hours = max(1, $fallbackHours);
-    return "COALESCE({$alias}.end_datetime, DATE_ADD($startExpr, INTERVAL {$hours} HOUR))";
+    $endExpr = "{$alias}.end_datetime";
+    return "CASE
+        WHEN $endExpr IS NOT NULL AND $startExpr IS NOT NULL AND $endExpr < $startExpr THEN DATE_ADD($startExpr, INTERVAL {$hours} HOUR)
+        ELSE COALESCE($endExpr, DATE_ADD($startExpr, INTERVAL {$hours} HOUR))
+    END";
 }
 
 function event_has_schedule_expression(string $alias = 'e'): string
@@ -787,9 +791,9 @@ function fetch_payment_settings_rows(PDO $pdo): array
         $rows = $stmt->fetchAll() ?: [];
         foreach ($rows as &$row) {
             $row['enabled'] = !empty($row['enabled']);
-            $row['limit_seats'] = (int) ($row['limit_seats'] ?? 2);
+            $row['limit_seats'] = (int) ($row['limit_seats'] ?? 6);
             if ($row['limit_seats'] <= 0) {
-                $row['limit_seats'] = 2;
+                $row['limit_seats'] = 6;
             }
         }
         unset($row);
@@ -812,9 +816,9 @@ function load_payment_settings_lookup(PDO $pdo): array
         $stmt = $pdo->query('SELECT scope, category_id, enabled, provider_label, payment_url, button_text, limit_seats, over_limit_message, fine_print, updated_at FROM payment_settings');
         $rows = $stmt->fetchAll() ?: [];
         foreach ($rows as $row) {
-            $row['limit_seats'] = (int) ($row['limit_seats'] ?? 2);
+            $row['limit_seats'] = (int) ($row['limit_seats'] ?? 6);
             if ($row['limit_seats'] <= 0) {
-                $row['limit_seats'] = 2;
+                $row['limit_seats'] = 6;
             }
             if (($row['scope'] ?? 'category') === 'global') {
                 if ($lookup['global'] === null) {
@@ -856,9 +860,9 @@ function resolve_event_payment_option(array $event, array $lookup): ?array
     if ($paymentUrl === '') {
         return null;
     }
-    $limitSeats = (int) ($candidate['limit_seats'] ?? 2);
+    $limitSeats = (int) ($candidate['limit_seats'] ?? 6);
     if ($limitSeats <= 0) {
-        $limitSeats = 2;
+        $limitSeats = 6;
     }
     $buttonText = trim((string) ($candidate['button_text'] ?? ''));
     if ($buttonText === '') {
@@ -1570,14 +1574,20 @@ function resolve_event_end_datetime(array $event, int $fallbackHours = 4): ?Date
 {
     $tz = new DateTimeZone($event['timezone'] ?? 'America/New_York');
     $end = $event['end_datetime'] ?? null;
+    $start = resolve_event_start_datetime($event);
     if ($end) {
         try {
-            return new DateTimeImmutable($end, $tz);
+            $endDt = new DateTimeImmutable($end, $tz);
+            if ($start && $endDt < $start) {
+                $endDt = null;
+            }
+            if ($endDt) {
+                return $endDt;
+            }
         } catch (Throwable $e) {
             // fall through
         }
     }
-    $start = resolve_event_start_datetime($event);
     if ($start) {
         return $start->modify('+' . max(1, $fallbackHours) . ' hours');
     }
@@ -3497,7 +3507,7 @@ $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
             }
         }
         $enabled = !empty($payload['enabled']);
-        $limitSeats = (int) ($payload['limit_seats'] ?? 2);
+        $limitSeats = (int) ($payload['limit_seats'] ?? 6);
         if ($limitSeats <= 0) {
             $limitSeats = 2;
         }
@@ -3571,9 +3581,9 @@ $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
         $row = $fetch->fetch() ?: null;
         if ($row) {
             $row['enabled'] = !empty($row['enabled']);
-            $row['limit_seats'] = (int) ($row['limit_seats'] ?? 2);
+            $row['limit_seats'] = (int) ($row['limit_seats'] ?? 6);
             if ($row['limit_seats'] <= 0) {
-                $row['limit_seats'] = 2;
+                $row['limit_seats'] = 6;
             }
         }
         Response::success(['payment_setting' => $row]);
@@ -4037,6 +4047,9 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
                 : ($existing['end_datetime'] ? new DateTimeImmutable($existing['end_datetime'], new DateTimeZone($timezone)) : null);
         } catch (Throwable $e) {
             return Response::error('Invalid end_datetime value', 422);
+        }
+        if (!$endInput && $startDt && $endDt && $endDt < $startDt && $shouldRecomputeStart) {
+            $endDt = null;
         }
         $slugInput = $payload['slug'] ?? $existing['slug'] ?? null;
         $slugBase = slugify_string($slugInput ?? ($title . ($startDt ? '-' . $startDt->format('Ymd') : '')));

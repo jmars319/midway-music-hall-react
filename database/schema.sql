@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS payment_settings (
   provider_label VARCHAR(191) DEFAULT NULL,
   payment_url VARCHAR(500) DEFAULT NULL,
   button_text VARCHAR(191) DEFAULT 'Pay Online',
-  limit_seats INT NOT NULL DEFAULT 2,
+  limit_seats INT NOT NULL DEFAULT 6,
   over_limit_message TEXT,
   fine_print TEXT,
   created_by VARCHAR(191) DEFAULT NULL,
