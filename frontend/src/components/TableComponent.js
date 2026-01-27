@@ -5,6 +5,7 @@ import { buildSeatId, buildSeatLabel } from '../utils/seatLabelUtils';
 
 const shapeAliases = {
   'table-8-rect': 'table-8',
+  'table-7-rect': 'table-7',
 };
 
 const resolveTableSurfaceLabel = (row = {}, fallback = 'Table') => {
@@ -306,6 +307,25 @@ export default function TableComponent({
         {renderTableCenter(size * 0.6, size * 0.4, surfaceLabel || 'Table')}
         {[0, 1, 2].map(i => renderSeat(i + 1, startX + i * (seatSize + gap), topY, seatSize))}
         {[0, 1, 2].map(i => renderSeat(i + 4, startX + i * (seatSize + gap), bottomY, seatSize))}
+      </div>
+    );
+  }
+
+  // TABLE-7: Three on each side + one at the end
+  if (normalizedShape === 'table-7' || normalizedShape === 'table7') {
+    const seatSize = Math.min(26, Math.floor(size * 0.26));
+    const gap = Math.max(4, Math.floor(size * 0.04));
+    const topY = Math.max(seatSize / 2 + gap, Math.floor(size * 0.18));
+    const bottomY = size - topY;
+    const startX = (size - (3 * seatSize) - (2 * gap)) / 2 + seatSize / 2;
+    const endX = size - gap - seatSize / 2;
+
+    return (
+      <div style={{ width: size, height: size, position: 'relative' }}>
+        {renderTableCenter(size * 0.62, size * 0.38, surfaceLabel || 'Table')}
+        {[0, 1, 2].map(i => renderSeat(i + 1, startX + i * (seatSize + gap), topY, seatSize))}
+        {[0, 1, 2].map(i => renderSeat(i + 4, startX + i * (seatSize + gap), bottomY, seatSize))}
+        {renderSeat(7, endX, size / 2, seatSize)}
       </div>
     );
   }

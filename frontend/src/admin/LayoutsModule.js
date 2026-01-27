@@ -45,6 +45,7 @@ const tableShapes = [
   { value: 'high-top-2', label: '2-Seat High-Top', seats: 2 },
   { value: 'table-4', label: '4-Top Table', seats: 4 },
   { value: 'table-6', label: '6-Top Table', seats: 6 },
+  { value: 'table-7', label: '7-Top Table', seats: 7 },
   { value: 'table-8', label: '8-Top Table', seats: 8 },
   { value: 'round-6', label: 'Round Table (6)', seats: 6 },
   { value: 'round-8', label: 'Round Table (8)', seats: 8 },
@@ -71,6 +72,7 @@ const canvasPresets = [
 
 const quickObjects = [
   { key: 'rect-6', label: 'Rect Table (6)', element_type: 'table', table_shape: 'table-6', total_seats: 6, seat_type: 'general' },
+  { key: 'rect-7', label: 'Rect Table (7)', element_type: 'table', table_shape: 'table-7', total_seats: 7, seat_type: 'general' },
   { key: 'high-top-2', label: 'High-Top Table (2)', element_type: 'table', table_shape: 'high-top-2', total_seats: 2, seat_type: 'general', width: 110, height: 90 },
   { key: 'rect-8', label: 'Rect Table (8)', element_type: 'table', table_shape: 'table-8', total_seats: 8, seat_type: 'general' },
   { key: 'round-8', label: 'Round Table (8)', element_type: 'table', table_shape: 'round-8', total_seats: 8, seat_type: 'general' },

@@ -11,6 +11,7 @@ const tableShapes = [
   { value: 'high-top-2', label: '2-Seat High-Top', seats: 2 },
   { value: 'table-4', label: '4-Top Table', seats: 4 },
   { value: 'table-6', label: '6-Top Table', seats: 6 },
+  { value: 'table-7', label: '7-Top Table', seats: 7 },
   { value: 'table-8', label: '8-Top Table', seats: 8 },
   { value: 'round-6', label: 'Round Table (6)', seats: 6 },
   { value: 'round-8', label: 'Round Table (8)', seats: 8 },
