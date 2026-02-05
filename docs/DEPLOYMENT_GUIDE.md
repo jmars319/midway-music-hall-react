@@ -118,9 +118,11 @@ bash ./scripts/dev-verify-admin-api.sh
 bash ./scripts/dev-verify-event-reschedule.sh
 bash ./scripts/dev-verify-announcement-banner.sh
 bash ./scripts/dev-verify-payment-settings.sh
+bash ./scripts/dev-verify-paypal-hosted-buttons-api.sh
 bash ./scripts/dev-verify-seating-guardrails.sh
 bash ./scripts/dev-verify-recurring-events-api.sh
 bash ./scripts/dev-verify-event-images.sh
 bash ./scripts/dev-verify-clearable-fields.sh
+bash ./scripts/dev-verify-seat-request-event-name-sync.sh
 bash ./scripts/dev-stop.sh
 ```
