@@ -70,6 +70,12 @@ const formatDateTime = (value) => {
   return dt.toLocaleString();
 };
 
+const eventDisplayNameForRequest = (request = {}) =>
+  request.event_display_name ||
+  request.event_artist_name ||
+  request.event_title ||
+  (request.event_id ? `Event ${request.event_id}` : 'Unassigned requests');
+
 const toLocalInputValue = (value) => {
   if (!value) return '';
   const dt = new Date(value);
@@ -250,7 +256,7 @@ export default function SeatRequestsModule() {
         req.customer_name,
         req.customer_email,
         req.customer_phone,
-        req.event_title,
+        eventDisplayNameForRequest(req),
         req.special_requests,
         req.staff_notes,
       ]
@@ -269,7 +275,7 @@ export default function SeatRequestsModule() {
       if (!groups.has(key)) {
         groups.set(key, {
           key,
-          title: req.event_title || 'Unassigned requests',
+          title: eventDisplayNameForRequest(req),
           start: req.start_datetime,
           requests: [],
         });
@@ -294,8 +300,8 @@ export default function SeatRequestsModule() {
       if (req.event_id && !map.has(req.event_id)) {
         map.set(req.event_id, {
           id: req.event_id,
-          title: req.event_title || `Event ${req.event_id}`,
-          artist_name: req.event_title ? null : undefined,
+          title: eventDisplayNameForRequest(req) || `Event ${req.event_id}`,
+          artist_name: req.event_artist_name || null,
         });
       }
     });
@@ -328,7 +334,7 @@ export default function SeatRequestsModule() {
         const notes = [req.special_requests, req.staff_notes].filter(Boolean).map(escapeHtml).join('<br />');
         const createdAt = formatDateTime(req.created_at);
         const statusLabel = escapeHtml(req.status || '');
-        const eventLabel = escapeHtml(req.event_title || '');
+        const eventLabel = escapeHtml(eventDisplayNameForRequest(req) || '');
         return `
           <tr>
             ${showEventColumn ? `<td>${eventLabel}</td>` : ''}
@@ -796,7 +802,7 @@ export default function SeatRequestsModule() {
                   </td>
                   {!hideEventColumn && (
                     <td className="px-4 py-3 align-top">
-                      <div className={`text-sm ${isExpired ? 'text-gray-500 line-through' : 'text-white'}`}>{req.event_title || `Event ${req.event_id}`}</div>
+                      <div className={`text-sm ${isExpired ? 'text-gray-500 line-through' : 'text-white'}`}>{eventDisplayNameForRequest(req)}</div>
                       <div className={`text-xs ${isExpired ? 'text-gray-600 line-through' : 'text-gray-400'}`}>{formatDateTime(req.start_datetime)}</div>
                     </td>
                   )}
@@ -1015,7 +1021,7 @@ export default function SeatRequestsModule() {
           <div className="bg-gray-900 rounded-2xl max-w-4xl w-full border border-purple-500/30 shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
               <div>
-                <h3 className="text-xl font-semibold text-white">Seat request for {selectedRequest.event_title || `Event ${selectedRequest.event_id}`}</h3>
+                <h3 className="text-xl font-semibold text-white">Seat request for {eventDisplayNameForRequest(selectedRequest)}</h3>
                 <p className="text-sm text-gray-400">Submitted {formatDateTime(selectedRequest.created_at)}</p>
               </div>
               <button onClick={closeDetail} className="p-2 rounded hover:bg-gray-800 text-gray-300">
@@ -1574,7 +1580,9 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                 <div className="font-semibold text-white mb-3">Legend</div>
                 {legendItems.map((item) => (
                   <div className="flex items-center gap-2 text-sm text-gray-200 mb-2 last:mb-0" key={item.key}>
-                    <span className={`w-5 h-5 rounded ${item.className}`} />
+                    <span className={`relative w-5 h-5 rounded ${item.className}`}>
+                      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold">{item.cueText || ''}</span>
+                    </span>
                     <span>{item.label}</span>
                   </div>
                 ))}

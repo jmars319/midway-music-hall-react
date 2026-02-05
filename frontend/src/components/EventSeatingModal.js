@@ -8,6 +8,7 @@ import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/s
 import { CONTACT_LINK_CLASSES, formatPhoneHref } from '../utils/contactLinks';
 import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
+import { loadPayPalHostedButtonsSdk } from '../utils/paypalHostedButtons';
 
 const publicSeatLabel = (label = '') => {
   const safe = String(label || '').trim();
@@ -32,6 +33,7 @@ export default function EventSeatingModal({ event, onClose }) {
   const [showMobileEventDetails, setShowMobileEventDetails] = useState(false);
   const paymentOption = event?.payment_option || null;
   const [paymentPanelDismissed, setPaymentPanelDismissed] = useState(false);
+  const [paypalRenderError, setPaypalRenderError] = useState('');
   const [stagePosition, setStagePosition] = useState({ x: 50, y: 10 });
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
   const [canvasSettings, setCanvasSettings] = useState({ width: 1200, height: 800 });
@@ -482,13 +484,70 @@ export default function EventSeatingModal({ event, onClose }) {
   };
 
   const paymentSeatLimit = paymentOption?.limit_seats ?? 6;
+  const paymentProviderType = paymentOption?.provider_type === 'paypal_hosted_button' ? 'paypal_hosted_button' : 'external_link';
   const showPaymentPanel = showContactForm && paymentOption && !paymentPanelDismissed;
   const paymentOverLimit = showPaymentPanel && selectedSeats.length > paymentSeatLimit;
+  const paymentAvailableNotice = Boolean(paymentOption?.enabled ?? paymentOption);
+  const paypalContainerId = `paypal-container-${event.id}`;
+
+  useEffect(() => {
+    if (!showPaymentPanel) {
+      setPaypalRenderError('');
+    }
+  }, [showPaymentPanel]);
+
+  useEffect(() => {
+    if (!showPaymentPanel || paymentOverLimit || paymentProviderType !== 'paypal_hosted_button') {
+      return undefined;
+    }
+    const paypalConfig = paymentOption?.paypal || {};
+    const hostedButtonId = String(paypalConfig.hosted_button_id || '').trim();
+    const sdkClientId = String(paypalConfig.sdk_client_id || '').trim();
+    if (!hostedButtonId || !sdkClientId) {
+      setPaypalRenderError('PayPal is temporarily unavailable for this event.');
+      return undefined;
+    }
+    let cancelled = false;
+    const clearContainer = () => {
+      const container = document.getElementById(paypalContainerId);
+      if (container) {
+        container.innerHTML = '';
+      }
+    };
+    setPaypalRenderError('');
+    clearContainer();
+    loadPayPalHostedButtonsSdk({
+      clientId: sdkClientId,
+      currency: paypalConfig.currency || 'USD',
+      enableVenmo: Boolean(paypalConfig.enable_venmo),
+    })
+      .then((paypal) => {
+        if (cancelled) return;
+        const container = document.getElementById(paypalContainerId);
+        if (!container) return;
+        container.innerHTML = '';
+        return paypal.HostedButtons({
+          hostedButtonId,
+        }).render(`#${paypalContainerId}`);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('PayPal hosted button render failed', error);
+        setPaypalRenderError('Unable to load PayPal right now. Please contact staff for help with payment.');
+      });
+    return () => {
+      cancelled = true;
+      clearContainer();
+    };
+  }, [paymentOption, paymentOverLimit, paymentProviderType, paypalContainerId, showPaymentPanel]);
+
   const legendList = (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
       {legendItems.map((item) => (
         <div className="flex items-center gap-2 min-w-0" key={item.key}>
-          <span className={`w-6 h-6 rounded ${item.className}`} />
+          <span className={`relative w-6 h-6 rounded ${item.className}`}>
+            <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{item.cueText || ''}</span>
+          </span>
           <span className="text-sm text-gray-100 break-words">{item.label}</span>
         </div>
       ))}
@@ -627,15 +686,24 @@ export default function EventSeatingModal({ event, onClose }) {
                     </p>
                   ) : (
                     <>
-                      <a
-                        href={paymentOption.payment_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 font-semibold text-white hover:bg-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-300"
-                        aria-label="Open payment link in a new tab"
-                      >
-                        {paymentOption.button_text || 'Pay Online'}
-                      </a>
+                      {paymentProviderType === 'paypal_hosted_button' ? (
+                        <div className="space-y-2">
+                          <div id={paypalContainerId} className="min-h-[40px]" />
+                          {paypalRenderError && (
+                            <p className="text-xs text-amber-200">{paypalRenderError}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <a
+                          href={paymentOption.payment_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 font-semibold text-white hover:bg-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-300"
+                          aria-label="Open payment link in a new tab"
+                        >
+                          {paymentOption.button_text || 'Pay Online'}
+                        </a>
+                      )}
                       {paymentOption.fine_print && (
                         <p className="text-xs text-gray-300">{paymentOption.fine_print}</p>
                       )}
@@ -896,6 +964,9 @@ export default function EventSeatingModal({ event, onClose }) {
           <div className="p-6 border-t border-purple-500/20 bg-gray-900/50 flex flex-col gap-4 md:flex-row md:items-center md:justify-between seat-action-bar">
             <div className="flex-1">
               <div className="text-sm uppercase tracking-wide text-gray-400">Selected Seats</div>
+              {paymentAvailableNotice && selectedSeats.length === 0 && (
+                <p className="mt-2 text-xs text-indigo-200">Online payment available after selecting seats.</p>
+              )}
                   {selectedSeats.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-2">
                       {selectedSeats.slice(0, 6).map((seat) => (

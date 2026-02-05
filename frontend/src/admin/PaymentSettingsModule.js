@@ -5,9 +5,14 @@ import { API_BASE } from '../apiConfig';
 const DEFAULT_LIMIT = 6;
 const scopeKey = (scope, categoryId) => (scope === 'category' ? `category-${categoryId}` : 'global');
 const defaultOverLimitCopy = (limit) => `For parties over ${limit} seats, please contact our staff to arrange payment.`;
+const MARKUP_PATTERN = /<[^>]*>/;
+const PAYPAL_BUTTON_ID_PATTERN = /^[A-Za-z0-9]{5,64}$/;
+
+const normalizeProviderType = (value) => (value === 'paypal_hosted_button' ? 'paypal_hosted_button' : 'external_link');
 
 const normalizeSetting = (setting = {}, scope = 'category', category = null) => {
   const limit = Number(setting.limit_seats) > 0 ? Number(setting.limit_seats) : DEFAULT_LIMIT;
+  const providerType = normalizeProviderType(setting.provider_type);
   const categoryId = scope === 'category'
     ? (category?.id ?? setting.category_id ?? null)
     : null;
@@ -18,7 +23,11 @@ const normalizeSetting = (setting = {}, scope = 'category', category = null) => 
     category_name: baseName,
     enabled: Boolean(setting.enabled),
     provider_label: setting.provider_label || '',
+    provider_type: providerType,
     payment_url: setting.payment_url || '',
+    paypal_hosted_button_id: setting.paypal_hosted_button_id || '',
+    paypal_currency: setting.paypal_currency || 'USD',
+    paypal_enable_venmo: Boolean(setting.paypal_enable_venmo),
     button_text: setting.button_text || 'Pay Online',
     limit_seats: limit,
     over_limit_message: setting.over_limit_message || defaultOverLimitCopy(limit),
@@ -34,6 +43,7 @@ export default function PaymentSettingsModule(){
   const [hasTable, setHasTable] = useState(true);
   const [formState, setFormState] = useState({});
   const [categories, setCategories] = useState([]);
+  const [capabilities, setCapabilities] = useState({});
   const [savingKey, setSavingKey] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
 
@@ -51,10 +61,12 @@ export default function PaymentSettingsModule(){
         setHasTable(false);
         setFormState({});
         setCategories([]);
+        setCapabilities({});
         setLoading(false);
         return;
       }
       setHasTable(true);
+      setCapabilities(data.capabilities || {});
       const categoryList = Array.isArray(data.categories) ? data.categories : [];
       const mapped = {};
       const byCategory = new Map();
@@ -98,7 +110,14 @@ export default function PaymentSettingsModule(){
         const parsed = Number(nextValue);
         value = Number.isFinite(parsed) && parsed > 0 ? parsed : '';
       }
+      if (field === 'provider_type') {
+        value = normalizeProviderType(nextValue);
+      }
       const next = { ...prev, [key]: { ...current, [field]: value } };
+      if (field === 'provider_type' && value === 'external_link') {
+        next[key].paypal_hosted_button_id = '';
+        next[key].paypal_enable_venmo = false;
+      }
       if (field === 'limit_seats') {
         const limit = Number(value) > 0 ? Number(value) : DEFAULT_LIMIT;
         const defaultMessage = defaultOverLimitCopy(limit);
@@ -111,6 +130,11 @@ export default function PaymentSettingsModule(){
     });
   };
 
+  const isProviderTypeAvailable = capabilities.provider_type !== false;
+  const isPaypalModeAvailable =
+    capabilities.paypal_hosted_button_id !== false &&
+    capabilities.paypal_currency !== false &&
+    capabilities.paypal_enable_venmo !== false;
   const handleSave = async (key) => {
     const config = formState[key];
     if (!config) return;
@@ -118,12 +142,33 @@ export default function PaymentSettingsModule(){
     setError('');
     setStatusMessage('');
     try {
+      const providerType = isProviderTypeAvailable
+        ? normalizeProviderType(config.provider_type)
+        : 'external_link';
+      if (
+        MARKUP_PATTERN.test(config.provider_label || '') ||
+        MARKUP_PATTERN.test(config.button_text || '') ||
+        MARKUP_PATTERN.test(config.over_limit_message || '') ||
+        MARKUP_PATTERN.test(config.fine_print || '')
+      ) {
+        throw new Error('Payment settings fields cannot contain HTML/script markup.');
+      }
+
+      const paypalHostedButtonId = (config.paypal_hosted_button_id || '').trim();
+      if (providerType === 'paypal_hosted_button' && !PAYPAL_BUTTON_ID_PATTERN.test(paypalHostedButtonId)) {
+        throw new Error('PayPal Hosted Button ID must be alphanumeric (5-64 characters).');
+      }
+
       const payload = {
         scope: config.scope,
         category_id: config.scope === 'category' ? config.category_id : null,
         enabled: Boolean(config.enabled),
+        provider_type: providerType,
         provider_label: (config.provider_label || '').trim(),
-        payment_url: (config.payment_url || '').trim(),
+        payment_url: providerType === 'external_link' ? (config.payment_url || '').trim() : '',
+        paypal_hosted_button_id: providerType === 'paypal_hosted_button' ? paypalHostedButtonId : '',
+        paypal_currency: (config.paypal_currency || 'USD').toUpperCase(),
+        paypal_enable_venmo: providerType === 'paypal_hosted_button' ? Boolean(config.paypal_enable_venmo) : false,
         button_text: (config.button_text || '').trim() || 'Pay Online',
         limit_seats: Number(config.limit_seats) > 0 ? Number(config.limit_seats) : DEFAULT_LIMIT,
         over_limit_message: (config.over_limit_message || '').trim(),
@@ -180,7 +225,7 @@ export default function PaymentSettingsModule(){
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold">Payment Settings</h1>
-          <p className="text-sm text-gray-400">Configure optional payment links shown after seat selection.</p>
+          <p className="text-sm text-gray-400">Configure optional payment methods shown after seat selection.</p>
         </div>
         <button
           type="button"
@@ -209,6 +254,11 @@ export default function PaymentSettingsModule(){
         <div className="py-10 text-center text-gray-400">Loading payment configuration…</div>
       ) : (
         <div className="space-y-6">
+          {(!isProviderTypeAvailable || !isPaypalModeAvailable) && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-900/20 px-4 py-3 text-sm text-amber-200">
+              Some PayPal fields are unavailable in this database schema. Run the latest schema migration to enable hosted button settings.
+            </div>
+          )}
           {configList.map(({ key, data }) => (
             <div key={key} className="border border-gray-700 rounded-xl p-5 bg-gray-900/60 shadow-inner">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
@@ -242,6 +292,18 @@ export default function PaymentSettingsModule(){
                   />
                 </div>
                 <div>
+                  <label className="block text-sm text-gray-300 mb-1">Provider type</label>
+                  <select
+                    className="w-full rounded bg-gray-800 border border-gray-700 px-3 py-2 text-white"
+                    value={data.provider_type || 'external_link'}
+                    onChange={(e) => updateField(key, 'provider_type', e.target.value)}
+                    disabled={savingKey === key || !isProviderTypeAvailable}
+                  >
+                    <option value="external_link">External link</option>
+                    <option value="paypal_hosted_button" disabled={!isPaypalModeAvailable}>PayPal hosted button</option>
+                  </select>
+                </div>
+                <div>
                   <label className="block text-sm text-gray-300 mb-1">Button text</label>
                   <input
                     type="text"
@@ -252,17 +314,64 @@ export default function PaymentSettingsModule(){
                     disabled={savingKey === key}
                   />
                 </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm text-gray-300 mb-1">Payment URL</label>
-                  <input
-                    type="url"
-                    className="w-full rounded bg-gray-800 border border-gray-700 px-3 py-2 text-white"
-                    value={data.payment_url}
-                    onChange={(e) => updateField(key, 'payment_url', e.target.value)}
-                    placeholder="https://example.com/pay"
-                    disabled={savingKey === key}
-                  />
-                </div>
+
+                {data.provider_type === 'external_link' ? (
+                  <div className="md:col-span-2">
+                    <label className="block text-sm text-gray-300 mb-1">Payment URL</label>
+                    <input
+                      type="url"
+                      className="w-full rounded bg-gray-800 border border-gray-700 px-3 py-2 text-white"
+                      value={data.payment_url}
+                      onChange={(e) => updateField(key, 'payment_url', e.target.value)}
+                      placeholder="https://example.com/pay"
+                      disabled={savingKey === key}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">PayPal Hosted Button ID</label>
+                      <input
+                        type="text"
+                        className="w-full rounded bg-gray-800 border border-gray-700 px-3 py-2 text-white"
+                        value={data.paypal_hosted_button_id}
+                        onChange={(e) => updateField(key, 'paypal_hosted_button_id', e.target.value.replace(/\s+/g, ''))}
+                        placeholder="U7GKCHLN5VH66"
+                        disabled={savingKey === key}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Currency</label>
+                      <input
+                        type="text"
+                        className="w-full rounded bg-gray-800 border border-gray-700 px-3 py-2 text-white uppercase"
+                        value={data.paypal_currency}
+                        onChange={(e) => updateField(key, 'paypal_currency', e.target.value.toUpperCase())}
+                        placeholder="USD"
+                        maxLength={8}
+                        disabled={savingKey === key}
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="inline-flex items-center gap-2 text-sm text-gray-200">
+                        <input
+                          type="checkbox"
+                          className="rounded bg-gray-700"
+                          checked={Boolean(data.paypal_enable_venmo)}
+                          onChange={(e) => updateField(key, 'paypal_enable_venmo', e.target.checked)}
+                          disabled={savingKey === key}
+                        />
+                        <span>Enable Venmo in PayPal SDK</span>
+                      </label>
+                    </div>
+                    {data.scope === 'global' && (
+                      <div className="md:col-span-2 text-xs text-gray-400">
+                        PayPal SDK client ID is sourced from backend environment (`PAYPAL_SDK_CLIENT_ID`).
+                      </div>
+                    )}
+                  </>
+                )}
+
                 <div>
                   <label className="block text-sm text-gray-300 mb-1">Seat limit for payment link</label>
                   <input

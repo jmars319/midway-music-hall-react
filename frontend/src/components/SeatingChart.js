@@ -693,7 +693,9 @@ export default function SeatingChart({
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
               {legendItems.map((item) => (
                 <div className="flex items-center gap-2 min-w-0" key={item.key}>
-                  <span className={`w-5 h-5 rounded ${item.className}`} />
+                  <span className={`relative w-5 h-5 rounded ${item.className}`}>
+                    <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold">{item.cueText || ''}</span>
+                  </span>
                   <span className="text-sm text-gray-100 break-words">{item.label}</span>
                 </div>
               ))}

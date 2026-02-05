@@ -141,6 +141,21 @@ export default function TableComponent({
     return { className: `absolute flex items-center justify-center rounded-full ${cursor} ${visualClass}`, status, visual };
   };
 
+  const getSeatCue = (statusKey) => {
+    switch (statusKey) {
+      case 'selected':
+        return 'S';
+      case 'reserved':
+        return 'R';
+      case 'pending':
+        return 'P';
+      case 'hold':
+        return 'H';
+      default:
+        return 'A';
+    }
+  };
+
   // Render individual seat
   const renderSeat = (seatNum, x, y, seatSize) => {
     const seatId = buildSeatId(row, seatNum);
@@ -148,6 +163,12 @@ export default function TableComponent({
     const displayLabel = seatLabel.length > 4 ? seatLabel.slice(0, 4) : seatLabel;
     const { className, status, visual } = getSeatClasses(seatId);
     const pointerEventsValue = interactive ? 'auto' : 'none';
+    const cueText = getSeatCue(visual.statusKey);
+    const statusOverlayStyles = {
+      reserved: 'repeating-linear-gradient(135deg, rgba(0,0,0,0.28), rgba(0,0,0,0.28) 3px, rgba(255,255,255,0.04) 3px, rgba(255,255,255,0.04) 6px)',
+      pending: 'repeating-linear-gradient(45deg, rgba(0,0,0,0.18), rgba(0,0,0,0.18) 3px, rgba(255,255,255,0.05) 3px, rgba(255,255,255,0.05) 6px)',
+      hold: 'repeating-linear-gradient(0deg, rgba(15,23,42,0.14), rgba(15,23,42,0.14) 2px, rgba(255,255,255,0.08) 2px, rgba(255,255,255,0.08) 5px)',
+    };
     const style = { 
       left: x, 
       top: y, 
@@ -158,6 +179,9 @@ export default function TableComponent({
       zIndex: 5,
       touchAction: 'manipulation',
       WebkitTapHighlightColor: 'transparent',
+      backgroundImage: statusOverlayStyles[visual.statusKey] || 'none',
+      outline: visual.statusKey === 'selected' ? '2px solid rgba(255,255,255,0.9)' : undefined,
+      outlineOffset: visual.statusKey === 'selected' ? '1px' : undefined,
     };
     const disabledReason = status.isReserved
       ? 'reserved'
@@ -169,10 +193,8 @@ export default function TableComponent({
     const resolvedReason = disabledReason && typeof seatReasonResolver === 'function'
       ? seatReasonResolver(disabledReason)
       : null;
-    const titleParts = [seatLabel];
-    if (disabledReason) {
-      titleParts.push(resolvedReason || visual.label);
-    }
+    const statusLabel = disabledReason ? (resolvedReason || visual.label) : visual.label;
+    const titleParts = [seatLabel, statusLabel];
     const titleText = titleParts.filter(Boolean).join(' – ');
 
     if (interactive) {
@@ -199,6 +221,9 @@ export default function TableComponent({
           aria-label={titleText}
         >
           <span className="text-[9px] font-bold relative z-10" style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)' }}>{displayLabel}</span>
+          <span className="absolute -top-1 -right-1 rounded-full bg-black/65 px-1 text-[8px] font-bold text-white leading-tight" aria-hidden="true">
+            {cueText}
+          </span>
         </button>
       );
     }
@@ -213,6 +238,9 @@ export default function TableComponent({
         data-seat-state={visual.statusKey}
       >
         <span className="text-[9px] font-bold" style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)' }}>{displayLabel}</span>
+        <span className="absolute -top-1 -right-1 rounded-full bg-black/65 px-1 text-[8px] font-bold text-white leading-tight" aria-hidden="true">
+          {cueText}
+        </span>
       </div>
     );
   };

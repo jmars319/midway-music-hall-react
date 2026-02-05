@@ -1,27 +1,32 @@
 const seatStatusVisualMap = {
   available: {
     label: 'Available',
-    className: 'bg-gray-500 text-white',
+    className: 'bg-gray-500 text-white border-2 border-white/80',
+    cueText: 'A',
     tooltip: 'Seat currently available.',
   },
   selected: {
     label: 'Your Selection',
-    className: 'bg-purple-600 ring-2 ring-purple-300 text-white',
+    className: 'bg-purple-600 ring-2 ring-purple-300 text-white border-2 border-white',
+    cueText: 'S',
     tooltip: 'Seat you have selected.',
   },
   hold: {
     label: 'Held (24h)',
-    className: 'bg-sky-500/90 ring-2 ring-sky-200 text-slate-900',
+    className: 'bg-sky-500/90 ring-2 ring-sky-200 text-slate-900 border-2 border-slate-900 border-dotted',
+    cueText: 'H',
     tooltip: 'Seat is on a temporary hold window.',
   },
   pending: {
     label: 'Pending Review',
-    className: 'bg-amber-500/80 border-2 border-amber-200 text-amber-950',
+    className: 'bg-amber-500/80 border-2 border-amber-200 text-amber-950 border-dashed',
+    cueText: 'P',
     tooltip: 'Seat is part of a pending request.',
   },
   reserved: {
     label: 'Reserved',
-    className: 'bg-red-600 ring-2 ring-red-400 text-white',
+    className: 'bg-red-600 ring-2 ring-red-400 text-white border-2 border-black/90',
+    cueText: 'R',
     tooltip: 'Seat is fully confirmed.',
   },
 };
@@ -52,6 +57,7 @@ export const buildSeatLegendItems = (keys = SEAT_STATUS_ORDER) =>
       key,
       label: seatingStatusLabels[key],
       className: seatingLegendSwatches[key],
+      cueText: seatStatusVisualMap[key]?.cueText || '',
     }));
 
 const STATUS_PRIORITY = {
