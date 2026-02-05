@@ -81,7 +81,11 @@ CREATE TABLE IF NOT EXISTS payment_settings (
   category_id INT DEFAULT NULL,
   enabled TINYINT(1) NOT NULL DEFAULT 0,
   provider_label VARCHAR(191) DEFAULT NULL,
+  provider_type ENUM('external_link','paypal_hosted_button') NOT NULL DEFAULT 'external_link',
   payment_url VARCHAR(500) DEFAULT NULL,
+  paypal_hosted_button_id VARCHAR(64) DEFAULT NULL,
+  paypal_currency VARCHAR(8) DEFAULT 'USD',
+  paypal_enable_venmo TINYINT(1) NOT NULL DEFAULT 0,
   button_text VARCHAR(191) DEFAULT 'Pay Online',
   limit_seats INT NOT NULL DEFAULT 6,
   over_limit_message TEXT,
@@ -95,6 +99,10 @@ CREATE TABLE IF NOT EXISTS payment_settings (
 );
 
 CALL add_constraint_if_missing(@TARGET_DB, 'payment_settings', 'fk_payment_category', 'ADD CONSTRAINT fk_payment_category FOREIGN KEY (category_id) REFERENCES event_categories(id) ON DELETE CASCADE');
+CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'provider_type', 'provider_type ENUM(''external_link'',''paypal_hosted_button'') NOT NULL DEFAULT ''external_link'' AFTER provider_label');
+CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'paypal_hosted_button_id', 'paypal_hosted_button_id VARCHAR(64) DEFAULT NULL AFTER payment_url');
+CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'paypal_currency', 'paypal_currency VARCHAR(8) DEFAULT ''USD'' AFTER paypal_hosted_button_id');
+CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'paypal_enable_venmo', 'paypal_enable_venmo TINYINT(1) NOT NULL DEFAULT 0 AFTER paypal_currency');
 
 CALL add_column_if_missing(@TARGET_DB, 'events', 'payment_enabled', 'payment_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER seat_request_email_override');
 

@@ -777,6 +777,78 @@ function payment_settings_table_exists(PDO $pdo): bool
     return $exists;
 }
 
+function payment_settings_table_has_column(PDO $pdo, string $column): bool
+{
+    static $cache = [];
+    $key = strtolower($column);
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+    if (!payment_settings_table_exists($pdo)) {
+        $cache[$key] = false;
+        return false;
+    }
+    try {
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', $column)) {
+            $cache[$key] = false;
+            return false;
+        }
+        $quoted = str_replace("'", "''", $column);
+        $stmt = $pdo->query("SHOW COLUMNS FROM payment_settings LIKE '{$quoted}'");
+        $cache[$key] = (bool) ($stmt->fetch() ?: null);
+    } catch (Throwable $error) {
+        $cache[$key] = false;
+        if (APP_DEBUG) {
+            error_log('payment_settings_table_has_column failure: ' . $error->getMessage());
+        }
+    }
+    return $cache[$key];
+}
+
+function payment_settings_has_disallowed_markup(?string $value): bool
+{
+    if ($value === null) {
+        return false;
+    }
+    return preg_match('/<[^>]*>/', $value) === 1;
+}
+
+function normalize_payment_provider_type($value): string
+{
+    $providerType = strtolower(trim((string) ($value ?? 'external_link')));
+    if (!in_array($providerType, ['external_link', 'paypal_hosted_button'], true)) {
+        return 'external_link';
+    }
+    return $providerType;
+}
+
+function normalize_paypal_currency($value): string
+{
+    $currency = strtoupper(trim((string) ($value ?? 'USD')));
+    if (!preg_match('/^[A-Z]{3,8}$/', $currency)) {
+        return 'USD';
+    }
+    return $currency;
+}
+
+function normalize_paypal_hosted_button_id($value): ?string
+{
+    $hostedButtonId = trim((string) ($value ?? ''));
+    if ($hostedButtonId === '') {
+        return null;
+    }
+    if (!preg_match('/^[A-Za-z0-9]{5,64}$/', $hostedButtonId)) {
+        return null;
+    }
+    return $hostedButtonId;
+}
+
+function resolve_paypal_sdk_client_id(): ?string
+{
+    $envClientId = trim((string) Env::get('PAYPAL_SDK_CLIENT_ID', ''));
+    return $envClientId !== '' ? $envClientId : null;
+}
+
 function fetch_payment_settings_rows(PDO $pdo): array
 {
     if (!payment_settings_table_exists($pdo)) {
@@ -813,7 +885,7 @@ function load_payment_settings_lookup(PDO $pdo): array
         return $lookup;
     }
     try {
-        $stmt = $pdo->query('SELECT scope, category_id, enabled, provider_label, payment_url, button_text, limit_seats, over_limit_message, fine_print, updated_at FROM payment_settings');
+        $stmt = $pdo->query('SELECT * FROM payment_settings');
         $rows = $stmt->fetchAll() ?: [];
         foreach ($rows as $row) {
             $row['limit_seats'] = (int) ($row['limit_seats'] ?? 6);
@@ -856,10 +928,6 @@ function resolve_event_payment_option(array $event, array $lookup): ?array
     if (!$candidate || empty($candidate['enabled'])) {
         return null;
     }
-    $paymentUrl = trim((string) ($candidate['payment_url'] ?? ''));
-    if ($paymentUrl === '') {
-        return null;
-    }
     $limitSeats = (int) ($candidate['limit_seats'] ?? 6);
     if ($limitSeats <= 0) {
         $limitSeats = 6;
@@ -868,17 +936,43 @@ function resolve_event_payment_option(array $event, array $lookup): ?array
     if ($buttonText === '') {
         $buttonText = 'Pay Online';
     }
-    return [
+    $providerType = normalize_payment_provider_type($candidate['provider_type'] ?? 'external_link');
+    $base = [
+        'enabled' => true,
         'scope' => $candidate['scope'] ?? 'category',
         'category_id' => $candidate['category_id'] ?? null,
+        'provider_type' => $providerType,
         'provider_label' => $candidate['provider_label'] ?? null,
         'button_text' => $buttonText,
-        'payment_url' => $paymentUrl,
         'limit_seats' => $limitSeats,
         'over_limit_message' => $candidate['over_limit_message'] ?? null,
         'fine_print' => $candidate['fine_print'] ?? null,
         'updated_at' => $candidate['updated_at'] ?? null,
     ];
+    if ($providerType === 'paypal_hosted_button') {
+        $hostedButtonId = normalize_paypal_hosted_button_id($candidate['paypal_hosted_button_id'] ?? null);
+        if (!$hostedButtonId) {
+            return null;
+        }
+        $paypalPayload = [
+            'hosted_button_id' => $hostedButtonId,
+            'currency' => normalize_paypal_currency($candidate['paypal_currency'] ?? 'USD'),
+            'enable_venmo' => !empty($candidate['paypal_enable_venmo']),
+        ];
+        $sdkClientId = resolve_paypal_sdk_client_id();
+        if ($sdkClientId) {
+            $paypalPayload['sdk_client_id'] = $sdkClientId;
+        }
+        $base['paypal'] = $paypalPayload;
+        return $base;
+    }
+    $paymentUrl = trim((string) ($candidate['payment_url'] ?? ''));
+    if ($paymentUrl === '') {
+        return null;
+    }
+    $base['payment_url'] = $paymentUrl;
+    $base['payment_url'] = $paymentUrl;
+    return $base;
 }
 
 function event_seating_snapshots_table_exists(PDO $pdo): bool
@@ -1620,6 +1714,57 @@ function format_event_datetime_for_email(array $event): string
     return 'TBD';
 }
 
+function escape_email_html(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
+
+function build_email_detail_table(array $rows): string
+{
+    $html = '';
+    foreach ($rows as $row) {
+        if (!is_array($row) || count($row) < 2) {
+            continue;
+        }
+        [$label, $value] = $row;
+        $labelText = escape_email_html((string) $label);
+        $valueText = escape_email_html((string) $value);
+        $html .= '<tr><td style="padding:6px 10px;border-bottom:1px solid #e2e8f0;color:#475569;font-weight:600;width:36%;">' . $labelText . '</td>';
+        $html .= '<td style="padding:6px 10px;border-bottom:1px solid #e2e8f0;color:#0f172a;">' . $valueText . '</td></tr>';
+    }
+    if ($html === '') {
+        return '';
+    }
+    return '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">' . $html . '</table>';
+}
+
+function build_seat_request_email_html(string $headline, array $introLines, array $detailRows, array $footerLines): string
+{
+    $introHtml = '';
+    foreach ($introLines as $line) {
+        $introHtml .= '<p style="margin:0 0 8px 0;">' . escape_email_html((string) $line) . '</p>';
+    }
+    $detailTable = build_email_detail_table($detailRows);
+    $footerHtml = '';
+    foreach ($footerLines as $line) {
+        $footerHtml .= '<p style="margin:0 0 6px 0;color:#475569;font-size:14px;">' . escape_email_html((string) $line) . '</p>';
+    }
+
+    return '<div style="font-family:Arial, sans-serif;background-color:#f8fafc;padding:24px;">'
+        . '<div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">'
+        . '<div style="background:#0f2d3f;color:#ffffff;padding:18px 20px;">'
+        . '<p style="margin:0;font-size:18px;font-weight:700;letter-spacing:0.2px;">Midway Music Hall &amp; Event Center</p>'
+        . '<p style="margin:6px 0 0 0;font-size:14px;opacity:0.9;">' . escape_email_html($headline) . '</p>'
+        . '</div>'
+        . '<div style="padding:20px;color:#0f172a;font-size:15px;line-height:1.5;">'
+        . $introHtml
+        . ($detailTable !== '' ? '<div style="margin:16px 0;">' . $detailTable . '</div>' : '')
+        . $footerHtml
+        . '</div>'
+        . '</div>'
+        . '</div>';
+}
+
 function decode_seat_list($seats): array
 {
     if (is_array($seats)) {
@@ -1650,87 +1795,60 @@ function notify_seat_request_emails(array $seatRequest, array $event): void
     }
     $timestamp = format_datetime_eastern(now_eastern());
     $eventDate = format_event_datetime_for_email($event);
-    $seatList = build_display_seat_list($seatRequest);
-    $seatCount = count($seatList);
-    $seatSummary = $seatCount ? implode(', ', $seatList) : 'None provided';
-    $notes = trim((string) ($seatRequest['special_requests'] ?? ''));
-    $notes = $notes !== '' ? $notes : 'None provided';
-    $holdExpiresLine = '';
-    if (!empty($seatRequest['hold_expires_at'])) {
-        try {
-            $holdDate = new DateTimeImmutable($seatRequest['hold_expires_at'], new DateTimeZone('America/New_York'));
-            $holdExpiresLine = "\nHold Expires (ET): " . format_datetime_eastern($holdDate);
-        } catch (Throwable $e) {
-            $holdExpiresLine = '';
-        }
-    }
-    $requestId = $seatRequest['id'] ?? 'n/a';
     $customerEmail = isset($seatRequest['customer_email']) ? trim((string) $seatRequest['customer_email']) : '';
     if ($customerEmail && !filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) {
         $customerEmail = '';
-    }
-    $customerPhone = trim((string) ($seatRequest['customer_phone'] ?? ''));
-    $customerName = trim((string) ($seatRequest['customer_name'] ?? ''));
-    $customerNameLine = $customerName !== '' ? $customerName : 'Unknown';
-    $customerEmailLine = $customerEmail !== '' ? $customerEmail : 'Not provided';
-    $customerPhoneLine = $customerPhone !== '' ? $customerPhone : 'Not provided';
-    $staffBody = <<<TEXT
-New seat request received.
-
-Timestamp (ET): {$timestamp}
-Seat Request ID: {$requestId}
-Event: {$eventTitle}
-Event Date/Time (ET): {$eventDate}{$holdExpiresLine}
-
-Customer Name: {$customerNameLine}
-Customer Email: {$customerEmailLine}
-Customer Phone: {$customerPhoneLine}
-
-Selected Seats ({$seatCount}):
-{$seatSummary}
-
-Notes / Special Requests:
-{$notes}
-TEXT;
-
-    [$staffInbox] = determine_seat_request_recipient($event);
-    $staffSubject = 'New Seat Request - ' . $eventTitle;
-    $replyTo = $customerEmail !== '' ? $customerEmail : $staffInbox;
-
-    try {
-        $emailer->send([
-            'to' => $staffInbox,
-            'from' => $emailer->notificationsSender(),
-            'subject' => $staffSubject,
-            'body' => $staffBody,
-            'reply_to' => $replyTo,
-        ]);
-    } catch (Throwable $sendError) {
-        error_log('[email] Seat request staff notification failed: ' . $sendError->getMessage());
     }
 
     if ($customerEmail === '') {
         return;
     }
 
+    $seatList = build_display_seat_list($seatRequest);
+    $seatCount = count($seatList);
+    $seatSummary = $seatCount ? implode(', ', $seatList) : 'None provided';
+    $notes = trim((string) ($seatRequest['special_requests'] ?? ''));
+    $notes = $notes !== '' ? $notes : 'None provided';
+    $holdExpires = '';
+    if (!empty($seatRequest['hold_expires_at'])) {
+        try {
+            $holdDate = new DateTimeImmutable($seatRequest['hold_expires_at'], new DateTimeZone('America/New_York'));
+            $holdExpires = format_datetime_eastern($holdDate);
+        } catch (Throwable $e) {
+            $holdExpires = '';
+        }
+    }
+    $requestId = $seatRequest['id'] ?? 'n/a';
+    $customerPhone = trim((string) ($seatRequest['customer_phone'] ?? ''));
+    $customerName = trim((string) ($seatRequest['customer_name'] ?? ''));
+    $customerPhoneLine = $customerPhone !== '' ? $customerPhone : 'Not provided';
+    [$staffInbox] = determine_seat_request_recipient($event);
+
     $customerGreeting = $customerName !== '' ? $customerName : 'there';
-    $customerBody = <<<TEXT
-Hi {$customerGreeting},
-
-Thanks for reaching out to Midway Music Hall. We received your seat request for "{$eventTitle}" on {$timestamp}.
-
-Request summary:
-- Event: {$eventTitle}
-- Event Date/Time (ET): {$eventDate}
-- Seats Requested ({$seatCount}): {$seatSummary}
-- Notes: {$notes}
-- Phone: {$customerPhoneLine}
-
-Our team will review your request and will follow up with availability and next steps. If you need to update your request, just reply to this email or contact us at {$staffInbox}.
-
-Thank you,
-Midway Music Hall
-TEXT;
+    $detailRows = [
+        ['Event', $eventTitle],
+        ['Event Date/Time (ET)', $eventDate],
+        ['Seats Requested (' . $seatCount . ')', $seatSummary],
+        ['Notes', $notes],
+        ['Phone', $customerPhoneLine],
+        ['Request ID', $requestId],
+    ];
+    if ($holdExpires !== '') {
+        $detailRows[] = ['Hold Expires (ET)', $holdExpires];
+    }
+    $customerBody = build_seat_request_email_html(
+        'Seat request received',
+        [
+            'Hi ' . $customerGreeting . ',',
+            'Thanks for reaching out to Midway Music Hall & Event Center. We received your seat request on ' . $timestamp . '.',
+            'Your request is pending staff confirmation.',
+        ],
+        $detailRows,
+        [
+            'Our team will review your request and follow up with availability and next steps.',
+            'If you need to update your request, reply to this email or contact us at ' . $staffInbox . '.',
+        ]
+    );
 
     try {
         $emailer->send([
@@ -1739,9 +1857,74 @@ TEXT;
             'subject' => 'Seat Request Received - ' . $eventTitle,
             'body' => $customerBody,
             'reply_to' => $staffInbox,
+            'content_type' => 'text/html',
         ]);
     } catch (Throwable $sendError) {
         error_log('[email] Seat request customer confirmation failed: ' . $sendError->getMessage());
+    }
+}
+
+function notify_seat_request_confirmed_email(array $seatRequest, array $event): void
+{
+    try {
+        $emailer = Emailer::instance();
+    } catch (Throwable $error) {
+        error_log('[email] Failed to initialize emailer for seat request confirmation: ' . $error->getMessage());
+        return;
+    }
+
+    $customerEmail = isset($seatRequest['customer_email']) ? trim((string) $seatRequest['customer_email']) : '';
+    if ($customerEmail === '' || !filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) {
+        return;
+    }
+
+    $eventTitle = trim((string) ($event['title'] ?? ''));
+    if ($eventTitle === '') {
+        $eventTitle = trim((string) ($event['artist_name'] ?? 'Midway Music Hall Event'));
+    }
+    if ($eventTitle === '') {
+        $eventTitle = 'Midway Music Hall Event';
+    }
+    $eventDate = format_event_datetime_for_email($event);
+    $seatList = build_display_seat_list($seatRequest);
+    $seatCount = count($seatList);
+    $seatSummary = $seatCount ? implode(', ', $seatList) : 'None provided';
+    $customerName = trim((string) ($seatRequest['customer_name'] ?? ''));
+    $customerGreeting = $customerName !== '' ? $customerName : 'there';
+    [$staffInbox] = determine_seat_request_recipient($event);
+    $requestId = $seatRequest['id'] ?? 'n/a';
+
+    $detailRows = [
+        ['Event', $eventTitle],
+        ['Event Date/Time (ET)', $eventDate],
+        ['Seats Confirmed (' . $seatCount . ')', $seatSummary],
+        ['Request ID', $requestId],
+    ];
+
+    $customerBody = build_seat_request_email_html(
+        'Seat request confirmed',
+        [
+            'Hi ' . $customerGreeting . ',',
+            'Good news - your seats are confirmed for ' . $eventTitle . '.',
+        ],
+        $detailRows,
+        [
+            'If you need to make changes, reply to this email or contact us at ' . $staffInbox . '.',
+            'Thank you for choosing Midway Music Hall & Event Center.',
+        ]
+    );
+
+    try {
+        $emailer->send([
+            'to' => $customerEmail,
+            'from' => $emailer->notificationsSender(),
+            'subject' => 'Seat Request Confirmed - ' . $eventTitle,
+            'body' => $customerBody,
+            'reply_to' => $staffInbox,
+            'content_type' => 'text/html',
+        ]);
+    } catch (Throwable $sendError) {
+        error_log('[email] Seat request confirmation email failed: ' . $sendError->getMessage());
     }
 }
 
@@ -3466,6 +3649,13 @@ $router->add('GET', '/api/admin/payment-settings', function () {
             ]);
         }
         $settings = fetch_payment_settings_rows($pdo);
+        foreach ($settings as &$setting) {
+            $setting['provider_type'] = normalize_payment_provider_type($setting['provider_type'] ?? 'external_link');
+            $setting['paypal_currency'] = normalize_paypal_currency($setting['paypal_currency'] ?? 'USD');
+            $setting['paypal_enable_venmo'] = !empty($setting['paypal_enable_venmo']);
+            $setting['paypal_hosted_button_id'] = normalize_paypal_hosted_button_id($setting['paypal_hosted_button_id'] ?? null);
+        }
+        unset($setting);
         $categories = [];
         if (event_categories_table_exists($pdo)) {
             $categoryStmt = $pdo->query('SELECT id, name, slug, is_active FROM event_categories ORDER BY name ASC');
@@ -3475,6 +3665,12 @@ $router->add('GET', '/api/admin/payment-settings', function () {
             'has_table' => true,
             'payment_settings' => $settings,
             'categories' => $categories,
+            'capabilities' => [
+                'provider_type' => payment_settings_table_has_column($pdo, 'provider_type'),
+                'paypal_hosted_button_id' => payment_settings_table_has_column($pdo, 'paypal_hosted_button_id'),
+                'paypal_currency' => payment_settings_table_has_column($pdo, 'paypal_currency'),
+                'paypal_enable_venmo' => payment_settings_table_has_column($pdo, 'paypal_enable_venmo'),
+            ],
         ]);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
@@ -3509,14 +3705,24 @@ $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
         $enabled = !empty($payload['enabled']);
         $limitSeats = (int) ($payload['limit_seats'] ?? 6);
         if ($limitSeats <= 0) {
-            $limitSeats = 2;
+            $limitSeats = 6;
         }
+        $providerType = normalize_payment_provider_type($payload['provider_type'] ?? 'external_link');
         $paymentUrlInput = trim((string) ($payload['payment_url'] ?? ''));
-        if ($enabled && $paymentUrlInput === '') {
-            return Response::error('payment_url is required when enabled', 422);
+        $paypalHostedButtonId = normalize_paypal_hosted_button_id($payload['paypal_hosted_button_id'] ?? null);
+        $paypalCurrency = normalize_paypal_currency($payload['paypal_currency'] ?? 'USD');
+        $paypalEnableVenmo = !empty($payload['paypal_enable_venmo']) ? 1 : 0;
+        if ($enabled && $providerType === 'external_link' && $paymentUrlInput === '') {
+            return Response::error('payment_url is required when external_link is enabled', 422);
+        }
+        if ($enabled && $providerType === 'paypal_hosted_button' && !$paypalHostedButtonId) {
+            return Response::error('paypal_hosted_button_id is required when paypal_hosted_button is enabled', 422);
         }
         if ($paymentUrlInput !== '' && !preg_match('#^https?://#i', $paymentUrlInput)) {
             return Response::error('payment_url must start with http:// or https://', 422);
+        }
+        if ($providerType === 'paypal_hosted_button' && $paymentUrlInput !== '') {
+            return Response::error('payment_url must be empty when provider_type is paypal_hosted_button', 422);
         }
         $buttonText = trim((string) ($payload['button_text'] ?? ''));
         if ($buttonText === '') {
@@ -3528,17 +3734,38 @@ $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
             $overLimitMessage = 'Please contact our staff to arrange payment for larger groups.';
         }
         $finePrint = normalize_nullable_text($payload['fine_print'] ?? null);
+        foreach ([$providerLabel, $buttonText, $overLimitMessage, $finePrint] as $fieldText) {
+            if (payment_settings_has_disallowed_markup($fieldText)) {
+                return Response::error('Payment settings fields cannot contain HTML/script markup.', 422);
+            }
+        }
         $actor = audit_log_actor();
 
         $scopeCategoryKey = $scope === 'category' ? $categoryId : null;
         $existingStmt = $pdo->prepare('SELECT id FROM payment_settings WHERE scope = ? AND ((category_id IS NULL AND ? IS NULL) OR category_id = ?) LIMIT 1');
         $existingStmt->execute([$scope, $scopeCategoryKey, $scopeCategoryKey]);
         $existingId = (int) $existingStmt->fetchColumn();
-        $storedPaymentUrl = $paymentUrlInput === '' ? null : $paymentUrlInput;
+        $storedPaymentUrl = $providerType === 'external_link' && $paymentUrlInput !== '' ? $paymentUrlInput : null;
+
+        $hasProviderTypeColumn = payment_settings_table_has_column($pdo, 'provider_type');
+        $hasPaypalHostedButtonIdColumn = payment_settings_table_has_column($pdo, 'paypal_hosted_button_id');
+        $hasPaypalCurrencyColumn = payment_settings_table_has_column($pdo, 'paypal_currency');
+        $hasPaypalEnableVenmoColumn = payment_settings_table_has_column($pdo, 'paypal_enable_venmo');
 
         if ($existingId) {
-            $update = $pdo->prepare('UPDATE payment_settings SET category_id = ?, enabled = ?, provider_label = ?, payment_url = ?, button_text = ?, limit_seats = ?, over_limit_message = ?, fine_print = ?, updated_by = ?, updated_at = NOW() WHERE id = ?');
-            $update->execute([
+            $updateParts = [
+                'category_id = ?',
+                'enabled = ?',
+                'provider_label = ?',
+                'payment_url = ?',
+                'button_text = ?',
+                'limit_seats = ?',
+                'over_limit_message = ?',
+                'fine_print = ?',
+                'updated_by = ?',
+                'updated_at = NOW()',
+            ];
+            $updateValues = [
                 $scopeCategoryKey,
                 $enabled ? 1 : 0,
                 $providerLabel,
@@ -3548,12 +3775,43 @@ $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
                 $overLimitMessage,
                 $finePrint,
                 $actor,
-                $existingId,
-            ]);
+            ];
+            if ($hasProviderTypeColumn) {
+                $updateParts[] = 'provider_type = ?';
+                $updateValues[] = $providerType;
+            }
+            if ($hasPaypalHostedButtonIdColumn) {
+                $updateParts[] = 'paypal_hosted_button_id = ?';
+                $updateValues[] = $providerType === 'paypal_hosted_button' ? $paypalHostedButtonId : null;
+            }
+            if ($hasPaypalCurrencyColumn) {
+                $updateParts[] = 'paypal_currency = ?';
+                $updateValues[] = $providerType === 'paypal_hosted_button' ? $paypalCurrency : 'USD';
+            }
+            if ($hasPaypalEnableVenmoColumn) {
+                $updateParts[] = 'paypal_enable_venmo = ?';
+                $updateValues[] = $providerType === 'paypal_hosted_button' ? $paypalEnableVenmo : 0;
+            }
+            $updateValues[] = $existingId;
+            $updateSql = 'UPDATE payment_settings SET ' . implode(', ', $updateParts) . ' WHERE id = ?';
+            $update = $pdo->prepare($updateSql);
+            $update->execute($updateValues);
             $settingId = $existingId;
         } else {
-            $insert = $pdo->prepare('INSERT INTO payment_settings (scope, category_id, enabled, provider_label, payment_url, button_text, limit_seats, over_limit_message, fine_print, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-            $insert->execute([
+            $insertColumns = [
+                'scope',
+                'category_id',
+                'enabled',
+                'provider_label',
+                'payment_url',
+                'button_text',
+                'limit_seats',
+                'over_limit_message',
+                'fine_print',
+                'created_by',
+                'updated_by',
+            ];
+            $insertValues = [
                 $scope,
                 $scopeCategoryKey,
                 $enabled ? 1 : 0,
@@ -3565,7 +3823,27 @@ $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
                 $finePrint,
                 $actor,
                 $actor,
-            ]);
+            ];
+            if ($hasProviderTypeColumn) {
+                $insertColumns[] = 'provider_type';
+                $insertValues[] = $providerType;
+            }
+            if ($hasPaypalHostedButtonIdColumn) {
+                $insertColumns[] = 'paypal_hosted_button_id';
+                $insertValues[] = $providerType === 'paypal_hosted_button' ? $paypalHostedButtonId : null;
+            }
+            if ($hasPaypalCurrencyColumn) {
+                $insertColumns[] = 'paypal_currency';
+                $insertValues[] = $providerType === 'paypal_hosted_button' ? $paypalCurrency : 'USD';
+            }
+            if ($hasPaypalEnableVenmoColumn) {
+                $insertColumns[] = 'paypal_enable_venmo';
+                $insertValues[] = $providerType === 'paypal_hosted_button' ? $paypalEnableVenmo : 0;
+            }
+            $placeholders = implode(', ', array_fill(0, count($insertColumns), '?'));
+            $insertSql = 'INSERT INTO payment_settings (' . implode(', ', $insertColumns) . ') VALUES (' . $placeholders . ')';
+            $insert = $pdo->prepare($insertSql);
+            $insert->execute($insertValues);
             $settingId = (int) $pdo->lastInsertId();
         }
 
@@ -3573,6 +3851,7 @@ $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
             'scope' => $scope,
             'category_id' => $scopeCategoryKey,
             'enabled' => $enabled,
+            'provider_type' => $providerType,
             'limit_seats' => $limitSeats,
         ]);
 
@@ -3585,6 +3864,10 @@ $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
             if ($row['limit_seats'] <= 0) {
                 $row['limit_seats'] = 6;
             }
+            $row['provider_type'] = normalize_payment_provider_type($row['provider_type'] ?? 'external_link');
+            $row['paypal_currency'] = normalize_paypal_currency($row['paypal_currency'] ?? 'USD');
+            $row['paypal_enable_venmo'] = !empty($row['paypal_enable_venmo']);
+            $row['paypal_hosted_button_id'] = normalize_paypal_hosted_button_id($row['paypal_hosted_button_id'] ?? null);
         }
         Response::success(['payment_setting' => $row]);
     } catch (Throwable $e) {
@@ -4900,6 +5183,8 @@ $router->add('GET', '/api/seat-requests', function (Request $request) {
 SELECT
     sr.*,
     e.title AS event_title,
+    e.artist_name AS event_artist_name,
+    COALESCE(NULLIF(TRIM(e.artist_name), ''), NULLIF(TRIM(e.title), '')) AS event_display_name,
     e.start_datetime,
     e.seat_request_email_override,
     ec.slug AS category_slug,
@@ -4927,6 +5212,13 @@ SQL;
             $row['status_raw'] = $row['status'];
             $row['status'] = normalize_seat_request_status($row['status']);
             $row['status_normalized'] = $row['status'];
+            if (empty($row['event_display_name'])) {
+                $fallbackTitle = trim((string) ($row['event_artist_name'] ?? ''));
+                if ($fallbackTitle === '') {
+                    $fallbackTitle = trim((string) ($row['event_title'] ?? ''));
+                }
+                $row['event_display_name'] = $fallbackTitle !== '' ? $fallbackTitle : null;
+            }
             [$targetEmail, $targetSource] = determine_seat_request_recipient($row);
             $row['seat_request_target_email'] = $targetEmail;
             $row['seat_request_target_source'] = $targetSource;
@@ -5062,6 +5354,22 @@ $router->add('POST', '/api/seat-requests/:id/approve', function ($request, $para
         record_audit('seat_request.approve', 'seat_request', $rid, [
             'seats' => $seats,
         ]);
+        try {
+            $hasCategoryTable = event_categories_table_exists($pdo);
+            if ($hasCategoryTable) {
+                $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.start_datetime, e.event_date, e.event_time, e.timezone, e.seat_request_email_override, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
+            } else {
+                $eventStmt = $pdo->prepare('SELECT id, title, artist_name, start_datetime, event_date, event_time, timezone, seat_request_email_override FROM events WHERE id = ? LIMIT 1');
+            }
+            $eventStmt->execute([$requestRow['event_id'] ?? null]);
+            $eventRow = $eventStmt->fetch();
+            if ($eventRow) {
+                $requestRow['status'] = 'confirmed';
+                notify_seat_request_confirmed_email($requestRow, $eventRow);
+            }
+        } catch (Throwable $notifyError) {
+            error_log('[email] Seat request confirmation notify failed: ' . $notifyError->getMessage());
+        }
         Response::success();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -5828,6 +6136,11 @@ if (APP_DEBUG) {
             $pdo = Database::connection();
             $hasArchived = events_table_has_column($pdo, 'archived_at');
             $hasArchivedIndex = events_table_has_index($pdo, 'idx_events_archived_at');
+            $hasPaymentSettings = payment_settings_table_exists($pdo);
+            $hasPaymentProviderType = payment_settings_table_has_column($pdo, 'provider_type');
+            $hasPaypalHostedButtonId = payment_settings_table_has_column($pdo, 'paypal_hosted_button_id');
+            $hasPaypalCurrency = payment_settings_table_has_column($pdo, 'paypal_currency');
+            $hasPaypalEnableVenmo = payment_settings_table_has_column($pdo, 'paypal_enable_venmo');
             $totalEvents = (int) $pdo->query('SELECT COUNT(*) FROM events')->fetchColumn();
             $nowExpr = "NOW()";
             $endExpr = event_end_expression('e');
@@ -5840,6 +6153,11 @@ if (APP_DEBUG) {
             Response::success([
                 'has_archived_at' => $hasArchived,
                 'has_archived_index' => $hasArchivedIndex,
+                'has_payment_settings' => $hasPaymentSettings,
+                'has_payment_provider_type' => $hasPaymentProviderType,
+                'has_paypal_hosted_button_id' => $hasPaypalHostedButtonId,
+                'has_paypal_currency' => $hasPaypalCurrency,
+                'has_paypal_enable_venmo' => $hasPaypalEnableVenmo,
                 'total_events' => $totalEvents,
                 'upcoming_events' => $upcomingEvents,
                 'past_events' => $pastEvents,
