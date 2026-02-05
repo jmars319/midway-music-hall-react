@@ -36,20 +36,32 @@ payload = {
     'scope': 'category',
     'category_id': category_id,
     'enabled': False,
+    'provider_type': 'external_link',
     'payment_url': '',
+    'paypal_hosted_button_id': '',
+    'paypal_currency': 'USD',
+    'paypal_enable_venmo': False,
     'button_text': 'Pay Online',
-    'limit_seats': 2,
+    'limit_seats': 6,
     'over_limit_message': '',
     'fine_print': '',
     'provider_label': '',
 }
 if raw:
     data = json.loads(base64.b64decode(raw.encode()).decode())
+    provider_type = data.get('provider_type') or 'external_link'
+    payment_url = data.get('payment_url') or ''
+    if provider_type == 'paypal_hosted_button':
+        payment_url = ''
     payload.update({
         'enabled': bool(data.get('enabled')),
-        'payment_url': data.get('payment_url') or '',
+        'provider_type': provider_type,
+        'payment_url': payment_url,
+        'paypal_hosted_button_id': data.get('paypal_hosted_button_id') or '',
+        'paypal_currency': data.get('paypal_currency') or 'USD',
+        'paypal_enable_venmo': bool(data.get('paypal_enable_venmo')),
         'button_text': data.get('button_text') or 'Pay Online',
-        'limit_seats': data.get('limit_seats') or 2,
+        'limit_seats': data.get('limit_seats') or 6,
         'over_limit_message': data.get('over_limit_message') or '',
         'fine_print': data.get('fine_print') or '',
         'provider_label': data.get('provider_label') or '',
@@ -70,20 +82,32 @@ api_base = sys.argv[2]
 payload = {
     'scope': 'global',
     'enabled': False,
+    'provider_type': 'external_link',
     'payment_url': '',
+    'paypal_hosted_button_id': '',
+    'paypal_currency': 'USD',
+    'paypal_enable_venmo': False,
     'button_text': 'Pay Online',
-    'limit_seats': 2,
+    'limit_seats': 6,
     'over_limit_message': '',
     'fine_print': '',
     'provider_label': '',
 }
 if raw:
     data = json.loads(base64.b64decode(raw.encode()).decode())
+    provider_type = data.get('provider_type') or 'external_link'
+    payment_url = data.get('payment_url') or ''
+    if provider_type == 'paypal_hosted_button':
+        payment_url = ''
     payload.update({
         'enabled': bool(data.get('enabled')),
-        'payment_url': data.get('payment_url') or '',
+        'provider_type': provider_type,
+        'payment_url': payment_url,
+        'paypal_hosted_button_id': data.get('paypal_hosted_button_id') or '',
+        'paypal_currency': data.get('paypal_currency') or 'USD',
+        'paypal_enable_venmo': bool(data.get('paypal_enable_venmo')),
         'button_text': data.get('button_text') or 'Pay Online',
-        'limit_seats': data.get('limit_seats') or 2,
+        'limit_seats': data.get('limit_seats') or 6,
         'over_limit_message': data.get('over_limit_message') or '',
         'fine_print': data.get('fine_print') or '',
         'provider_label': data.get('provider_label') or '',
