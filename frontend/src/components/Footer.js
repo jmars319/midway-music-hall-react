@@ -155,10 +155,34 @@ export default function Footer({ onAdminClick, onNavigate }){
                 Admin Login
               </button>
             )}
-            <a href="https://www.jamarq.digital" target="_blank" rel="noopener noreferrer" className="hover:text-purple-300 underline decoration-purple-400/50 transition">
-              Powered by JAMARQ
-            </a>
           </div>
+        </div>
+
+        <div className="mt-6 border-t border-white/10 pt-4 flex justify-center">
+          <a
+            href="https://jamarq.digital"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group relative inline-flex items-center gap-2 text-[15px] text-gray-400 opacity-70 transition hover:opacity-90 focus-visible:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-400"
+          >
+            <span>Powered by</span>
+            <span className="h-[22px] w-[22px] rounded-full overflow-hidden border border-white/10 transition group-hover:drop-shadow-[0_0_6px_rgba(45,212,191,0.6)] group-focus-visible:drop-shadow-[0_0_6px_rgba(45,212,191,0.6)]">
+              <img
+                src="/iconslogos/jamarq-q.png"
+                alt="JAMARQ"
+                className="h-full w-full object-cover"
+                loading="lazy"
+                decoding="async"
+              />
+            </span>
+            <span
+              role="tooltip"
+              className="pointer-events-none absolute bottom-full left-1/2 mb-2 w-max max-w-[240px] -translate-x-1/2 rounded-md border border-teal-300/30 bg-gray-900/95 px-3 py-2 text-[11px] leading-snug text-gray-200 opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-visible:opacity-100"
+            >
+              <span className="block">JAMARQ builds and maintains reliable websites and systems.</span>
+              <span className="block">Design, infrastructure, and long-term support.</span>
+            </span>
+          </a>
         </div>
       </div>
     </footer>

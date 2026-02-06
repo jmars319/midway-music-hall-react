@@ -943,7 +943,9 @@ export default function EventSeatingModal({ event, onClose }) {
                   </div>
                   {isMobileSeatMode && (
                     <details className="seat-legend-panel seat-legend-panel--mobile bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full">
-                      <summary className="seat-legend-toggle font-semibold text-white">Legend</summary>
+                      <summary className="seat-legend-toggle list-none inline-flex w-full items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 cursor-pointer">
+                        Legend
+                      </summary>
                       <div className="mt-3 seat-legend-content">{legendList}</div>
                     </details>
                   )}

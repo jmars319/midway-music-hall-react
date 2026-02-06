@@ -113,6 +113,9 @@ export default function PaymentSettingsModule(){
       if (field === 'provider_type') {
         value = normalizeProviderType(nextValue);
       }
+      if (field === 'provider_type' || field === 'paypal_hosted_button_id' || field === 'enabled') {
+        setError('');
+      }
       const next = { ...prev, [key]: { ...current, [field]: value } };
       if (field === 'provider_type' && value === 'external_link') {
         next[key].paypal_hosted_button_id = '';
@@ -155,7 +158,11 @@ export default function PaymentSettingsModule(){
       }
 
       const paypalHostedButtonId = (config.paypal_hosted_button_id || '').trim();
-      if (providerType === 'paypal_hosted_button' && !PAYPAL_BUTTON_ID_PATTERN.test(paypalHostedButtonId)) {
+      if (
+        Boolean(config.enabled) &&
+        providerType === 'paypal_hosted_button' &&
+        !PAYPAL_BUTTON_ID_PATTERN.test(paypalHostedButtonId)
+      ) {
         throw new Error('PayPal Hosted Button ID must be alphanumeric (5-64 characters).');
       }
 
