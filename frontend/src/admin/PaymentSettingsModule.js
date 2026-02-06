@@ -157,7 +157,8 @@ export default function PaymentSettingsModule(){
         throw new Error('Payment settings fields cannot contain HTML/script markup.');
       }
 
-      const paypalHostedButtonId = (config.paypal_hosted_button_id || '').trim();
+      const paypalHostedButtonIdRaw = (config.paypal_hosted_button_id || '').trim();
+      const paypalHostedButtonId = paypalHostedButtonIdRaw.replace(/[^A-Za-z0-9]/g, '');
       if (
         Boolean(config.enabled) &&
         providerType === 'paypal_hosted_button' &&
@@ -342,7 +343,7 @@ export default function PaymentSettingsModule(){
                         type="text"
                         className="w-full rounded bg-gray-800 border border-gray-700 px-3 py-2 text-white"
                         value={data.paypal_hosted_button_id}
-                        onChange={(e) => updateField(key, 'paypal_hosted_button_id', e.target.value.replace(/\s+/g, ''))}
+                        onChange={(e) => updateField(key, 'paypal_hosted_button_id', e.target.value.replace(/[^A-Za-z0-9]/g, ''))}
                         placeholder="U7GKCHLN5VH66"
                         disabled={savingKey === key}
                       />
