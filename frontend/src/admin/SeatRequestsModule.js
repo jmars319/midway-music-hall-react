@@ -155,8 +155,27 @@ const parseSeatSnapshot = (snapshot) => {
   return [];
 };
 
+const seatLetterFromIndex = (index) => {
+  const value = Number(index);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  let n = Math.floor(value);
+  let letters = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letters;
+};
+
+const sanitizeSeatToken = (value) =>
+  String(value || '')
+    .trim()
+    .replace(/^(?:\(|\[|\s)+/, '')
+    .replace(/(?:\)|\]|\s)+$/, '');
+
 const withSeatDash = (value) => {
-  const raw = String(value || '').trim();
+  const raw = sanitizeSeatToken(value);
   if (!raw) return '';
   const direct = raw.match(/^(\d+)([A-Za-z]+)$/);
   if (direct) {
@@ -166,7 +185,7 @@ const withSeatDash = (value) => {
 };
 
 const resolveLegacyNumericSeat = (seatId, rows = []) => {
-  const raw = String(seatId || '').trim();
+  const raw = sanitizeSeatToken(seatId);
   if (!/^\d+$/.test(raw) || !rows.length) return '';
 
   const rowById = new Map();
@@ -197,6 +216,22 @@ const resolveLegacyNumericSeat = (seatId, rows = []) => {
   return best ? withSeatDash(formatSeatLabel(best, { mode: 'seat' })) : '';
 };
 
+const resolveLegacyNumericSeatHeuristic = (seatId) => {
+  const raw = sanitizeSeatToken(seatId);
+  if (!/^\d{2,}$/.test(raw)) return '';
+  for (let split = 1; split <= 2 && split < raw.length; split += 1) {
+    const tableRaw = raw.slice(0, raw.length - split);
+    const seatNum = Number(raw.slice(raw.length - split));
+    if (!tableRaw || !Number.isFinite(seatNum) || seatNum <= 0 || seatNum > 26) continue;
+    const table = String(Number(tableRaw));
+    if (!table || table === 'NaN') continue;
+    const letter = seatLetterFromIndex(seatNum);
+    if (!letter) continue;
+    return `${table}-${letter}`;
+  }
+  return '';
+};
+
 const escapeHtml = (value) => {
   if (value === null || value === undefined) return '';
   return String(value)
@@ -210,18 +245,31 @@ const escapeHtml = (value) => {
 const buildDisplaySeatList = (request) => {
   const seats = parseSeats(request.selected_seats || []);
   if (!seats.length) return [];
+  const snapshotRows = parseSeatSnapshot(request.seat_map_snapshot);
+  const snapshotSeatRows = snapshotRows.filter(isSeatRow);
   if (Array.isArray(request.seat_display_labels) && request.seat_display_labels.length) {
     const normalizedLabels = request.seat_display_labels.map((label) => describeSeatSelection(label));
-    return normalizedLabels.map((label) => withSeatDash(label));
+    return normalizedLabels.map((normalized) => {
+      const explicit = withSeatDash(normalized);
+      if (explicit) return explicit;
+      const fromSnapshot = resolveLegacyNumericSeat(normalized, snapshotSeatRows);
+      if (fromSnapshot) return fromSnapshot;
+      const heuristic = resolveLegacyNumericSeatHeuristic(normalized);
+      if (heuristic) return heuristic;
+      return normalized;
+    });
   }
-  const snapshotRows = parseSeatSnapshot(request.seat_map_snapshot);
-  if (!snapshotRows.length) {
-    return seats.map((seatId) => withSeatDash(describeSeatSelection(seatId)));
+  if (!snapshotSeatRows.length) {
+    return seats.map((seatId) => {
+      const normalized = withSeatDash(describeSeatSelection(seatId));
+      return normalized || resolveLegacyNumericSeatHeuristic(seatId) || describeSeatSelection(seatId);
+    });
   }
-  const lookup = buildSeatLookupMap(snapshotRows.filter(isSeatRow));
+  const lookup = buildSeatLookupMap(snapshotSeatRows);
   return seats.map((seatId) => {
-    const resolved = lookup[seatId] ? describeSeatSelection(seatId, lookup[seatId]) : resolveLegacyNumericSeat(seatId, snapshotRows);
-    return withSeatDash(resolved || describeSeatSelection(seatId));
+    const resolved = lookup[seatId] ? describeSeatSelection(seatId, lookup[seatId]) : resolveLegacyNumericSeat(seatId, snapshotSeatRows);
+    const normalized = withSeatDash(resolved || describeSeatSelection(seatId));
+    return normalized || resolveLegacyNumericSeatHeuristic(seatId) || describeSeatSelection(seatId);
   });
 };
 
