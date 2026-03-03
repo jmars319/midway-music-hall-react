@@ -46,5 +46,7 @@ if kill -0 "$pid" >/dev/null 2>&1; then
     kill -9 "$pid" >/dev/null 2>&1 || true
   fi
 fi
-log_error "backend failed to become ready at $(backend_health_url)"
+log_error "backend failed to bind/listen at ${DEV_BACKEND_HOST}:${DEV_BACKEND_PORT} (health: $(backend_health_url))"
+log_error "Check listeners with: lsof -nP -iTCP:${DEV_BACKEND_PORT} -sTCP:LISTEN"
+log_error "Try another port: DEV_BACKEND_PORT=8090 bash ./scripts/dev-start.sh"
 exit 2

@@ -115,6 +115,27 @@ if [ -z "$created_event_id" ]; then
 fi
 
 log_step "[seat-name-sync] creating seat request against original event name"
+seat_payload=$(curl -sS -H 'Accept: application/json' "${API_BASE}/seating/event/${created_event_id}")
+seat_id=$(SEAT_JSON="$seat_payload" python3 - <<'PY'
+import json
+import os
+
+payload = json.loads(os.environ.get('SEAT_JSON', '{}'))
+rows = payload.get('seating') or []
+for row in rows:
+    section = str(row.get('section_name') or row.get('section') or '').strip()
+    row_label = str(row.get('row_label') or '').strip()
+    total = int(row.get('total_seats') or 0)
+    if section and row_label and total > 0:
+        print(f"{section}-{row_label}-1")
+        break
+PY
+)
+if [ -z "$seat_id" ]; then
+  log_error "unable to derive a seat id from /api/seating/event/${created_event_id}"
+  exit 1
+fi
+
 seat_request_payload=$(cat <<JSON
 {
   "event_id": ${created_event_id},
@@ -123,13 +144,29 @@ seat_request_payload=$(cat <<JSON
     "phone": "555-867-5309",
     "email": "seat-sync@example.com"
   },
-  "selected_seats": ["Sync-A-1"],
+  "selected_seats": ["${seat_id}"],
   "special_requests": "Name sync verification"
 }
 JSON
 )
 
-create_request_response=$(curl -fsS -X POST -H 'Content-Type: application/json' -H 'Accept: application/json' -d "$seat_request_payload" "${API_BASE}/seat-requests")
+create_request_response=$(curl -sS -X POST -H 'Content-Type: application/json' -H 'Accept: application/json' -d "$seat_request_payload" "${API_BASE}/seat-requests")
+create_request_success=$(CREATE_REQUEST_JSON="$create_request_response" python3 - <<'PY'
+import json
+import os
+
+try:
+    payload = json.loads(os.environ.get('CREATE_REQUEST_JSON', '{}'))
+except Exception:
+    print('0')
+    raise SystemExit(0)
+print('1' if payload.get('success') else '0')
+PY
+)
+if [ "$create_request_success" != "1" ]; then
+  log_error "failed to create seat request for name sync verification: $create_request_response"
+  exit 1
+fi
 created_request_id=$(CREATE_REQUEST_JSON="$create_request_response" python3 - <<'PY'
 import json
 import os

@@ -184,7 +184,7 @@ export default function SeatRequestsModule() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [events, setEvents] = useState([]);
-  const [filters, setFilters] = useState({ status: 'open', eventId: 'all', search: '', groupByEvent: false });
+  const [filters, setFilters] = useState({ status: 'open', eventId: 'all', search: '', groupByEvent: false, includePast: false });
   const [collapsedGroups, setCollapsedGroups] = useState({});
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [editForm, setEditForm] = useState(null);
@@ -201,7 +201,7 @@ export default function SeatRequestsModule() {
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     fetchRequests();
-  }, [filters.status, filters.eventId]);
+  }, [filters.status, filters.eventId, filters.includePast]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
@@ -231,6 +231,7 @@ export default function SeatRequestsModule() {
       const params = new URLSearchParams();
       if (filters.status && filters.status !== 'all') params.append('status', filters.status);
       if (filters.eventId && filters.eventId !== 'all') params.append('event_id', filters.eventId);
+      if (filters.includePast) params.append('include_past', '1');
       const res = await fetch(`${API_BASE}/seat-requests${params.toString() ? `?${params.toString()}` : ''}`);
       const data = await res.json();
       if (data?.success && Array.isArray(data.requests)) {
@@ -1006,6 +1007,15 @@ export default function SeatRequestsModule() {
             className="w-4 h-4 rounded border-gray-600 bg-gray-800"
           />
           Group by event
+        </label>
+        <label className="flex items-center gap-2 text-sm text-gray-300">
+          <input
+            type="checkbox"
+            checked={filters.includePast}
+            onChange={(e) => setFilters((prev) => ({ ...prev, includePast: e.target.checked }))}
+            className="w-4 h-4 rounded border-gray-600 bg-gray-800"
+          />
+          Include past events
         </label>
       </div>
 
