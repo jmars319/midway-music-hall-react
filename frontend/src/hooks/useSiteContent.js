@@ -85,6 +85,22 @@ const DEFAULT_CONTENT = {
     link_text: '',
     severity: 'info',
   },
+  reservation_banner: {
+    enabled: false,
+    message: '',
+    label: '',
+    link_url: '',
+    link_text: '',
+    severity: 'info',
+  },
+  announcement_popup: {
+    enabled: false,
+    message: '',
+    link_url: '',
+    link_text: '',
+    severity: 'info',
+    allow_during_seat_selection: false,
+  },
   settings: {
     beach_price_label: '',
     beach_price_note: '',
@@ -152,6 +168,14 @@ const normalizeSiteContent = (value) => {
       ...DEFAULT_CONTENT.announcement,
       ...((safe.announcement && typeof safe.announcement === 'object') ? safe.announcement : {}),
     },
+    reservation_banner: {
+      ...DEFAULT_CONTENT.reservation_banner,
+      ...((safe.reservation_banner && typeof safe.reservation_banner === 'object') ? safe.reservation_banner : {}),
+    },
+    announcement_popup: {
+      ...DEFAULT_CONTENT.announcement_popup,
+      ...((safe.announcement_popup && typeof safe.announcement_popup === 'object') ? safe.announcement_popup : {}),
+    },
     settings: { ...DEFAULT_CONTENT.settings, ...((safe.settings && typeof safe.settings === 'object') ? safe.settings : {}) },
   };
   normalized.contacts = Array.isArray(safe.contacts) ? safe.contacts : DEFAULT_CONTENT.contacts;
@@ -163,6 +187,15 @@ const normalizeSiteContent = (value) => {
   normalized.announcement.severity = ['info', 'warning', 'urgent'].includes(normalized.announcement.severity)
     ? normalized.announcement.severity
     : 'info';
+  normalized.reservation_banner.enabled = Boolean(normalized.reservation_banner.enabled);
+  normalized.reservation_banner.severity = ['info', 'warning', 'urgent'].includes(normalized.reservation_banner.severity)
+    ? normalized.reservation_banner.severity
+    : 'info';
+  normalized.announcement_popup.enabled = Boolean(normalized.announcement_popup.enabled);
+  normalized.announcement_popup.severity = ['info', 'warning', 'urgent'].includes(normalized.announcement_popup.severity)
+    ? normalized.announcement_popup.severity
+    : 'info';
+  normalized.announcement_popup.allow_during_seat_selection = Boolean(normalized.announcement_popup.allow_during_seat_selection);
   return normalized;
 };
 

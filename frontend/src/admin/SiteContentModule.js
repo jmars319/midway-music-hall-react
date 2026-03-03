@@ -29,6 +29,24 @@ const emptyAnnouncement = () => ({
   severity: 'info',
 });
 
+const emptyReservationBanner = () => ({
+  enabled: false,
+  message: '',
+  label: '',
+  link_url: '',
+  link_text: '',
+  severity: 'info',
+});
+
+const emptyAnnouncementPopup = () => ({
+  enabled: false,
+  message: '',
+  link_url: '',
+  link_text: '',
+  severity: 'info',
+  allow_during_seat_selection: false,
+});
+
 const parseJsonSetting = (value, fallback) => {
   if (!value) return fallback;
   try {
@@ -57,6 +75,43 @@ const parseAnnouncementSetting = (value) => {
   }
 };
 
+const parseReservationBannerSetting = (value) => {
+  if (!value) return emptyReservationBanner();
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object') {
+      return emptyReservationBanner();
+    }
+    return {
+      ...emptyReservationBanner(),
+      ...parsed,
+      enabled: Boolean(parsed.enabled),
+      severity: ['info', 'warning', 'urgent'].includes(parsed.severity) ? parsed.severity : 'info',
+    };
+  } catch (err) {
+    return emptyReservationBanner();
+  }
+};
+
+const parseAnnouncementPopupSetting = (value) => {
+  if (!value) return emptyAnnouncementPopup();
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object') {
+      return emptyAnnouncementPopup();
+    }
+    return {
+      ...emptyAnnouncementPopup(),
+      ...parsed,
+      enabled: Boolean(parsed.enabled),
+      severity: ['info', 'warning', 'urgent'].includes(parsed.severity) ? parsed.severity : 'info',
+      allow_during_seat_selection: Boolean(parsed.allow_during_seat_selection),
+    };
+  } catch (err) {
+    return emptyAnnouncementPopup();
+  }
+};
+
 export default function SiteContentModule() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -82,6 +137,8 @@ export default function SiteContentModule() {
   const [contacts, setContacts] = useState([emptyContact()]);
   const [lessons, setLessons] = useState([emptyLesson()]);
   const [announcement, setAnnouncement] = useState(emptyAnnouncement());
+  const [reservationBanner, setReservationBanner] = useState(emptyReservationBanner());
+  const [announcementPopup, setAnnouncementPopup] = useState(emptyAnnouncementPopup());
 
   const loadSettings = async () => {
     setLoading(true);
@@ -114,6 +171,8 @@ export default function SiteContentModule() {
         const parsedLessons = parseJsonSetting(settings.lessons_json, []);
         setLessons(parsedLessons.length ? parsedLessons : [emptyLesson()]);
         setAnnouncement(parseAnnouncementSetting(settings.announcement_banner));
+        setReservationBanner(parseReservationBannerSetting(settings.reservation_banner));
+        setAnnouncementPopup(parseAnnouncementPopupSetting(settings.announcement_popup));
       } else {
         setError('Unable to load site content settings.');
       }
@@ -161,6 +220,12 @@ export default function SiteContentModule() {
   const updateAnnouncementField = (field, value) => {
     setAnnouncement((prev) => ({ ...prev, [field]: value }));
   };
+  const updateReservationBannerField = (field, value) => {
+    setReservationBanner((prev) => ({ ...prev, [field]: value }));
+  };
+  const updateAnnouncementPopupField = (field, value) => {
+    setAnnouncementPopup((prev) => ({ ...prev, [field]: value }));
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -197,6 +262,22 @@ export default function SiteContentModule() {
       link_text: announcement.link_text.trim(),
       severity: ['info', 'warning', 'urgent'].includes(announcement.severity) ? announcement.severity : 'info',
     };
+    const cleanedReservationBanner = {
+      enabled: Boolean(reservationBanner.enabled),
+      message: reservationBanner.message.trim(),
+      label: reservationBanner.label.trim(),
+      link_url: reservationBanner.link_url.trim(),
+      link_text: reservationBanner.link_text.trim(),
+      severity: ['info', 'warning', 'urgent'].includes(reservationBanner.severity) ? reservationBanner.severity : 'info',
+    };
+    const cleanedAnnouncementPopup = {
+      enabled: Boolean(announcementPopup.enabled),
+      message: announcementPopup.message.trim(),
+      link_url: announcementPopup.link_url.trim(),
+      link_text: announcementPopup.link_text.trim(),
+      severity: ['info', 'warning', 'urgent'].includes(announcementPopup.severity) ? announcementPopup.severity : 'info',
+      allow_during_seat_selection: Boolean(announcementPopup.allow_during_seat_selection),
+    };
     if (cleanedAnnouncement.enabled && !cleanedAnnouncement.message) {
       setError('Announcement message is required when enabled.');
       setSaving(false);
@@ -206,11 +287,31 @@ export default function SiteContentModule() {
       cleanedAnnouncement.link_url = '';
       cleanedAnnouncement.link_text = '';
     }
+    if (cleanedReservationBanner.enabled && !cleanedReservationBanner.message) {
+      setError('Reservation banner message is required when enabled.');
+      setSaving(false);
+      return;
+    }
+    if (!cleanedReservationBanner.link_url || !cleanedReservationBanner.link_text) {
+      cleanedReservationBanner.link_url = '';
+      cleanedReservationBanner.link_text = '';
+    }
+    if (cleanedAnnouncementPopup.enabled && !cleanedAnnouncementPopup.message) {
+      setError('Announcement popup message is required when enabled.');
+      setSaving(false);
+      return;
+    }
+    if (!cleanedAnnouncementPopup.link_url || !cleanedAnnouncementPopup.link_text) {
+      cleanedAnnouncementPopup.link_url = '';
+      cleanedAnnouncementPopup.link_text = '';
+    }
     const payload = {
       ...form,
       site_contacts_json: JSON.stringify(sanitizedContacts),
       lessons_json: JSON.stringify(sanitizedLessons),
       announcement_banner: JSON.stringify(cleanedAnnouncement),
+      reservation_banner: JSON.stringify(cleanedReservationBanner),
+      announcement_popup: JSON.stringify(cleanedAnnouncementPopup),
     };
     try {
       const res = await fetch(`${API_BASE}/settings`, {
@@ -375,6 +476,140 @@ export default function SiteContentModule() {
                   onChange={(e) => updateAnnouncementField('link_text', e.target.value)}
                   className="w-full px-4 py-2 bg-gray-700 text-white rounded"
                   placeholder="Read the update"
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className="bg-gray-800 rounded-xl border border-purple-500/30 p-6 space-y-4">
+            <div>
+              <h2 className="text-xl font-semibold text-white">Reservation flow banner</h2>
+              <p className="text-sm text-gray-400">Shown only inside the seating request modal.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="flex items-center gap-2 text-sm text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={reservationBanner.enabled}
+                  onChange={(e) => updateReservationBannerField('enabled', e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-600 bg-gray-800"
+                />
+                Enable reservation banner
+              </label>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Severity</label>
+                <select
+                  value={reservationBanner.severity}
+                  onChange={(e) => updateReservationBannerField('severity', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                >
+                  <option value="info">Info</option>
+                  <option value="warning">Warning</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Label (optional)</label>
+                <input
+                  value={reservationBanner.label}
+                  onChange={(e) => updateReservationBannerField('label', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="Reservation Notice"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm text-gray-300 mb-1">Message</label>
+                <textarea
+                  value={reservationBanner.message}
+                  onChange={(e) => updateReservationBannerField('message', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  rows="2"
+                  placeholder="Reservation requests are reviewed in submission order."
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Link URL (optional)</label>
+                <input
+                  value={reservationBanner.link_url}
+                  onChange={(e) => updateReservationBannerField('link_url', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="https://midwaymusichall.net"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Link text (optional)</label>
+                <input
+                  value={reservationBanner.link_text}
+                  onChange={(e) => updateReservationBannerField('link_text', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="More details"
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className="bg-gray-800 rounded-xl border border-purple-500/30 p-6 space-y-4">
+            <div>
+              <h2 className="text-xl font-semibold text-white">Announcement popup</h2>
+              <p className="text-sm text-gray-400">Dismissible popup announcement with a 24-hour cooldown.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="flex items-center gap-2 text-sm text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={announcementPopup.enabled}
+                  onChange={(e) => updateAnnouncementPopupField('enabled', e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-600 bg-gray-800"
+                />
+                Enable popup announcement
+              </label>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Severity</label>
+                <select
+                  value={announcementPopup.severity}
+                  onChange={(e) => updateAnnouncementPopupField('severity', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                >
+                  <option value="info">Info</option>
+                  <option value="warning">Warning</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-300 md:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={announcementPopup.allow_during_seat_selection}
+                  onChange={(e) => updateAnnouncementPopupField('allow_during_seat_selection', e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-600 bg-gray-800"
+                />
+                Allow popup while seat selection modal is open
+              </label>
+              <div className="md:col-span-2">
+                <label className="block text-sm text-gray-300 mb-1">Message</label>
+                <textarea
+                  value={announcementPopup.message}
+                  onChange={(e) => updateAnnouncementPopupField('message', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  rows="2"
+                  placeholder="Doors open 30 minutes before showtime."
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Link URL (optional)</label>
+                <input
+                  value={announcementPopup.link_url}
+                  onChange={(e) => updateAnnouncementPopupField('link_url', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="https://midwaymusichall.net"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Link text (optional)</label>
+                <input
+                  value={announcementPopup.link_text}
+                  onChange={(e) => updateAnnouncementPopupField('link_text', e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  placeholder="Read update"
                 />
               </div>
             </div>

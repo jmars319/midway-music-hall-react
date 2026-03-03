@@ -6064,19 +6064,52 @@ $router->add('GET', '/api/site-content', function () {
         $beachPriceLabel = trim((string)($settings['beach_price_label'] ?? ''));
         $beachPriceNote = trim((string)($settings['beach_price_note'] ?? ''));
         $announcementRaw = decode_settings_json($settings, 'announcement_banner', []);
+        $announcementSeverity = $announcementRaw['severity'] ?? 'info';
         $announcement = [
             'enabled' => !empty($announcementRaw['enabled']),
             'message' => trim((string)($announcementRaw['message'] ?? '')),
             'label' => trim((string)($announcementRaw['label'] ?? '')),
             'link_url' => trim((string)($announcementRaw['link_url'] ?? '')),
             'link_text' => trim((string)($announcementRaw['link_text'] ?? '')),
-            'severity' => in_array(($announcementRaw['severity'] ?? 'info'), ['info', 'warning', 'urgent'], true)
-                ? $announcementRaw['severity']
+            'severity' => in_array($announcementSeverity, ['info', 'warning', 'urgent'], true)
+                ? $announcementSeverity
                 : 'info',
         ];
         if ($announcement['link_url'] === '' || $announcement['link_text'] === '') {
             $announcement['link_url'] = '';
             $announcement['link_text'] = '';
+        }
+        $reservationBannerRaw = decode_settings_json($settings, 'reservation_banner', []);
+        $reservationBannerSeverity = $reservationBannerRaw['severity'] ?? 'info';
+        $reservationBanner = [
+            'enabled' => !empty($reservationBannerRaw['enabled']),
+            'message' => trim((string)($reservationBannerRaw['message'] ?? '')),
+            'label' => trim((string)($reservationBannerRaw['label'] ?? '')),
+            'link_url' => trim((string)($reservationBannerRaw['link_url'] ?? '')),
+            'link_text' => trim((string)($reservationBannerRaw['link_text'] ?? '')),
+            'severity' => in_array($reservationBannerSeverity, ['info', 'warning', 'urgent'], true)
+                ? $reservationBannerSeverity
+                : 'info',
+        ];
+        if ($reservationBanner['link_url'] === '' || $reservationBanner['link_text'] === '') {
+            $reservationBanner['link_url'] = '';
+            $reservationBanner['link_text'] = '';
+        }
+        $announcementPopupRaw = decode_settings_json($settings, 'announcement_popup', []);
+        $announcementPopupSeverity = $announcementPopupRaw['severity'] ?? 'info';
+        $announcementPopup = [
+            'enabled' => !empty($announcementPopupRaw['enabled']),
+            'message' => trim((string)($announcementPopupRaw['message'] ?? '')),
+            'link_url' => trim((string)($announcementPopupRaw['link_url'] ?? '')),
+            'link_text' => trim((string)($announcementPopupRaw['link_text'] ?? '')),
+            'severity' => in_array($announcementPopupSeverity, ['info', 'warning', 'urgent'], true)
+                ? $announcementPopupSeverity
+                : 'info',
+            'allow_during_seat_selection' => !empty($announcementPopupRaw['allow_during_seat_selection']),
+        ];
+        if ($announcementPopup['link_url'] === '' || $announcementPopup['link_text'] === '') {
+            $announcementPopup['link_url'] = '';
+            $announcementPopup['link_text'] = '';
         }
 
         Response::success([
@@ -6091,6 +6124,8 @@ $router->add('GET', '/api/site-content', function () {
                 'review' => $review,
                 'branding' => $branding,
                 'announcement' => $announcement,
+                'reservation_banner' => $reservationBanner,
+                'announcement_popup' => $announcementPopup,
                 'beach_price_label' => $beachPriceLabel,
                 'beach_price_note' => $beachPriceNote,
                 'settings' => [
