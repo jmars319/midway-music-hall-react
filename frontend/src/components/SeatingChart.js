@@ -44,6 +44,7 @@ export default function SeatingChart({
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [layoutRefreshToken, setLayoutRefreshToken] = useState(0);
+  const [mapScale, setMapScale] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     customerName: '',
@@ -301,6 +302,10 @@ export default function SeatingChart({
     setSelectedSeats((prev) => (prev.length ? [] : prev));
   }, [eventId, formEventId]);
 
+  useEffect(() => {
+    setMapScale(1);
+  }, [eventId, formEventId, layoutRefreshToken]);
+
   const rowHasPosition = useCallback(
     (row) =>
       row &&
@@ -525,6 +530,9 @@ export default function SeatingChart({
       );
     }
 
+    const scaledWidth = Math.round(canvasSettings.width * mapScale);
+    const scaledHeight = Math.round(canvasSettings.height * mapScale);
+
     return (
       <div className="flex flex-col xl:flex-row gap-6 items-start">
         <div className="relative flex-1 w-full min-w-0">
@@ -536,12 +544,23 @@ export default function SeatingChart({
             <div
               className="relative mx-auto"
               style={{
-                width: canvasSettings.width,
-                height: canvasSettings.height,
-                minWidth: canvasSettings.width,
-                minHeight: canvasSettings.height,
+                width: scaledWidth,
+                height: scaledHeight,
+                minWidth: scaledWidth,
+                minHeight: scaledHeight,
               }}
             >
+              <div
+                className="relative"
+                style={{
+                  width: canvasSettings.width,
+                  height: canvasSettings.height,
+                  minWidth: canvasSettings.width,
+                  minHeight: canvasSettings.height,
+                  transform: `scale(${mapScale})`,
+                  transformOrigin: 'top left',
+                }}
+              >
               <div
                 className="absolute inset-0 rounded-[32px] border border-gray-700/60 pointer-events-none"
                 style={{
@@ -668,6 +687,7 @@ export default function SeatingChart({
                   </div>
                 );
               })}
+              </div>
             </div>
 
             <div className="absolute left-4 bottom-4 text-gray-300 bg-gray-800/70 px-3 py-1 rounded-lg pointer-events-none">
@@ -677,7 +697,31 @@ export default function SeatingChart({
           {interactive && (
             <div className="mt-4 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
               {errorMessage && <div className="text-sm text-red-400">{errorMessage}</div>}
-              <div className="flex-1" />
+              <div className="flex-1 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMapScale((prev) => Math.max(0.6, Number((prev - 0.12).toFixed(2)) || 1))}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded border border-purple-500/40 bg-gray-800 text-white hover:bg-gray-700"
+                  aria-label="Zoom out seating chart"
+                >
+                  -
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMapScale((prev) => Math.min(2.5, Number((prev + 0.12).toFixed(2)) || 1))}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded border border-purple-500/40 bg-gray-800 text-white hover:bg-gray-700"
+                  aria-label="Zoom in seating chart"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMapScale(1)}
+                  className="inline-flex items-center rounded border border-purple-500/40 bg-gray-800 px-3 py-2 text-xs font-semibold text-white hover:bg-gray-700"
+                >
+                  Fit
+                </button>
+              </div>
               <button
                 onClick={openRequestModal}
                 className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-2 transition self-stretch sm:self-auto"

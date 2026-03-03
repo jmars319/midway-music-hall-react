@@ -4,18 +4,12 @@ import TableComponent from './TableComponent';
 import { API_BASE } from '../apiConfig';
 import { buildSeatLegendItems, buildSeatStatusMap } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
-import { buildSeatLookupMap, describeSeatSelection, isSeatRow } from '../utils/seatLabelUtils';
+import { buildSeatLookupMap, describeSeatSelection, formatSeatLabel, isSeatRow } from '../utils/seatLabelUtils';
 import { CONTACT_LINK_CLASSES, formatPhoneHref } from '../utils/contactLinks';
 import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
 import { loadPayPalHostedButtonsSdk } from '../utils/paypalHostedButtons';
-
-const publicSeatLabel = (label = '') => {
-  const safe = String(label || '').trim();
-  if (!safe) return '';
-  const idx = safe.lastIndexOf(' - ');
-  return idx >= 0 ? safe.slice(idx + 3).trim() : safe;
-};
+import ReservationBanner from './ReservationBanner';
 
 export default function EventSeatingModal({ event, onClose }) {
   const [seatingConfig, setSeatingConfig] = useState([]);
@@ -31,8 +25,10 @@ export default function EventSeatingModal({ event, onClose }) {
   const [successMessage, setSuccessMessage] = useState('');
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [showMobileEventDetails, setShowMobileEventDetails] = useState(false);
+  const [showLargeMap, setShowLargeMap] = useState(false);
   const paymentOption = event?.payment_option || null;
   const [paymentPanelDismissed, setPaymentPanelDismissed] = useState(false);
+  const [postSubmitPaymentReady, setPostSubmitPaymentReady] = useState(false); // Phase 3 scaffold: post-submit payment gate
   const [paypalRenderError, setPaypalRenderError] = useState('');
   const [stagePosition, setStagePosition] = useState({ x: 50, y: 10 });
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
@@ -45,6 +41,8 @@ export default function EventSeatingModal({ event, onClose }) {
   const resizeDebounceRef = useRef(null);
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
+  const largeMapOverlayRef = useRef(null);
+  const largeMapCloseButtonRef = useRef(null);
   const errorResetTimer = useRef(null);
   const seatDebug = useSeatDebugLogger('event-modal');
   const { log: seatDebugLog, enabled: seatDebugEnabled } = seatDebug;
@@ -57,6 +55,7 @@ export default function EventSeatingModal({ event, onClose }) {
   const specialRequestsId = `${titleId}-special-requests`;
   const phoneHelpTextId = `${titleId}-phone-help`;
   const eventDetailsPanelId = `${titleId}-event-details`;
+  const largeMapTitleId = `${titleId}-large-map-title`;
   const [form, setForm] = useState({
     customerName: '',
     customerEmail: '',
@@ -115,7 +114,7 @@ export default function EventSeatingModal({ event, onClose }) {
     [seatingConfig]
   );
   const seatLabelMap = useMemo(() => buildSeatLookupMap(activeRows), [activeRows]);
-  const seatLabelFor = (seatId) => publicSeatLabel(seatLabelMap[seatId] || seatId);
+  const seatLabelFor = (seatId) => formatSeatLabel(seatLabelMap[seatId] || seatId, { mode: 'seat' });
   const canvasWidth = canvasSettings?.width || 1200;
   const canvasHeight = canvasSettings?.height || 800;
   const hasPositions = useMemo(
@@ -143,6 +142,8 @@ export default function EventSeatingModal({ event, onClose }) {
     setShowContactForm(false);
     setShowCancelConfirm(false);
     setPaymentPanelDismissed(false);
+    setPostSubmitPaymentReady(false);
+    setShowLargeMap(false);
     setMapTransform({ scale: 1, translateX: 0, translateY: 0 });
     mapFitRequestedRef.current = false;
   }, [event.id]);
@@ -160,6 +161,37 @@ export default function EventSeatingModal({ event, onClose }) {
       setPaymentPanelDismissed(false);
     }
   }, [showContactForm, event.id]);
+
+  useEffect(() => {
+    if (showContactForm && showLargeMap) {
+      setShowLargeMap(false);
+    }
+  }, [showContactForm, showLargeMap]);
+
+  useEffect(() => {
+    if (!showLargeMap) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setShowLargeMap(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showLargeMap]);
+
+  useEffect(() => {
+    if (!showLargeMap) return;
+    requestAnimationFrame(() => {
+      if (largeMapCloseButtonRef.current) {
+        largeMapCloseButtonRef.current.focus();
+      } else if (largeMapOverlayRef.current) {
+        largeMapOverlayRef.current.focus();
+      }
+    });
+  }, [showLargeMap]);
 
   const fitSeatsToViewport = useCallback(() => {
     if (!hasPositions) return;
@@ -194,6 +226,14 @@ export default function EventSeatingModal({ event, onClose }) {
     mapFitRequestedRef.current = true;
     fitSeatsToViewport();
   }, [fitSeatsToViewport]);
+
+  const handleZoomIn = useCallback(() => {
+    setMapTransform((prev) => ({ ...prev, scale: Math.min(2.5, Number((prev.scale + 0.12).toFixed(2)) || 1) }));
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setMapTransform((prev) => ({ ...prev, scale: Math.max(0.6, Number((prev.scale - 0.12).toFixed(2)) || 1) }));
+  }, []);
 
   useEffect(() => {
     const handleResize = () => {
@@ -422,6 +462,7 @@ export default function EventSeatingModal({ event, onClose }) {
       seatIds: selectedSeats.slice(),
       seatCount: selectedSeats.length,
       requestType: 'event-modal',
+      phase3_post_submit_payment_ready: postSubmitPaymentReady,
     });
     
     try {
@@ -445,6 +486,7 @@ export default function EventSeatingModal({ event, onClose }) {
 
       const data = await res.json();
       if (data.success) {
+        setPostSubmitPaymentReady(true);
         setSuccessMessage('Request submitted successfully! We will contact you soon.');
         setSelectedSeats([]);
         setShowContactForm(false);
@@ -454,6 +496,7 @@ export default function EventSeatingModal({ event, onClose }) {
           seatCount: selectedSeats.length,
           status: res.status,
           success: true,
+          phase3_post_submit_payment_ready: true,
         });
         setTimeout(() => {
           onClose();
@@ -554,91 +597,256 @@ export default function EventSeatingModal({ event, onClose }) {
     </div>
   );
 
+  const renderSeatWorkspace = ({ expanded = false } = {}) => (
+    <div className={`flex flex-col${expanded ? '' : ' xl:flex-row'} gap-4 h-full min-h-0 seat-selection-layout`}>
+      <div className={`flex-1 min-w-0 flex flex-col gap-4 ${expanded ? 'min-h-[440px]' : 'min-h-[360px]'} seat-map-column`}>
+        <div
+          className={`seat-map-viewport seatingMapViewport seat-map-text-lock bg-gray-100 dark:bg-gray-900 rounded-xl border border-purple-500/20${expanded ? ' seat-map-viewport--expanded' : ''}`}
+          ref={mapViewportRef}
+        >
+          <div
+            className="seat-map-scroll seatingMapCanvasWrapper relative w-full h-full"
+            ref={canvasContainerRef}
+          >
+            <div
+              className="relative mx-auto"
+              style={{
+                width: canvasWidth,
+                height: canvasHeight,
+                minWidth: canvasWidth,
+                minHeight: canvasHeight,
+                transformOrigin: 'top left',
+                transform: `scale(${mapTransform.scale}) translate(${mapTransform.translateX}px, ${mapTransform.translateY}px)`
+              }}
+            >
+              {/* Stage */}
+              <div
+                className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
+                style={{
+                  left: `${stagePosition.x}%`,
+                  top: `${stagePosition.y}%`,
+                  transform: 'translate(-50%, -50%)',
+                  width: `${stageSize.width || 200}px`,
+                  height: `${stageSize.height || 80}px`,
+                  pointerEvents: 'none'
+                }}
+              >
+                STAGE
+              </div>
+
+              {/* Tables */}
+              {activeRows.map(row => {
+                if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
+                return (
+                  <div
+                    key={row.id}
+                    className="absolute"
+                    style={{
+                      left: `${row.pos_x}%`,
+                      top: `${row.pos_y}%`,
+                      transform: `translate(-50%, -50%)`,
+                      padding: '20px',
+                      minWidth: `${row.width || 120}px`,
+                      minHeight: `${row.height || 120}px`,
+                      pointerEvents: 'none'
+                    }}
+                  >
+                    <div className="flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
+                      <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
+                        <TableComponent
+                          row={row}
+                          tableShape={row.table_shape || 'table-6'}
+                          selectedSeats={selectedSeats}
+                          pendingSeats={pendingSeats}
+                          holdSeats={holdSeats}
+                          reservedSeats={reservedSeats}
+                          seatStatusMap={seatStatusMap}
+                          onToggleSeat={(seatId, meta = {}) =>
+                            handleSeatInteraction(seatId, {
+                              ...meta,
+                              tableId: row?.id || `${row.section_name}-${row.row_label}`,
+                              rowLabel: row.row_label,
+                              section: row.section_name || row.section,
+                            })
+                          }
+                          interactive
+                          labelFormatter={(rawLabel) => formatSeatLabel(rawLabel, { mode: 'seat' })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          {!seatingEnabled && (
+            <div className="pointer-events-none absolute inset-0 flex items-start justify-center p-4">
+              <div className="mt-6 rounded-xl bg-black/70 text-white border border-amber-400/60 max-w-xl w-full shadow-xl p-4 text-center">
+                <p className="text-base font-semibold">Seat reservations are temporarily paused.</p>
+                <p className="text-sm text-amber-100 mt-2">
+                  You can review which seats are already held or reserved, but new requests are disabled while staff finalizes the lineup. Please check back soon or contact the venue for assistance.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-gray-400 flex-1 min-w-[200px]">
+            Drag or pinch inside the map to explore available seats.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleZoomOut}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
+              aria-label="Zoom out seating map"
+            >
+              -
+            </button>
+            <button
+              type="button"
+              onClick={handleZoomIn}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
+              aria-label="Zoom in seating map"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowLargeMap((prev) => !prev);
+                mapFitRequestedRef.current = true;
+                requestAnimationFrame(() => fitSeatsToViewport());
+              }}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400/60"
+            >
+              {expanded ? 'Exit large map' : 'Open large map'}
+            </button>
+            <button
+              type="button"
+              onClick={handleFitSeatsClick}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-purple-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
+            >
+              Fit seats to screen
+            </button>
+          </div>
+        </div>
+        {isMobileSeatMode && !expanded && (
+          <details className="seat-legend-panel seat-legend-panel--mobile bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full">
+            <summary className="seat-legend-toggle list-none inline-flex w-full items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 cursor-pointer">
+              Legend
+            </summary>
+            <div className="mt-3 seat-legend-content">{legendList}</div>
+          </details>
+        )}
+        {expanded && (
+          <details className="seat-legend-panel seat-legend-panel--mobile bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full">
+            <summary className="seat-legend-toggle list-none inline-flex w-full items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 cursor-pointer">
+              Legend
+            </summary>
+            <div className="mt-3 seat-legend-content">{legendList}</div>
+          </details>
+        )}
+      </div>
+      {!isMobileSeatMode && !expanded && (
+        <aside className="bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-72 flex-shrink-0 max-h-[320px] xl:max-h-[calc(100vh-10rem)] overflow-y-auto seat-legend-panel">
+          <div className="font-semibold mb-3 text-white">Legend</div>
+          {legendList}
+        </aside>
+      )}
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4" role="presentation">
       <div
         ref={dialogRef}
         role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
+        aria-modal={!showLargeMap}
+        aria-labelledby={showLargeMap ? largeMapTitleId : titleId}
         tabIndex={-1}
-        className={`bg-gray-900 rounded-xl w-full max-w-7xl h-[90vh] flex flex-col border border-purple-500/30 shadow-2xl focus:outline-none${isMobileSeatMode ? ' seat-selection-mobile' : ''}`}
+        className={`relative bg-gray-900 rounded-xl w-full max-w-7xl h-[90vh] flex flex-col border border-purple-500/30 shadow-2xl focus:outline-none${isMobileSeatMode ? ' seat-selection-mobile' : ''}`}
       >
-        {/* Header */}
-        <div className="flex justify-between items-center p-6 border-b border-purple-500/20">
-          <div>
-            <h2 id={titleId} className="text-3xl font-bold text-white">
-              {event.artist_name || event.title}
-            </h2>
-            <p className="text-gray-400 mt-1">
-              {new Date(event.start_datetime || event.event_date).toLocaleDateString('en-US', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-              })}
-            </p>
-          </div>
-          <button 
-            ref={closeButtonRef}
-            onClick={handleCancel}
-            className="text-gray-400 hover:text-white transition rounded-full hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-400 inline-flex h-12 w-12 items-center justify-center"
-            aria-label="Close seating selection"
-            type="button"
-          >
-            <X className="h-7 w-7" />
-          </button>
-        </div>
-
-        {hasEventContact && (
-          <div className="px-6 py-4 border-b border-purple-500/20 bg-gray-950/40 space-y-3 seat-event-details">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs uppercase tracking-[0.4em] text-purple-200">Event Contact</p>
-              {isMobileSeatMode && (
-                <button
-                  type="button"
-                  className="text-xs font-semibold text-purple-200 underline decoration-dotted hover:text-purple-100"
-                  aria-expanded={showMobileEventDetails}
-                  aria-controls={eventDetailsPanelId}
-                  onClick={() => setShowMobileEventDetails((prev) => !prev)}
-                >
-                  {showMobileEventDetails ? 'Hide event details' : 'Show event details'}
-                </button>
-              )}
-            </div>
-            <div
-              id={eventDetailsPanelId}
-              className={`space-y-2${isMobileSeatMode ? ' seat-event-details-panel' : ''}${isMobileSeatMode && !showMobileEventDetails ? ' is-collapsed' : ''}`}
-              aria-hidden={isMobileSeatMode && !showMobileEventDetails}
-            >
-              {contactName && <p className="text-lg font-semibold text-white">{contactName}</p>}
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                {contactPhone && (
-                  <a
-                    href={contactPhoneHref || undefined}
-                    className={`${CONTACT_LINK_CLASSES} text-white bg-purple-600/20 border border-purple-500/40`}
-                    aria-label={`Call ${contactName || 'event contact'} at ${contactPhone}`}
-                  >
-                    <Phone className="h-4 w-4" aria-hidden="true" />
-                    <span>{contactPhone}</span>
-                  </a>
-                )}
-                {contactEmail && (
-                  <a
-                    href={`mailto:${contactEmail}`}
-                    className={`${CONTACT_LINK_CLASSES} text-white bg-purple-600/20 border border-purple-500/40`}
-                    aria-label={`Email ${contactName || 'event contact'} at ${contactEmail}`}
-                  >
-                    <Mail className="h-4 w-4" aria-hidden="true" />
-                    <span>{contactEmail}</span>
-                  </a>
-                )}
+        {!showLargeMap && (
+          <>
+            {/* Header */}
+            <div className="flex justify-between items-center p-6 border-b border-purple-500/20">
+              <div>
+                <h2 id={titleId} className="text-3xl font-bold text-white">
+                  {event.artist_name || event.title}
+                </h2>
+                <p className="text-gray-400 mt-1">
+                  {new Date(event.start_datetime || event.event_date).toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })}
+                </p>
               </div>
-              {contactNotes && (
-                <p className="text-sm text-gray-300">{contactNotes}</p>
-              )}
+              <button
+                ref={closeButtonRef}
+                onClick={handleCancel}
+                className="text-gray-400 hover:text-white transition rounded-full hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-400 inline-flex h-12 w-12 items-center justify-center"
+                aria-label="Close seating selection"
+                type="button"
+              >
+                <X className="h-7 w-7" />
+              </button>
             </div>
-          </div>
+            <ReservationBanner />
+
+            {hasEventContact && (
+              <div className="px-6 py-4 border-b border-purple-500/20 bg-gray-950/40 space-y-3 seat-event-details">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs uppercase tracking-[0.4em] text-purple-200">Event Contact</p>
+                  {isMobileSeatMode && (
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-purple-200 underline decoration-dotted hover:text-purple-100"
+                      aria-expanded={showMobileEventDetails}
+                      aria-controls={eventDetailsPanelId}
+                      onClick={() => setShowMobileEventDetails((prev) => !prev)}
+                    >
+                      {showMobileEventDetails ? 'Hide event details' : 'Show event details'}
+                    </button>
+                  )}
+                </div>
+                <div
+                  id={eventDetailsPanelId}
+                  className={`space-y-2${isMobileSeatMode ? ' seat-event-details-panel' : ''}${isMobileSeatMode && !showMobileEventDetails ? ' is-collapsed' : ''}`}
+                  aria-hidden={isMobileSeatMode && !showMobileEventDetails}
+                >
+                  {contactName && <p className="text-lg font-semibold text-white">{contactName}</p>}
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                    {contactPhone && (
+                      <a
+                        href={contactPhoneHref || undefined}
+                        className={`${CONTACT_LINK_CLASSES} text-white bg-purple-600/20 border border-purple-500/40`}
+                        aria-label={`Call ${contactName || 'event contact'} at ${contactPhone}`}
+                      >
+                        <Phone className="h-4 w-4" aria-hidden="true" />
+                        <span>{contactPhone}</span>
+                      </a>
+                    )}
+                    {contactEmail && (
+                      <a
+                        href={`mailto:${contactEmail}`}
+                        className={`${CONTACT_LINK_CLASSES} text-white bg-purple-600/20 border border-purple-500/40`}
+                        aria-label={`Email ${contactName || 'event contact'} at ${contactEmail}`}
+                      >
+                        <Mail className="h-4 w-4" aria-hidden="true" />
+                        <span>{contactEmail}</span>
+                      </a>
+                    )}
+                  </div>
+                  {contactNotes && (
+                    <p className="text-sm text-gray-300">{contactNotes}</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Content */}
@@ -837,132 +1045,49 @@ export default function EventSeatingModal({ event, onClose }) {
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col xl:flex-row gap-4 h-full min-h-0 seat-selection-layout">
-                <div className="flex-1 min-w-0 flex flex-col gap-4 min-h-[360px] seat-map-column">
-                  <div
-                    className="seat-map-viewport seatingMapViewport seat-map-text-lock bg-gray-100 dark:bg-gray-900 rounded-xl border border-purple-500/20"
-                    ref={mapViewportRef}
-                  >
-                    <div
-                      className="seat-map-scroll seatingMapCanvasWrapper relative w-full h-full"
-                      ref={canvasContainerRef}
-                    >
-                      <div
-                        className="relative mx-auto"
-                        style={{
-                          width: canvasWidth,
-                          height: canvasHeight,
-                          minWidth: canvasWidth,
-                          minHeight: canvasHeight,
-                          transformOrigin: 'top left',
-                          transform: `scale(${mapTransform.scale}) translate(${mapTransform.translateX}px, ${mapTransform.translateY}px)`
-                        }}
-                      >
-                        {/* Stage */}
-                        <div 
-                          className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
-                          style={{
-                            left: `${stagePosition.x}%`,
-                            top: `${stagePosition.y}%`,
-                            transform: 'translate(-50%, -50%)',
-                            width: `${stageSize.width || 200}px`,
-                            height: `${stageSize.height || 80}px`,
-                            pointerEvents: 'none'
-                          }}
-                        >
-                          STAGE
-                        </div>
-
-                        {/* Tables */}
-                        {activeRows.map(row => {
-                          if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
-                          return (
-                            <div
-                              key={row.id}
-                              className="absolute"
-                              style={{
-                                left: `${row.pos_x}%`,
-                                top: `${row.pos_y}%`,
-                                transform: `translate(-50%, -50%)`,
-                                padding: '20px',
-                                minWidth: `${row.width || 120}px`,
-                                minHeight: `${row.height || 120}px`,
-                                pointerEvents: 'none'
-                              }}
-                            >
-                              <div className="flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
-                                <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
-                                  <TableComponent
-                                    row={row}
-                                    tableShape={row.table_shape || 'table-6'}
-                                    selectedSeats={selectedSeats}
-                                    pendingSeats={pendingSeats}
-                                    holdSeats={holdSeats}
-                                    reservedSeats={reservedSeats}
-                                    seatStatusMap={seatStatusMap}
-                                    onToggleSeat={(seatId, meta = {}) =>
-                                      handleSeatInteraction(seatId, {
-                                        ...meta,
-                                        tableId: row?.id || `${row.section_name}-${row.row_label}`,
-                                        rowLabel: row.row_label,
-                                        section: row.section_name || row.section,
-                                      })
-                                    }
-                                    interactive
-                                    labelFormatter={publicSeatLabel}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    {!seatingEnabled && (
-                      <div className="pointer-events-none absolute inset-0 flex items-start justify-center p-4">
-                        <div className="mt-6 rounded-xl bg-black/70 text-white border border-amber-400/60 max-w-xl w-full shadow-xl p-4 text-center">
-                          <p className="text-base font-semibold">Seat reservations are temporarily paused.</p>
-                          <p className="text-sm text-amber-100 mt-2">
-                            You can review which seats are already held or reserved, but new requests are disabled while staff finalizes the lineup. Please check back soon or contact the venue for assistance.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-xs text-gray-400 flex-1 min-w-[200px]">
-                      Drag or pinch inside the map to explore available seats.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleFitSeatsClick}
-                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-purple-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
-                    >
-                      Fit seats to screen
-                    </button>
-                  </div>
-                  {isMobileSeatMode && (
-                    <details className="seat-legend-panel seat-legend-panel--mobile bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full">
-                      <summary className="seat-legend-toggle list-none inline-flex w-full items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 cursor-pointer">
-                        Legend
-                      </summary>
-                      <div className="mt-3 seat-legend-content">{legendList}</div>
-                    </details>
-                  )}
-                </div>
-                {!isMobileSeatMode && (
-                  <aside className="bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-72 flex-shrink-0 max-h-[320px] xl:max-h-[calc(100vh-10rem)] overflow-y-auto seat-legend-panel">
-                    <div className="font-semibold mb-3 text-white">Legend</div>
-                    {legendList}
-                  </aside>
-                )}
-              </div>
+              showLargeMap ? (
+                <div className="h-full rounded-xl border border-indigo-500/30 bg-gray-950/40" aria-hidden="true" />
+              ) : (
+                renderSeatWorkspace()
+              )
             )}
           </div>
         )}
 
+        {showLargeMap && hasPositions && !showContactForm && (
+          <div
+            ref={largeMapOverlayRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={largeMapTitleId}
+            tabIndex={-1}
+            className="absolute inset-0 z-30 bg-black/95 p-3 sm:p-6 focus:outline-none"
+          >
+            <div className="mx-auto flex h-full w-full max-w-[1600px] flex-col rounded-xl border border-indigo-500/40 bg-gray-950 shadow-2xl">
+              <div className="flex items-center justify-between gap-3 border-b border-indigo-500/30 px-4 py-3 sm:px-6">
+                <div>
+                  <h3 id={largeMapTitleId} className="text-lg font-semibold text-white">Large Seating Map</h3>
+                  <p className="text-xs text-indigo-100">Expanded view for easier navigation and larger text settings.</p>
+                </div>
+                <button
+                  ref={largeMapCloseButtonRef}
+                  type="button"
+                  onClick={() => setShowLargeMap(false)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full text-gray-300 hover:bg-gray-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400/70"
+                  aria-label="Close large seating map"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+              <div className="flex-1 min-h-0 overflow-hidden p-4 sm:p-6">
+                {renderSeatWorkspace({ expanded: true })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Footer Buttons - Only show when not in contact form */}
-        {!showContactForm && !loading && hasPositions && (
+        {!showContactForm && !loading && hasPositions && !showLargeMap && (
           <div className="p-6 border-t border-purple-500/20 bg-gray-900/50 flex flex-col gap-4 md:flex-row md:items-center md:justify-between seat-action-bar">
             <div className="flex-1">
               <div className="text-sm uppercase tracking-wide text-gray-400">Selected Seats</div>

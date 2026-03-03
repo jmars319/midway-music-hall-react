@@ -157,6 +157,12 @@ a:focus, button:focus, iframe:focus {
   touch-action: pan-x pan-y pinch-zoom;
 }
 
+.seat-map-viewport--expanded {
+  height: clamp(420px, 78vh, 900px);
+  min-height: 420px;
+  max-height: none;
+}
+
 .seat-map-scroll {
   width: 100%;
   height: 100%;
