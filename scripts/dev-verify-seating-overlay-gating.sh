@@ -7,13 +7,13 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 MODAL_FILE="$ROOT_DIR/frontend/src/components/EventSeatingModal.js"
 
-log_step "[seating-overlay-gating] verifying Show seating chart gated path"
+log_step "[seating-overlay-gating] verifying seating chart gated path"
 if ! rg -n "overlayOnlySeatChart" "$MODAL_FILE" >/dev/null; then
   log_error "overlayOnlySeatChart state missing"
   exit 1
 fi
-if ! rg -n "Show seating chart" "$MODAL_FILE" >/dev/null; then
-  log_error "Show seating chart button path missing"
+if ! rg -n "Show seating chart|Open seating chart" "$MODAL_FILE" >/dev/null; then
+  log_error "Seating chart button path missing"
   exit 1
 fi
 if ! rg -n "seatSelectionContentRef|MIN_INLINE_MAP_HEIGHT" "$MODAL_FILE" >/dev/null; then
@@ -48,7 +48,7 @@ fi
 cat <<'CHECKLIST'
 [seating-overlay-gating] MANUAL CHECKLIST
 1. Open a seating-enabled event and launch EventSeatingModal.
-2. In a narrow/mobile viewport, confirm inline map is replaced by "Show seating chart".
+2. In a narrow/mobile viewport, confirm inline map is replaced by a seating-chart open CTA.
 3. Open the chart, select seats, press "Confirm seats", and verify selection summary persists.
 4. Continue to contact form and submit; confirm post-submit flow remains intact.
 5. Verify Escape closes the large-map overlay on desktop.

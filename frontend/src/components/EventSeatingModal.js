@@ -11,6 +11,8 @@ import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
 import { loadPayPalHostedButtonsSdk } from '../utils/paypalHostedButtons';
 import ReservationBanner from './ReservationBanner';
 
+const ALWAYS_USE_SEAT_CHART_OVERLAY = true;
+
 export default function EventSeatingModal({ event, onClose }) {
   const [seatingConfig, setSeatingConfig] = useState([]);
   const [reservedSeats, setReservedSeats] = useState([]);
@@ -206,7 +208,7 @@ export default function EventSeatingModal({ event, onClose }) {
     });
   }, [showLargeMap]);
 
-  const fitSeatsToViewport = useCallback(() => {
+  const fitSeatsToViewport = useCallback((mode = 'fit') => {
     if (!hasPositions) return;
     const viewport = mapViewportRef.current;
     const scrollContainer = canvasContainerRef.current;
@@ -214,13 +216,66 @@ export default function EventSeatingModal({ event, onClose }) {
     const viewportWidth = viewport.clientWidth || 0;
     const viewportHeight = viewport.clientHeight || 0;
     if (!viewportWidth || !viewportHeight) return;
-    const scale = Math.min(viewportWidth / canvasWidth, viewportHeight / canvasHeight, 1);
-    const translateX = scale === 1 ? 0 : (viewportWidth - canvasWidth * scale) / 2;
-    const translateY = scale === 1 ? 0 : (viewportHeight - canvasHeight * scale) / 2;
+    const positionedRows = activeRows.filter(
+      (row) => row?.pos_x !== null && row?.pos_x !== undefined && row?.pos_y !== null && row?.pos_y !== undefined
+    );
+    let bounds = null;
+    if (positionedRows.length) {
+      bounds = positionedRows.reduce(
+        (acc, row) => {
+          const x = ((Number(row.pos_x) || 0) / 100) * canvasWidth;
+          const y = ((Number(row.pos_y) || 0) / 100) * canvasHeight;
+          return {
+            minX: Math.min(acc.minX, x),
+            maxX: Math.max(acc.maxX, x),
+            minY: Math.min(acc.minY, y),
+            maxY: Math.max(acc.maxY, y),
+          };
+        },
+        { minX: Number.POSITIVE_INFINITY, maxX: Number.NEGATIVE_INFINITY, minY: Number.POSITIVE_INFINITY, maxY: Number.NEGATIVE_INFINITY }
+      );
+    }
+    if (stagePosition && stageSize) {
+      const stageX = ((Number(stagePosition.x) || 0) / 100) * canvasWidth;
+      const stageY = ((Number(stagePosition.y) || 0) / 100) * canvasHeight;
+      const stageW = Number(stageSize.width);
+      const stageH = Number(stageSize.height);
+      if (Number.isFinite(stageX) && Number.isFinite(stageY) && Number.isFinite(stageW) && Number.isFinite(stageH)) {
+        const stageLeft = stageX - stageW / 2;
+        const stageRight = stageX + stageW / 2;
+        const stageTop = stageY - stageH / 2;
+        const stageBottom = stageY + stageH / 2;
+        if (bounds) {
+          bounds = {
+            minX: Math.min(bounds.minX, stageLeft),
+            maxX: Math.max(bounds.maxX, stageRight),
+            minY: Math.min(bounds.minY, stageTop),
+            maxY: Math.max(bounds.maxY, stageBottom),
+          };
+        } else {
+          bounds = {
+            minX: stageLeft,
+            maxX: stageRight,
+            minY: stageTop,
+            maxY: stageBottom,
+          };
+        }
+      }
+    }
+    const padding = mode === 'fit' ? 140 : 120;
+    const targetWidth = bounds ? Math.max(260, bounds.maxX - bounds.minX + padding * 2) : canvasWidth;
+    const targetHeight = bounds ? Math.max(220, bounds.maxY - bounds.minY + padding * 2) : canvasHeight;
+    const fitScale = Math.min(viewportWidth / targetWidth, viewportHeight / targetHeight);
+    const minScale = mode === 'default' ? 0.9 : 0.2;
+    const scale = Math.min(Math.max(fitScale, minScale), 2.2);
+    const focusX = bounds ? (bounds.minX + bounds.maxX) / 2 : canvasWidth / 2;
+    const focusY = bounds ? (bounds.minY + bounds.maxY) / 2 : canvasHeight / 2;
+    const translateX = viewportWidth / 2 - focusX * scale;
+    const translateY = viewportHeight / 2 - focusY * scale;
     scrollContainer.scrollTop = 0;
     scrollContainer.scrollLeft = 0;
     setMapTransform({ scale, translateX, translateY });
-  }, [canvasHeight, canvasWidth, hasPositions]);
+  }, [activeRows, canvasHeight, canvasWidth, hasPositions, stagePosition, stageSize]);
 
   const scheduleFitToViewport = useCallback(() => {
     if (!mapFitRequestedRef.current) return;
@@ -237,7 +292,7 @@ export default function EventSeatingModal({ event, onClose }) {
 
   const handleFitSeatsClick = useCallback(() => {
     mapFitRequestedRef.current = true;
-    fitSeatsToViewport();
+    fitSeatsToViewport('fit');
   }, [fitSeatsToViewport]);
 
   const handleZoomIn = useCallback(() => {
@@ -245,14 +300,14 @@ export default function EventSeatingModal({ event, onClose }) {
   }, []);
 
   const handleZoomOut = useCallback(() => {
-    setMapTransform((prev) => ({ ...prev, scale: Math.max(0.6, Number((prev.scale - 0.12).toFixed(2)) || 1) }));
+    setMapTransform((prev) => ({ ...prev, scale: Math.max(0.2, Number((prev.scale - 0.12).toFixed(2)) || 1) }));
   }, []);
 
   const openLargeMapOverlay = useCallback(() => {
     setShowLargeMap(true);
     mapFitRequestedRef.current = true;
     requestAnimationFrame(() => {
-      fitSeatsToViewport();
+      fitSeatsToViewport('default');
     });
   }, [fitSeatsToViewport]);
 
@@ -344,7 +399,9 @@ export default function EventSeatingModal({ event, onClose }) {
       const containerHeight = container.clientHeight || container.getBoundingClientRect().height || 0;
       const reservedUiHeight = isMobileSeatMode ? 225 : 185;
       const projectedMapHeight = containerHeight - reservedUiHeight;
-      const mustUseOverlay = projectedMapHeight > 0 && projectedMapHeight < MIN_INLINE_MAP_HEIGHT;
+      const mustUseOverlay =
+        ALWAYS_USE_SEAT_CHART_OVERLAY ||
+        (projectedMapHeight > 0 && projectedMapHeight < MIN_INLINE_MAP_HEIGHT);
       setOverlayOnlySeatChart((prev) => (prev === mustUseOverlay ? prev : mustUseOverlay));
       if (!mustUseOverlay && mapFitRequestedRef.current) {
         scheduleFitToViewport();
@@ -1187,16 +1244,14 @@ export default function EventSeatingModal({ event, onClose }) {
                 <div className="h-full rounded-xl border border-indigo-500/30 bg-gray-950/40" aria-hidden="true" />
               ) : overlayOnlySeatChart ? (
                 <div className="h-full rounded-xl border border-indigo-500/30 bg-gray-950/50 p-6 flex flex-col items-center justify-center text-center gap-4">
-                  <h3 className="text-xl font-semibold text-white">Seating chart available in focused view</h3>
-                  <p className="max-w-2xl text-sm text-gray-300">
-                    This screen size leaves too little room for an accurate interactive map. Open the dedicated seating chart to select seats comfortably.
-                  </p>
+                  <h3 className="text-xl font-semibold text-white">Select seats on the map</h3>
+                  <p className="max-w-2xl text-sm text-gray-300">Tap below to open the seating chart.</p>
                   <button
                     type="button"
                     onClick={openLargeMapOverlay}
                     className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-500/60 bg-indigo-600/20 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500/30 focus:outline-none focus:ring-2 focus:ring-indigo-300/70"
                   >
-                    Show seating chart
+                    Open seating chart
                   </button>
                 </div>
               ) : (
@@ -1219,7 +1274,7 @@ export default function EventSeatingModal({ event, onClose }) {
               <div className="flex items-center justify-between gap-3 border-b border-indigo-500/30 px-4 py-3 sm:px-6">
                 <div>
                   <h3 id={largeMapTitleId} className="text-lg font-semibold text-white">Large Seating Map</h3>
-                  <p className="text-xs text-indigo-100">Expanded view for easier navigation and larger text settings.</p>
+                  <p className="text-xs text-indigo-100">Zoom in and pick your seats.</p>
                 </div>
                 <button
                   ref={largeMapCloseButtonRef}
