@@ -35,6 +35,7 @@ This document covers admin-facing features, their implementation, and why they e
 ## Seat requests workflow
 - **What:** Review, approve, deny, and restore reservations.
 - **How:** `SeatRequestsModule.js` and `RequestsModule.js` use `/api/seat-requests` and approval/denial endpoints; backend enforces transactional conflict detection.
+- **Behavior note:** In "All events" mode (no `event_id` filter), past events are hidden by default; `include_past=1` (UI toggle) restores past rows.
 - **Why:** Prevents double-booking and provides staff control.
 
 ## Media library + responsive images

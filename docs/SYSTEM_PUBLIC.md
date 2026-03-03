@@ -10,6 +10,7 @@ This document covers public-facing features, their implementation, and why they 
 ## Hero + brand presentation
 - **What:** High-impact hero with CTA and brand assets.
 - **How:** `frontend/src/components/Hero.js`, `BrandImage.js`, and `useSiteContent.js` provide deterministic assets plus CMS copy fallback.
+- **Behavior note:** Home global announcements render as a full-width overlay pinned to the top edge of the hero image (no layout displacement), with bounded/scrollable long text.
 - **Why:** Establishes venue identity and drives primary actions.
 
 ## Featured + upcoming events
@@ -49,11 +50,12 @@ This document covers public-facing features, their implementation, and why they 
 ### Mobile seat-selection mode
 - **What:** A mobile-first layout that guarantees a usable seating map viewport and always-visible primary actions.
 - **How:** `EventSeatingModal.js` enables mobile mode when seat selection is active and `(max-width: 640px)` or coarse pointer conditions match; it clamps the map viewport height and constrains the action bar with internal scroll. Event details are collapsed by default behind a toggle with `aria-expanded`.
+- **Behavior note:** When inline map space is too constrained, the modal shows **Show seating chart**; selection continues in the overlay and returns via **Confirm seats**.
 - **Why:** Large accessibility font sizes on mobile must not obscure the map or action buttons.
 
 ## Payment links in seat requests
 - **What:** Payment CTA and fine print for eligible events.
-- **How:** `EventSeatingModal.js` renders payment details from `payment_option` and category-level payment settings.
+- **How:** `EventSeatingModal.js` renders payment details from `payment_option` and category-level payment settings only after successful seat-request submission; `paypal_orders` endpoints are scaffold stubs (not implemented) and amount fields (`total_amount`, `currency`) are stored as scaffolding.
 - **Why:** Consistent payment flow without per-event manual setup.
 
 ## Artist suggestion form
@@ -64,6 +66,7 @@ This document covers public-facing features, their implementation, and why they 
 ## Site content + contact info
 - **What:** Editable contact details, hero copy, and footer links.
 - **How:** `useSiteContent.js` loads `/api/site-content` or `/api/settings`; data lives in `business_settings`.
+- **Behavior note:** Announcement popup is centered modal-style and uses versioned localStorage cooldown per message payload.
 - **Why:** Staff can update content without code changes.
 
 ## Legal pages (privacy/terms)

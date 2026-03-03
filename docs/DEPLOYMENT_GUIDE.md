@@ -105,6 +105,7 @@ Keep `SEND_EMAILS=false` until all checks pass.
 - Verify time-based filtering hides past events.
 
 ## Optional repair for legacy NULL event status/visibility
+Behavior note: create/update paths now normalize missing/invalid `status` and `visibility` to `draft`/`private`, and admin list filtering treats legacy NULLs as those same defaults.
 Run only when you explicitly want to normalize legacy rows.
 
 ```sql
@@ -124,27 +125,5 @@ WHERE status IS NULL OR TRIM(status) = '' OR visibility IS NULL OR TRIM(visibili
 ```bash
 cd frontend && npm run lint
 cd frontend && npm run build
-bash ./scripts/dev-start.sh
-bash ./scripts/dev-verify-admin-api.sh
-bash ./scripts/dev-verify-event-reschedule.sh
-bash ./scripts/dev-verify-announcement-banner.sh
-bash ./scripts/dev-verify-announcement-popup-versioning.sh
-bash ./scripts/dev-verify-login-identifiers.sh
-bash ./scripts/dev-verify-seating-large-map.sh
-bash ./scripts/dev-verify-seating-overlay-gating.sh
-bash ./scripts/dev-verify-seat-marker-print.sh
-bash ./scripts/dev-verify-payment-post-submit.sh
-bash ./scripts/dev-verify-payment-orders-scaffold.sh
-bash ./scripts/dev-verify-seat-request-amount.sh
-bash ./scripts/dev-verify-confirmation-email-send-once.sh
-bash ./scripts/dev-verify-event-create-defaults.sh
-bash ./scripts/dev-verify-seat-requests-hide-past-events.sh
-bash ./scripts/dev-verify-payment-settings.sh
-bash ./scripts/dev-verify-paypal-hosted-buttons-api.sh
-bash ./scripts/dev-verify-seating-guardrails.sh
-bash ./scripts/dev-verify-recurring-events-api.sh
-bash ./scripts/dev-verify-event-images.sh
-bash ./scripts/dev-verify-clearable-fields.sh
-bash ./scripts/dev-verify-seat-request-event-name-sync.sh
-bash ./scripts/dev-stop.sh
+bash ./scripts/dev-verify-all.sh
 ```
