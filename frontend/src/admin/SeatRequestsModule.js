@@ -174,6 +174,8 @@ const sanitizeSeatToken = (value) =>
     .replace(/^(?:\(|\[|\s)+/, '')
     .replace(/(?:\)|\]|\s)+$/, '');
 
+const isPlainNumericToken = (value) => /^\d+$/.test(sanitizeSeatToken(value));
+
 const withSeatDash = (value) => {
   const raw = sanitizeSeatToken(value);
   if (!raw) return '';
@@ -262,14 +264,20 @@ const buildDisplaySeatList = (request) => {
   if (!snapshotSeatRows.length) {
     return seats.map((seatId) => {
       const normalized = withSeatDash(describeSeatSelection(seatId));
-      return normalized || resolveLegacyNumericSeatHeuristic(seatId) || describeSeatSelection(seatId);
+      if (!normalized || isPlainNumericToken(normalized)) {
+        return resolveLegacyNumericSeatHeuristic(seatId) || normalized || describeSeatSelection(seatId);
+      }
+      return normalized;
     });
   }
   const lookup = buildSeatLookupMap(snapshotSeatRows);
   return seats.map((seatId) => {
     const resolved = lookup[seatId] ? describeSeatSelection(seatId, lookup[seatId]) : resolveLegacyNumericSeat(seatId, snapshotSeatRows);
     const normalized = withSeatDash(resolved || describeSeatSelection(seatId));
-    return normalized || resolveLegacyNumericSeatHeuristic(seatId) || describeSeatSelection(seatId);
+    if (!normalized || isPlainNumericToken(normalized)) {
+      return resolveLegacyNumericSeatHeuristic(seatId) || normalized || describeSeatSelection(seatId);
+    }
+    return normalized;
   });
 };
 

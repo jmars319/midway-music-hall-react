@@ -11,6 +11,16 @@ const parseSeats = (value) => {
   }
 };
 
+const withSeatDash = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const direct = raw.match(/^(\d+)([A-Za-z]+)$/);
+  if (direct) {
+    return `${direct[1]}-${direct[2].toUpperCase()}`;
+  }
+  return raw;
+};
+
 const escapeHtml = (value) =>
   String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -41,7 +51,7 @@ const eventNameForRequest = (request = {}) =>
   request.event_display_name || request.event_artist_name || request.event_title || `Event ${request.event_id || ''}`.trim();
 
 const markerForSeat = (request, seatId) => {
-  const seatLabel = formatSeatLabel(seatId, { mode: 'seat' });
+  const seatLabel = withSeatDash(formatSeatLabel(seatId, { mode: 'seat' }));
   const tableLabel = formatSeatLabel(seatId, { mode: 'table' });
   return {
     kind: 'seat',
