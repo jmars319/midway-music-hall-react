@@ -4,6 +4,7 @@ import { Plus, Edit, Copy, CheckCircle, XCircle, Archive as ArchiveIcon } from '
 import { API_BASE, getImageUrlSync } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
 import { getEventEditorFlags } from './eventEditorFlags';
+import { formatSeatLabel } from '../utils/seatLabelUtils';
 const SECTION_STORAGE_KEY = 'mmh_event_sections';
 
 const VENUE_LABELS = {
@@ -1581,7 +1582,7 @@ export default function EventsModule(){
       <div className="flex flex-wrap gap-1">
         {seats.map((seat) => (
           <span key={seat} className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-100 border border-gray-600">
-            {seat}
+            {formatSeatLabel(seat, { mode: 'seat' })}
           </span>
         ))}
       </div>

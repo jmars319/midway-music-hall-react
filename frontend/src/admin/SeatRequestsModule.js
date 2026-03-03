@@ -4,7 +4,8 @@ import { API_BASE } from '../apiConfig';
 import TableComponent from '../components/TableComponent';
 import { buildSeatLegendItems, buildSeatStatusMap } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
-import { buildSeatLookupMap, describeSeatSelection, isSeatRow, seatIdsForRow } from '../utils/seatLabelUtils';
+import { buildSeatLookupMap, describeSeatSelection, formatSeatLabel, isSeatRow, seatIdsForRow } from '../utils/seatLabelUtils';
+import { buildMarkersForRequest, buildSeatMarkerPrintHtml } from '../utils/seatMarkerPrint';
 import { getSeatReasonMessage, getAdminReservationFailureMessage } from '../utils/reservationReasonMessages';
 import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
@@ -168,11 +169,11 @@ const buildDisplaySeatList = (request) => {
   const seats = parseSeats(request.selected_seats || []);
   if (!seats.length) return [];
   if (Array.isArray(request.seat_display_labels) && request.seat_display_labels.length) {
-    return request.seat_display_labels;
+    return request.seat_display_labels.map((label) => describeSeatSelection(label));
   }
   const snapshotRows = parseSeatSnapshot(request.seat_map_snapshot);
   if (!snapshotRows.length) {
-    return seats;
+    return seats.map((seatId) => describeSeatSelection(seatId));
   }
   const lookup = buildSeatLookupMap(snapshotRows.filter(isSeatRow));
   return seats.map((seatId) => describeSeatSelection(seatId, lookup[seatId]));
@@ -266,6 +267,10 @@ export default function SeatRequestsModule() {
       return haystack.includes(term);
     });
   }, [requests, filters.search]);
+  const confirmedVisibleRequests = useMemo(
+    () => visibleRequests.filter((req) => normalizeStatus(req.status) === 'confirmed'),
+    [visibleRequests]
+  );
 
   const groupedRequests = useMemo(() => {
     if (!filters.groupByEvent) return [];
@@ -477,6 +482,30 @@ export default function SeatRequestsModule() {
     win.document.close();
     win.focus();
   }, [events, filters.eventId, visibleRequests]);
+
+  const openMarkerPrintView = useCallback((markers, title) => {
+    const win = window.open('', 'mmh-seat-markers-print');
+    if (!win) {
+      alert('Pop-up blocked. Please allow pop-ups to print seat markers.');
+      return;
+    }
+    const html = buildSeatMarkerPrintHtml(markers, { title });
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+  }, []);
+
+  const printSeatMarkers = useCallback(() => {
+    if (!confirmedVisibleRequests.length) return;
+    const markers = confirmedVisibleRequests.flatMap((req) => buildMarkersForRequest(req, { mode: 'seat' }));
+    openMarkerPrintView(markers, 'Print Seat Markers');
+  }, [confirmedVisibleRequests, openMarkerPrintView]);
+
+  const printTableMarkerForRequest = useCallback((request) => {
+    const markers = buildMarkersForRequest(request, { mode: 'table' });
+    openMarkerPrintView(markers, 'Print Table Marker');
+  }, [openMarkerPrintView]);
 
   const deleteRequest = async (id) => {
     if (!window.confirm('Delete this seat request?')) return;
@@ -725,6 +754,17 @@ export default function SeatRequestsModule() {
         </button>
       );
     }
+    if (status === 'confirmed') {
+      buttons.push(
+        <button
+          key="print-table-marker"
+          onClick={() => printTableMarkerForRequest(req)}
+          className="px-2 py-1 text-[11px] bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-100 rounded"
+        >
+          Print Table Marker
+        </button>
+      );
+    }
     buttons.push(
       <button
         key="view"
@@ -910,6 +950,14 @@ export default function SeatRequestsModule() {
             <Info className="h-4 w-4" /> Print Seat Requests
           </button>
           <button
+            onClick={printSeatMarkers}
+            disabled={confirmedVisibleRequests.length === 0}
+            title={confirmedVisibleRequests.length === 0 ? 'No confirmed reservations to print yet.' : 'Print seat markers'}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-700 text-white rounded text-sm hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Info className="h-4 w-4" /> Print Seat Markers
+          </button>
+          <button
             onClick={refresh}
             className="inline-flex items-center gap-2 px-4 py-2 bg-gray-200 dark:bg-gray-800 rounded text-sm hover:bg-gray-300 dark:hover:bg-gray-700"
           >
@@ -917,6 +965,9 @@ export default function SeatRequestsModule() {
           </button>
         </div>
       </div>
+      {confirmedVisibleRequests.length === 0 && (
+        <p className="mb-3 text-xs text-gray-400">No confirmed reservations to print yet.</p>
+      )}
 
       <div className="flex flex-wrap items-center gap-4 mb-4">
         <select
@@ -1148,7 +1199,7 @@ export default function SeatRequestsModule() {
                 )}
                 {isFinalStatus(editForm.status) ? (
                   <div className="px-3 py-2 bg-gray-800 text-gray-200 rounded text-sm whitespace-pre-wrap">
-                    {editForm.selectedSeatsText || 'Seats locked after confirmation'}
+                    {displaySeatsForSelected.length ? displaySeatsForSelected.join('\n') : 'Seats locked after confirmation'}
                   </div>
                 ) : (
                   <textarea
@@ -1594,7 +1645,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                 <div className="flex flex-wrap gap-2">
                   {selectedSeats.map((seatId) => (
                     <span key={seatId} className="px-3 py-1 bg-purple-600/60 text-white rounded text-xs">
-                      {seatId}
+                      {formatSeatLabel(seatId, { mode: 'seat' })}
                     </span>
                   ))}
                   {selectedSeats.length === 0 && (

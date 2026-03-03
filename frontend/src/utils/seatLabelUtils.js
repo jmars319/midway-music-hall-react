@@ -105,11 +105,70 @@ const buildSeatLookupMap = (rows = []) => {
   return map;
 };
 
-const describeSeatSelection = (seatId, label) => {
-  if (!label || label === seatId) {
-    return seatId;
+const seatLetterFromIndex = (index) => {
+  const value = Number(index);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  let n = Math.floor(value);
+  let letters = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    n = Math.floor((n - 1) / 26);
   }
-  return `${label} (${seatId})`;
+  return letters;
+};
+
+const normalizeTableToken = (token) => {
+  const raw = String(token || '').trim();
+  if (!raw) return '';
+  const digitMatch = raw.match(/\d+/);
+  if (digitMatch) return digitMatch[0];
+  return raw;
+};
+
+const formatSeatLabel = (rawSeatId, options = {}) => {
+  const mode = options.mode === 'table' ? 'table' : 'seat';
+  const raw = String(rawSeatId || '').trim();
+  if (!raw) return '';
+
+  const directSeatMatch = raw.match(/^(\d+)\s*[- ]?\s*([A-Za-z]+)$/);
+  if (directSeatMatch) {
+    const table = directSeatMatch[1];
+    const seat = directSeatMatch[2].toUpperCase();
+    return mode === 'table' ? table : `${table}${seat}`;
+  }
+
+  const parts = raw.split('-').map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) {
+    return raw;
+  }
+
+  const seatPart = parts[parts.length - 1];
+  const rowPart = parts[parts.length - 2];
+  const table = normalizeTableToken(rowPart) || rowPart;
+  if (mode === 'table') {
+    return table || raw;
+  }
+
+  const seatNumber = Number(seatPart);
+  if (Number.isFinite(seatNumber) && seatNumber > 0) {
+    const letter = seatLetterFromIndex(seatNumber);
+    if (table && letter) {
+      return `${table}${letter}`;
+    }
+  }
+
+  const seatSuffix = String(seatPart || '').trim();
+  if (table && seatSuffix) {
+    return `${table}${seatSuffix.toUpperCase()}`;
+  }
+  return raw;
+};
+
+const describeSeatSelection = (seatId, label) => {
+  const formatted = formatSeatLabel(label || seatId, { mode: 'seat' });
+  if (formatted) return formatted;
+  return formatSeatLabel(seatId, { mode: 'seat' }) || String(seatId || '').trim();
 };
 
 export {
@@ -117,6 +176,7 @@ export {
   buildSeatLabel,
   buildSeatLookupMap,
   describeSeatSelection,
+  formatSeatLabel,
   isSeatRow,
   normalizeSeatLabels,
   resolveRowHeaderLabels,
