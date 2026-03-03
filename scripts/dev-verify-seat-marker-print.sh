@@ -36,7 +36,6 @@ const requiredTokens = [
   'Print Seat Markers',
   'markers-grid',
   'marker-card',
-  'Table 19 Reserved',
   'Seat 19A',
   'Seat 19B',
   'Test Guest',

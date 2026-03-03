@@ -4,7 +4,7 @@ import { API_BASE } from '../apiConfig';
 import TableComponent from '../components/TableComponent';
 import { buildSeatLegendItems, buildSeatStatusMap } from '../utils/seatingTheme';
 import useFocusTrap from '../utils/useFocusTrap';
-import { buildSeatLookupMap, describeSeatSelection, formatSeatLabel, isSeatRow, seatIdsForRow } from '../utils/seatLabelUtils';
+import { buildSeatLabel, buildSeatLookupMap, describeSeatSelection, formatSeatLabel, isSeatRow, seatIdsForRow } from '../utils/seatLabelUtils';
 import { buildMarkersForRequest, buildSeatMarkerPrintHtml } from '../utils/seatMarkerPrint';
 import { getSeatReasonMessage, getAdminReservationFailureMessage } from '../utils/reservationReasonMessages';
 import { filterUnavailableSeats } from '../utils/seatAvailability';
@@ -155,6 +155,48 @@ const parseSeatSnapshot = (snapshot) => {
   return [];
 };
 
+const withSeatDash = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const direct = raw.match(/^(\d+)([A-Za-z]+)$/);
+  if (direct) {
+    return `${direct[1]}-${direct[2].toUpperCase()}`;
+  }
+  return raw;
+};
+
+const resolveLegacyNumericSeat = (seatId, rows = []) => {
+  const raw = String(seatId || '').trim();
+  if (!/^\d+$/.test(raw) || !rows.length) return '';
+
+  const rowById = new Map();
+  rows.forEach((row) => {
+    const rowId = Number(row?.id);
+    if (Number.isFinite(rowId) && rowId > 0) {
+      rowById.set(rowId, row);
+    }
+  });
+  if (!rowById.size) return '';
+
+  let best = null;
+  for (let split = 1; split <= 2 && split < raw.length; split += 1) {
+    const rowIdPart = Number(raw.slice(0, raw.length - split));
+    const seatNumPart = Number(raw.slice(raw.length - split));
+    const row = rowById.get(rowIdPart);
+    if (!row) continue;
+    const total = Number(row.total_seats || row.totalSeats || row.capacity || 0);
+    if (!Number.isFinite(seatNumPart) || seatNumPart <= 0 || (total > 0 && seatNumPart > total)) {
+      continue;
+    }
+    const label = buildSeatLabel(row, seatNumPart);
+    if (!label) continue;
+    best = label;
+    break;
+  }
+
+  return best ? withSeatDash(formatSeatLabel(best, { mode: 'seat' })) : '';
+};
+
 const escapeHtml = (value) => {
   if (value === null || value === undefined) return '';
   return String(value)
@@ -169,14 +211,18 @@ const buildDisplaySeatList = (request) => {
   const seats = parseSeats(request.selected_seats || []);
   if (!seats.length) return [];
   if (Array.isArray(request.seat_display_labels) && request.seat_display_labels.length) {
-    return request.seat_display_labels.map((label) => describeSeatSelection(label));
+    const normalizedLabels = request.seat_display_labels.map((label) => describeSeatSelection(label));
+    return normalizedLabels.map((label) => withSeatDash(label));
   }
   const snapshotRows = parseSeatSnapshot(request.seat_map_snapshot);
   if (!snapshotRows.length) {
-    return seats.map((seatId) => describeSeatSelection(seatId));
+    return seats.map((seatId) => withSeatDash(describeSeatSelection(seatId)));
   }
   const lookup = buildSeatLookupMap(snapshotRows.filter(isSeatRow));
-  return seats.map((seatId) => describeSeatSelection(seatId, lookup[seatId]));
+  return seats.map((seatId) => {
+    const resolved = lookup[seatId] ? describeSeatSelection(seatId, lookup[seatId]) : resolveLegacyNumericSeat(seatId, snapshotRows);
+    return withSeatDash(resolved || describeSeatSelection(seatId));
+  });
 };
 
 export default function SeatRequestsModule() {
