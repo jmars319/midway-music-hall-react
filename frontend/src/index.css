@@ -158,8 +158,8 @@ a:focus, button:focus, iframe:focus {
 }
 
 .seat-map-viewport--expanded {
-  height: clamp(420px, 78vh, 900px);
-  min-height: 420px;
+  height: clamp(520px, 82vh, 1200px);
+  min-height: 520px;
   max-height: none;
 }
 

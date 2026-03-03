@@ -28,6 +28,7 @@ export default function EventSeatingModal({ event, onClose }) {
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [showMobileEventDetails, setShowMobileEventDetails] = useState(false);
   const [showLargeMap, setShowLargeMap] = useState(false);
+  const [showLargeMapLegend, setShowLargeMapLegend] = useState(false);
   const [overlayOnlySeatChart, setOverlayOnlySeatChart] = useState(false);
   const paymentOption = event?.payment_option || null;
   const [paymentPanelDismissed, setPaymentPanelDismissed] = useState(false);
@@ -158,6 +159,7 @@ export default function EventSeatingModal({ event, onClose }) {
     setSuccessMessage('');
     setErrorMessage('');
     setShowLargeMap(false);
+    setShowLargeMapLegend(false);
     setOverlayOnlySeatChart(false);
     setMapTransform({ scale: 1, translateX: 0, translateY: 0 });
     mapFitRequestedRef.current = false;
@@ -195,6 +197,12 @@ export default function EventSeatingModal({ event, onClose }) {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
+  }, [showLargeMap]);
+
+  useEffect(() => {
+    if (!showLargeMap) {
+      setShowLargeMapLegend(false);
+    }
   }, [showLargeMap]);
 
   useEffect(() => {
@@ -761,167 +769,252 @@ export default function EventSeatingModal({ event, onClose }) {
     </div>
   );
 
-  const renderSeatWorkspace = ({ expanded = false } = {}) => (
-    <div className={`flex flex-col${expanded ? '' : ' xl:flex-row'} gap-4 h-full min-h-0 seat-selection-layout`}>
-      <div className={`flex-1 min-w-0 flex flex-col gap-4 ${expanded ? 'min-h-[440px]' : 'min-h-[360px]'} seat-map-column`}>
+  const renderSeatWorkspace = ({ expanded = false } = {}) => {
+    const mapCanvas = (
+      <div
+        className={`${expanded ? 'h-full' : 'seat-map-viewport seatingMapViewport'} seat-map-text-lock bg-gray-900 rounded-xl border border-purple-500/20`}
+        ref={mapViewportRef}
+      >
         <div
-          className={`seat-map-viewport seatingMapViewport seat-map-text-lock bg-gray-100 dark:bg-gray-900 rounded-xl border border-purple-500/20${expanded ? ' seat-map-viewport--expanded' : ''}`}
-          ref={mapViewportRef}
+          className="seat-map-scroll seatingMapCanvasWrapper relative w-full h-full"
+          ref={canvasContainerRef}
         >
           <div
-            className="seat-map-scroll seatingMapCanvasWrapper relative w-full h-full"
-            ref={canvasContainerRef}
-          >
-            <div
-              className="relative mx-auto"
+            className="relative mx-auto"
               style={{
                 width: canvasWidth,
                 height: canvasHeight,
                 minWidth: canvasWidth,
                 minHeight: canvasHeight,
                 transformOrigin: 'top left',
-                transform: `scale(${mapTransform.scale}) translate(${mapTransform.translateX}px, ${mapTransform.translateY}px)`
+                transform: `translate(${mapTransform.translateX}px, ${mapTransform.translateY}px) scale(${mapTransform.scale})`
               }}
             >
-              {/* Stage */}
-              <div
-                className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
-                style={{
-                  left: `${stagePosition.x}%`,
-                  top: `${stagePosition.y}%`,
-                  transform: 'translate(-50%, -50%)',
-                  width: `${stageSize.width || 200}px`,
-                  height: `${stageSize.height || 80}px`,
-                  pointerEvents: 'none'
-                }}
-              >
-                STAGE
-              </div>
+            <div
+              className="absolute bg-amber-900 text-amber-100 rounded-lg font-bold shadow-lg z-10 flex items-center justify-center"
+              style={{
+                left: `${stagePosition.x}%`,
+                top: `${stagePosition.y}%`,
+                transform: 'translate(-50%, -50%)',
+                width: `${stageSize.width || 200}px`,
+                height: `${stageSize.height || 80}px`,
+                pointerEvents: 'none'
+              }}
+            >
+              STAGE
+            </div>
 
-              {/* Tables */}
-              {activeRows.map(row => {
-                if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
-                return (
-                  <div
-                    key={row.id}
-                    className="absolute"
-                    style={{
-                      left: `${row.pos_x}%`,
-                      top: `${row.pos_y}%`,
-                      transform: `translate(-50%, -50%)`,
-                      padding: '20px',
-                      minWidth: `${row.width || 120}px`,
-                      minHeight: `${row.height || 120}px`,
-                      pointerEvents: 'none'
-                    }}
-                  >
-                    <div className="flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
-                      <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
-                        <TableComponent
-                          row={row}
-                          tableShape={row.table_shape || 'table-6'}
-                          selectedSeats={selectedSeats}
-                          pendingSeats={pendingSeats}
-                          holdSeats={holdSeats}
-                          reservedSeats={reservedSeats}
-                          seatStatusMap={seatStatusMap}
-                          onToggleSeat={(seatId, meta = {}) =>
-                            handleSeatInteraction(seatId, {
-                              ...meta,
-                              tableId: row?.id || `${row.section_name}-${row.row_label}`,
-                              rowLabel: row.row_label,
-                              section: row.section_name || row.section,
-                            })
-                          }
-                          interactive
-                          labelFormatter={(rawLabel) => formatSeatLabel(rawLabel, { mode: 'seat' })}
-                        />
-                      </div>
+            {activeRows.map((row) => {
+              if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
+              return (
+                <div
+                  key={row.id}
+                  className="absolute"
+                  style={{
+                    left: `${row.pos_x}%`,
+                    top: `${row.pos_y}%`,
+                    transform: 'translate(-50%, -50%)',
+                    padding: '20px',
+                    minWidth: `${row.width || 120}px`,
+                    minHeight: `${row.height || 120}px`,
+                    pointerEvents: 'none'
+                  }}
+                >
+                  <div className="flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
+                    <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
+                      <TableComponent
+                        row={row}
+                        tableShape={row.table_shape || 'table-6'}
+                        selectedSeats={selectedSeats}
+                        pendingSeats={pendingSeats}
+                        holdSeats={holdSeats}
+                        reservedSeats={reservedSeats}
+                        seatStatusMap={seatStatusMap}
+                        onToggleSeat={(seatId, meta = {}) =>
+                          handleSeatInteraction(seatId, {
+                            ...meta,
+                            tableId: row?.id || `${row.section_name}-${row.row_label}`,
+                            rowLabel: row.row_label,
+                            section: row.section_name || row.section,
+                          })
+                        }
+                        interactive
+                        labelFormatter={(rawLabel) => formatSeatLabel(rawLabel, { mode: 'seat' })}
+                      />
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-          {!seatingEnabled && (
-            <div className="pointer-events-none absolute inset-0 flex items-start justify-center p-4">
-              <div className="mt-6 rounded-xl bg-black/70 text-white border border-amber-400/60 max-w-xl w-full shadow-xl p-4 text-center">
-                <p className="text-base font-semibold">Seat reservations are temporarily paused.</p>
-                <p className="text-sm text-amber-100 mt-2">
-                  You can review which seats are already held or reserved, but new requests are disabled while staff finalizes the lineup. Please check back soon or contact the venue for assistance.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-gray-400 flex-1 min-w-[200px]">
-            Drag or pinch inside the map to explore available seats.
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handleZoomOut}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
-              aria-label="Zoom out seating map"
-            >
-              -
-            </button>
-            <button
-              type="button"
-              onClick={handleZoomIn}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
-              aria-label="Zoom in seating map"
-            >
-              +
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (expanded) {
-                  setShowLargeMap(false);
-                  return;
-                }
-                openLargeMapOverlay();
-              }}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400/60"
-            >
-              {expanded ? 'Exit large map' : 'Open large map'}
-            </button>
-            <button
-              type="button"
-              onClick={handleFitSeatsClick}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-purple-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
-            >
-              Fit seats to screen
-            </button>
+                </div>
+              );
+            })}
           </div>
         </div>
-        {isMobileSeatMode && !expanded && (
-          <details className="seat-legend-panel seat-legend-panel--mobile bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full">
-            <summary className="seat-legend-toggle list-none inline-flex w-full items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 cursor-pointer">
-              Legend
-            </summary>
-            <div className="mt-3 seat-legend-content">{legendList}</div>
-          </details>
-        )}
-        {expanded && (
-          <details className="seat-legend-panel seat-legend-panel--mobile bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full">
-            <summary className="seat-legend-toggle list-none inline-flex w-full items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 cursor-pointer">
-              Legend
-            </summary>
-            <div className="mt-3 seat-legend-content">{legendList}</div>
-          </details>
+        {!seatingEnabled && (
+          <div className="pointer-events-none absolute inset-0 flex items-start justify-center p-4">
+            <div className="mt-6 rounded-xl bg-black/70 text-white border border-amber-400/60 max-w-xl w-full shadow-xl p-4 text-center">
+              <p className="text-base font-semibold">Seat reservations are temporarily paused.</p>
+              <p className="text-sm text-amber-100 mt-2">
+                You can review which seats are already held or reserved, but new requests are disabled while staff finalizes the lineup. Please check back soon or contact the venue for assistance.
+              </p>
+            </div>
+          </div>
         )}
       </div>
-      {!isMobileSeatMode && !expanded && (
-        <aside className="bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-72 flex-shrink-0 max-h-[320px] xl:max-h-[calc(100vh-10rem)] overflow-y-auto seat-legend-panel">
-          <div className="font-semibold mb-3 text-white">Legend</div>
-          {legendList}
-        </aside>
-      )}
-    </div>
-  );
+    );
+
+    if (expanded) {
+      return (
+        <div className="relative h-full min-h-0">
+          {mapCanvas}
+          <div className="pointer-events-none absolute inset-0">
+            <div className="pointer-events-auto absolute right-4 top-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowLargeMap(false)}
+                className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-indigo-400/60 bg-gray-950/80 text-white hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-300/70"
+                aria-label="Close seating chart"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+
+            <div className="pointer-events-auto absolute left-4 bottom-4">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowLargeMapLegend((prev) => !prev)}
+                  className="inline-flex items-center justify-center rounded-lg border border-purple-500/60 bg-gray-950/85 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-300/70"
+                >
+                  Legend
+                </button>
+                {showLargeMapLegend && (
+                  <div className="absolute bottom-12 left-0 w-[260px] max-w-[80vw] rounded-xl border border-purple-500/40 bg-gray-950/95 p-3 shadow-xl">
+                    {legendList}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="pointer-events-auto absolute right-4 bottom-4 flex items-center gap-2">
+              <span className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-indigo-100 border border-indigo-500/40 rounded-md bg-gray-950/85">
+                Zoom
+              </span>
+              <button
+                type="button"
+                onClick={handleZoomOut}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/50 bg-gray-950/85 text-sm font-semibold text-white hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
+                aria-label="Zoom out seating map"
+              >
+                -
+              </button>
+              <button
+                type="button"
+                onClick={handleZoomIn}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/50 bg-gray-950/85 text-sm font-semibold text-white hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
+                aria-label="Zoom in seating map"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                onClick={handleFitSeatsClick}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-purple-500/50 bg-gray-950/85 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
+              >
+                Fit seats to screen
+              </button>
+            </div>
+
+            {selectedSeats.length > 0 && seatingEnabled && (
+              <div className="pointer-events-auto absolute left-1/2 -translate-x-1/2 bottom-4">
+                <div className="rounded-xl border border-indigo-400/60 bg-gray-950/90 px-3 py-2 flex items-center gap-3 shadow-xl">
+                  <div className="hidden sm:flex flex-wrap gap-2 max-w-[50vw]">
+                    {selectedSeats.slice(0, 4).map((seat) => (
+                      <span key={seat} className="px-2 py-1 bg-purple-600/80 text-white rounded-full text-xs font-medium">
+                        {describeSeatSelection(seat, seatLabelFor(seat))}
+                      </span>
+                    ))}
+                    {selectedSeats.length > 4 && (
+                      <span className="px-2 py-1 bg-gray-700 text-white rounded-full text-xs font-medium">
+                        +{selectedSeats.length - 4}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleConfirmSeats}
+                    className="inline-flex items-center justify-center rounded-lg border border-indigo-300/70 bg-indigo-600/30 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500/40 focus:outline-none focus:ring-2 focus:ring-indigo-300/70"
+                  >
+                    Confirm seats ({selectedSeats.length})
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-col xl:flex-row gap-4 h-full min-h-0 seat-selection-layout">
+        <div className="flex-1 min-w-0 flex flex-col gap-4 min-h-[360px] seat-map-column">
+          {mapCanvas}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-gray-400 flex-1 min-w-[200px]">
+              Drag or pinch inside the map to explore available seats.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-indigo-100 border border-indigo-500/40 rounded-md">
+                Zoom
+              </span>
+              <button
+                type="button"
+                onClick={handleZoomOut}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
+                aria-label="Zoom out seating map"
+              >
+                -
+              </button>
+              <button
+                type="button"
+                onClick={handleZoomIn}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
+                aria-label="Zoom in seating map"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                onClick={openLargeMapOverlay}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400/60"
+              >
+                Open seating chart
+              </button>
+              <button
+                type="button"
+                onClick={handleFitSeatsClick}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-purple-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400/60"
+              >
+                Fit seats to screen
+              </button>
+            </div>
+          </div>
+          {isMobileSeatMode && (
+            <details className="seat-legend-panel seat-legend-panel--mobile bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full">
+              <summary className="seat-legend-toggle list-none inline-flex w-full items-center justify-center rounded-lg border border-purple-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 cursor-pointer">
+                Legend
+              </summary>
+              <div className="mt-3 seat-legend-content">{legendList}</div>
+            </details>
+          )}
+        </div>
+        {!isMobileSeatMode && (
+          <aside className="bg-gray-900/80 border border-purple-500/30 rounded-xl p-4 text-sm text-gray-200 w-full xl:w-72 flex-shrink-0 max-h-[320px] xl:max-h-[calc(100vh-10rem)] overflow-y-auto seat-legend-panel">
+            <div className="font-semibold mb-3 text-white">Legend</div>
+            {legendList}
+          </aside>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4" role="presentation">
@@ -1243,17 +1336,25 @@ export default function EventSeatingModal({ event, onClose }) {
               showLargeMap ? (
                 <div className="h-full rounded-xl border border-indigo-500/30 bg-gray-950/40" aria-hidden="true" />
               ) : overlayOnlySeatChart ? (
-                <div className="h-full rounded-xl border border-indigo-500/30 bg-gray-950/50 p-6 flex flex-col items-center justify-center text-center gap-4">
-                  <h3 className="text-xl font-semibold text-white">Select seats on the map</h3>
-                  <p className="max-w-2xl text-sm text-gray-300">Tap below to open the seating chart.</p>
-                  <button
-                    type="button"
-                    onClick={openLargeMapOverlay}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-500/60 bg-indigo-600/20 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500/30 focus:outline-none focus:ring-2 focus:ring-indigo-300/70"
-                  >
-                    Open seating chart
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={openLargeMapOverlay}
+                  className="h-full w-full rounded-xl border border-indigo-500/30 bg-gray-950/70 p-6 text-left focus:outline-none focus:ring-2 focus:ring-indigo-300/70"
+                  aria-label="Open full seating chart"
+                >
+                  <div className="relative h-full rounded-xl border border-indigo-500/20 bg-gradient-to-br from-gray-950 to-indigo-950/70 overflow-hidden">
+                    <div className="absolute inset-0 bg-black/35" />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center px-4">
+                      <h3 className="text-2xl font-semibold text-white">Open full seating chart</h3>
+                      <p className="max-w-2xl text-sm text-gray-200">
+                        Click anywhere to enter the full chart view, pick seats, and confirm.
+                      </p>
+                      <span className="inline-flex items-center justify-center rounded-lg border border-indigo-400/60 bg-indigo-600/30 px-5 py-3 text-sm font-semibold text-white">
+                        Open full seating chart
+                      </span>
+                    </div>
+                  </div>
+                </button>
               ) : (
                 renderSeatWorkspace()
               )
@@ -1268,49 +1369,11 @@ export default function EventSeatingModal({ event, onClose }) {
             aria-modal="true"
             aria-labelledby={largeMapTitleId}
             tabIndex={-1}
-            className="absolute inset-0 z-30 bg-black/95 p-3 sm:p-6 focus:outline-none"
+            className="fixed inset-0 z-[70] bg-black/70 p-3 sm:p-5 md:p-6 focus:outline-none"
           >
-            <div className="mx-auto flex h-full w-full max-w-[1600px] flex-col rounded-xl border border-indigo-500/40 bg-gray-950 shadow-2xl">
-              <div className="flex items-center justify-between gap-3 border-b border-indigo-500/30 px-4 py-3 sm:px-6">
-                <div>
-                  <h3 id={largeMapTitleId} className="text-lg font-semibold text-white">Large Seating Map</h3>
-                  <p className="text-xs text-indigo-100">Zoom in and pick your seats.</p>
-                </div>
-                <button
-                  ref={largeMapCloseButtonRef}
-                  type="button"
-                  onClick={() => setShowLargeMap(false)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full text-gray-300 hover:bg-gray-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400/70"
-                  aria-label="Close large seating map"
-                >
-                  <X className="h-6 w-6" />
-                </button>
-              </div>
-              <div className="flex-1 min-h-0 overflow-hidden p-4 sm:p-6">
-                {renderSeatWorkspace({ expanded: true })}
-              </div>
-              <div className="border-t border-indigo-500/30 px-4 py-3 sm:px-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs text-indigo-100">
-                  Selection is saved live while this chart is open.
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowLargeMap(false)}
-                    className="inline-flex items-center justify-center rounded-lg border border-gray-600 px-4 py-2 text-sm font-semibold text-gray-200 hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400/60"
-                  >
-                    Close
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowLargeMap(false)}
-                    disabled={selectedSeats.length === 0 || !seatingEnabled}
-                    className="inline-flex items-center justify-center rounded-lg border border-indigo-400/60 bg-indigo-600/20 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500/30 focus:outline-none focus:ring-2 focus:ring-indigo-300/70 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Confirm seats
-                  </button>
-                </div>
-              </div>
+            <h3 id={largeMapTitleId} className="sr-only">Seating chart</h3>
+            <div className="h-full w-full min-h-0 overflow-hidden rounded-xl border border-indigo-500/40 bg-gray-950 shadow-2xl">
+              {renderSeatWorkspace({ expanded: true })}
             </div>
           </div>
         )}
