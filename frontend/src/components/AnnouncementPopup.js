@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import useSiteContent from '../hooks/useSiteContent';
 
-const POPUP_DISMISS_KEY = 'mmh_announcement_popup_dismissed_at_v1';
+const POPUP_DISMISS_KEY_PREFIX = 'mmh_announcement_popup_dismissed_v2_';
 const POPUP_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 const DEFAULT_POPUP = {
@@ -41,30 +41,27 @@ const hasAnyModalOpen = () => {
   return Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
 };
 
-const hasSeatSelectionModalOpen = () => {
-  if (typeof document === 'undefined') return false;
-  const activeDialog = document.querySelector('[role="dialog"][aria-modal="true"]');
-  if (!activeDialog) return false;
-  const labelledBy = activeDialog.getAttribute('aria-labelledby') || '';
-  return labelledBy.startsWith('event-seating-title-');
+const popupVersionHash = (popup) => {
+  const payload = [
+    popup.enabled ? '1' : '0',
+    popup.message || '',
+    popup.severity || 'info',
+    popup.link_text || '',
+    popup.link_url || '',
+  ].join('|');
+  let hash = 0;
+  for (let i = 0; i < payload.length; i += 1) {
+    hash = (hash * 31 + payload.charCodeAt(i)) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
 };
 
-const isBlockedByModalState = (allowDuringSeatSelection) => {
-  const modalOpen = hasAnyModalOpen();
-  if (!modalOpen) {
-    return false;
-  }
-  const seatModalOpen = hasSeatSelectionModalOpen();
-  if (seatModalOpen && allowDuringSeatSelection) {
-    return false;
-  }
-  return true;
-};
+const dismissStorageKey = (popup) => `${POPUP_DISMISS_KEY_PREFIX}${popupVersionHash(popup)}`;
 
-const isInCooldownWindow = () => {
+const isInCooldownWindow = (storageKey) => {
   if (typeof window === 'undefined' || !window.localStorage) return false;
   try {
-    const rawValue = window.localStorage.getItem(POPUP_DISMISS_KEY);
+    const rawValue = window.localStorage.getItem(storageKey);
     if (!rawValue) return false;
     const dismissedAt = Number(rawValue);
     if (!Number.isFinite(dismissedAt) || dismissedAt <= 0) return false;
@@ -77,12 +74,13 @@ const isInCooldownWindow = () => {
 export default function AnnouncementPopup() {
   const siteContent = useSiteContent();
   const popup = useMemo(() => normalizePopup(siteContent?.announcement_popup || {}), [siteContent]);
+  const popupDismissKey = useMemo(() => dismissStorageKey(popup), [popup]);
   const [dismissed, setDismissed] = useState(false);
-  const [isBlockedByModal, setIsBlockedByModal] = useState(false);
+  const [isBlockedByModal, setIsBlockedByModal] = useState(() => hasAnyModalOpen());
 
   useEffect(() => {
     setDismissed(false);
-  }, [popup.enabled, popup.message, popup.severity, popup.link_url, popup.link_text, popup.allow_during_seat_selection]);
+  }, [popup.enabled, popup.message, popup.severity, popup.link_url, popup.link_text, popupDismissKey]);
 
   useLayoutEffect(() => {
     if (!popup.enabled) {
@@ -90,7 +88,7 @@ export default function AnnouncementPopup() {
       return undefined;
     }
     const updateModalState = () => {
-      const nextState = isBlockedByModalState(popup.allow_during_seat_selection);
+      const nextState = hasAnyModalOpen();
       setIsBlockedByModal((prev) => (prev === nextState ? prev : nextState));
     };
     updateModalState();
@@ -107,11 +105,11 @@ export default function AnnouncementPopup() {
       attributeFilter: ['role', 'aria-modal', 'aria-labelledby', 'class', 'style'],
     });
     return () => observer.disconnect();
-  }, [popup.enabled, popup.allow_during_seat_selection]);
+  }, [popup.enabled]);
 
-  const blockedByModalNow = popup.enabled && isBlockedByModalState(popup.allow_during_seat_selection);
+  const blockedByModalNow = popup.enabled && hasAnyModalOpen();
 
-  if (!popup.enabled || !popup.message || dismissed || isInCooldownWindow() || isBlockedByModal || blockedByModalNow) {
+  if (!popup.enabled || !popup.message || dismissed || isInCooldownWindow(popupDismissKey) || isBlockedByModal || blockedByModalNow) {
     return null;
   }
 
@@ -119,7 +117,7 @@ export default function AnnouncementPopup() {
     setDismissed(true);
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
-        window.localStorage.setItem(POPUP_DISMISS_KEY, String(Date.now()));
+        window.localStorage.setItem(popupDismissKey, String(Date.now()));
       } catch (err) {
         // Ignore storage failures and continue with in-memory dismissal.
       }
@@ -129,15 +127,29 @@ export default function AnnouncementPopup() {
   const styleClass = SEVERITY_STYLES[popup.severity] || SEVERITY_STYLES.info;
 
   return (
-    <div className="fixed inset-x-4 bottom-4 z-40 pointer-events-none">
-      <div className={`mx-auto max-w-2xl rounded-xl border shadow-2xl pointer-events-auto ${styleClass}`}>
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center p-4"
+      onClick={dismissPopup}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          dismissPopup();
+        }
+      }}
+      role="presentation"
+    >
+      <div className="absolute inset-0 bg-black/30" aria-hidden="true" />
+      <div
+        className={`relative z-10 w-full max-w-xl rounded-xl border shadow-2xl ${styleClass}`}
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="p-4 sm:p-5 flex items-start gap-3">
-          <div className="flex-1">
-            <p className="text-sm sm:text-base font-medium">{popup.message}</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm sm:text-base font-medium break-words [overflow-wrap:anywhere]">{popup.message}</p>
             {popup.link_url && popup.link_text && (
               <a
                 href={popup.link_url}
-                className="inline-block mt-2 text-sm font-semibold underline"
+                className="inline-block mt-2 text-sm font-semibold underline break-words [overflow-wrap:anywhere]"
               >
                 {popup.link_text}
               </a>

@@ -522,11 +522,10 @@ export default function HomePage({ onAdminClick, onNavigate }) {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <Navigation />
-      <AnnouncementBanner />
       <AnnouncementPopup />
 
       <main id="main" role="main">
-        <Hero />
+        <Hero topOverlay={<AnnouncementBanner variant="overlay" />} />
         <FirstTimeHere />
         <FeaturedEvents events={featuredEvents} loading={loadingEvents} />
         <RecurringEvents series={recurringSeries} />

@@ -104,6 +104,17 @@ Keep `SEND_EMAILS=false` until all checks pass.
 - Verify recurrence exceptions (skip date) remove instances from public.
 - Verify time-based filtering hides past events.
 
+## Optional repair for legacy NULL event status/visibility
+Run only when you explicitly want to normalize legacy rows.
+
+```sql
+UPDATE events
+SET
+  status = COALESCE(NULLIF(TRIM(status), ''), 'draft'),
+  visibility = COALESCE(NULLIF(TRIM(visibility), ''), 'private')
+WHERE status IS NULL OR TRIM(status) = '' OR visibility IS NULL OR TRIM(visibility) = '';
+```
+
 ## Data refresh (if reseeding events)
 - Update `frontend/src/data/events.json`.
 - Run `php backend/scripts/migrate_events.php`.
@@ -117,9 +128,17 @@ bash ./scripts/dev-start.sh
 bash ./scripts/dev-verify-admin-api.sh
 bash ./scripts/dev-verify-event-reschedule.sh
 bash ./scripts/dev-verify-announcement-banner.sh
+bash ./scripts/dev-verify-announcement-popup-versioning.sh
 bash ./scripts/dev-verify-login-identifiers.sh
 bash ./scripts/dev-verify-seating-large-map.sh
+bash ./scripts/dev-verify-seating-overlay-gating.sh
 bash ./scripts/dev-verify-seat-marker-print.sh
+bash ./scripts/dev-verify-payment-post-submit.sh
+bash ./scripts/dev-verify-payment-orders-scaffold.sh
+bash ./scripts/dev-verify-seat-request-amount.sh
+bash ./scripts/dev-verify-confirmation-email-send-once.sh
+bash ./scripts/dev-verify-event-create-defaults.sh
+bash ./scripts/dev-verify-seat-requests-hide-past-events.sh
 bash ./scripts/dev-verify-payment-settings.sh
 bash ./scripts/dev-verify-paypal-hosted-buttons-api.sh
 bash ./scripts/dev-verify-seating-guardrails.sh

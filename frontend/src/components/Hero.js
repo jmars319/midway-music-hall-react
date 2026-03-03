@@ -144,7 +144,7 @@ const resolveHeroImagesFromSettings = (settings, config) => {
 
 const shouldPrioritizeImage = (variantKey, index) => variantKey === 'main' && index === 0;
 
-export default function Hero({ variant = 'main', ctaTarget }) {
+export default function Hero({ variant = 'main', ctaTarget, topOverlay = null }) {
   const config = HERO_VARIANTS[variant] || HERO_VARIANTS.main;
   const [heroTitle, setHeroTitle] = useState(config.defaults.title);
   const [heroSubtitle, setHeroSubtitle] = useState(config.defaults.subtitle);
@@ -245,6 +245,13 @@ export default function Hero({ variant = 'main', ctaTarget }) {
           }}
         />
       </div>
+      {topOverlay && (
+        <div className="pointer-events-none absolute inset-x-0 top-3 sm:top-4 z-20 px-3 sm:px-4">
+          <div className="mx-auto max-w-5xl pointer-events-auto">
+            {topOverlay}
+          </div>
+        </div>
+      )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 relative z-10">
         <div className="flex justify-center">

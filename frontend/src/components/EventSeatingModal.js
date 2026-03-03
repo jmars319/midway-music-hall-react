@@ -26,9 +26,13 @@ export default function EventSeatingModal({ event, onClose }) {
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [showMobileEventDetails, setShowMobileEventDetails] = useState(false);
   const [showLargeMap, setShowLargeMap] = useState(false);
+  const [overlayOnlySeatChart, setOverlayOnlySeatChart] = useState(false);
   const paymentOption = event?.payment_option || null;
   const [paymentPanelDismissed, setPaymentPanelDismissed] = useState(false);
   const [postSubmitPaymentReady, setPostSubmitPaymentReady] = useState(false); // Phase 3 scaffold: post-submit payment gate
+  const [submittedSeatCount, setSubmittedSeatCount] = useState(0);
+  const [submittedTotalAmount, setSubmittedTotalAmount] = useState(null);
+  const [submittedCurrency, setSubmittedCurrency] = useState('USD');
   const [paypalRenderError, setPaypalRenderError] = useState('');
   const [stagePosition, setStagePosition] = useState({ x: 50, y: 10 });
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
@@ -37,8 +41,10 @@ export default function EventSeatingModal({ event, onClose }) {
   const [mapTransform, setMapTransform] = useState({ scale: 1, translateX: 0, translateY: 0 });
   const canvasContainerRef = useRef(null);
   const mapViewportRef = useRef(null);
+  const seatSelectionContentRef = useRef(null);
   const mapFitRequestedRef = useRef(false);
   const resizeDebounceRef = useRef(null);
+  const seatSizingDebounceRef = useRef(null);
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const largeMapOverlayRef = useRef(null);
@@ -130,6 +136,7 @@ export default function EventSeatingModal({ event, onClose }) {
   );
   const isSeatSelectionView = !loading && !showContactForm && hasPositions;
   const isMobileSeatMode = isSeatSelectionView && isMobileViewport;
+  const MIN_INLINE_MAP_HEIGHT = 240;
 
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
@@ -143,7 +150,13 @@ export default function EventSeatingModal({ event, onClose }) {
     setShowCancelConfirm(false);
     setPaymentPanelDismissed(false);
     setPostSubmitPaymentReady(false);
+    setSubmittedSeatCount(0);
+    setSubmittedTotalAmount(null);
+    setSubmittedCurrency('USD');
+    setSuccessMessage('');
+    setErrorMessage('');
     setShowLargeMap(false);
+    setOverlayOnlySeatChart(false);
     setMapTransform({ scale: 1, translateX: 0, translateY: 0 });
     mapFitRequestedRef.current = false;
   }, [event.id]);
@@ -235,6 +248,14 @@ export default function EventSeatingModal({ event, onClose }) {
     setMapTransform((prev) => ({ ...prev, scale: Math.max(0.6, Number((prev.scale - 0.12).toFixed(2)) || 1) }));
   }, []);
 
+  const openLargeMapOverlay = useCallback(() => {
+    setShowLargeMap(true);
+    mapFitRequestedRef.current = true;
+    requestAnimationFrame(() => {
+      fitSeatsToViewport();
+    });
+  }, [fitSeatsToViewport]);
+
   useEffect(() => {
     const handleResize = () => {
       scheduleFitToViewport();
@@ -254,6 +275,10 @@ export default function EventSeatingModal({ event, onClose }) {
     if (resizeDebounceRef.current) {
       clearTimeout(resizeDebounceRef.current);
       resizeDebounceRef.current = null;
+    }
+    if (seatSizingDebounceRef.current) {
+      clearTimeout(seatSizingDebounceRef.current);
+      seatSizingDebounceRef.current = null;
     }
   }, []);
 
@@ -307,6 +332,55 @@ export default function EventSeatingModal({ event, onClose }) {
     }
     mapFitRequestedRef.current = false;
   }, [isMobileSeatMode, scheduleFitToViewport]);
+
+  useEffect(() => {
+    if (!hasPositions || loading || showContactForm) {
+      setOverlayOnlySeatChart(false);
+      return undefined;
+    }
+    const evaluateSeatChartMode = () => {
+      const container = seatSelectionContentRef.current;
+      if (!container) return;
+      const containerHeight = container.clientHeight || container.getBoundingClientRect().height || 0;
+      const reservedUiHeight = isMobileSeatMode ? 225 : 185;
+      const projectedMapHeight = containerHeight - reservedUiHeight;
+      const mustUseOverlay = projectedMapHeight > 0 && projectedMapHeight < MIN_INLINE_MAP_HEIGHT;
+      setOverlayOnlySeatChart((prev) => (prev === mustUseOverlay ? prev : mustUseOverlay));
+      if (!mustUseOverlay && mapFitRequestedRef.current) {
+        scheduleFitToViewport();
+      }
+    };
+    const scheduleEvaluateSeatChartMode = () => {
+      if (seatSizingDebounceRef.current) {
+        clearTimeout(seatSizingDebounceRef.current);
+      }
+      seatSizingDebounceRef.current = setTimeout(() => {
+        seatSizingDebounceRef.current = null;
+        evaluateSeatChartMode();
+      }, 120);
+    };
+    evaluateSeatChartMode();
+    let observer = null;
+    if (typeof ResizeObserver !== 'undefined' && seatSelectionContentRef.current) {
+      observer = new ResizeObserver(() => {
+        scheduleEvaluateSeatChartMode();
+      });
+      observer.observe(seatSelectionContentRef.current);
+    }
+    window.addEventListener('resize', scheduleEvaluateSeatChartMode);
+    window.addEventListener('orientationchange', scheduleEvaluateSeatChartMode);
+    return () => {
+      window.removeEventListener('resize', scheduleEvaluateSeatChartMode);
+      window.removeEventListener('orientationchange', scheduleEvaluateSeatChartMode);
+      if (observer) {
+        observer.disconnect();
+      }
+      if (seatSizingDebounceRef.current) {
+        clearTimeout(seatSizingDebounceRef.current);
+        seatSizingDebounceRef.current = null;
+      }
+    };
+  }, [MIN_INLINE_MAP_HEIGHT, hasPositions, isMobileSeatMode, loading, scheduleFitToViewport, showContactForm]);
 
   const fetchEventSeating = async () => {
     setLoading(true);
@@ -435,11 +509,21 @@ export default function EventSeatingModal({ event, onClose }) {
     }
     setShowContactForm(true);
     setErrorMessage('');
+    setSuccessMessage('');
+    setPostSubmitPaymentReady(false);
+    setSubmittedSeatCount(0);
+    setSubmittedTotalAmount(null);
+    setSubmittedCurrency('USD');
   };
 
   const handleBackToSeats = () => {
     setShowContactForm(false);
     clearTransientErrorTimer();
+    setPostSubmitPaymentReady(false);
+    setSubmittedSeatCount(0);
+    setSubmittedTotalAmount(null);
+    setSubmittedCurrency('USD');
+    setSuccessMessage('');
     setForm({
       customerName: '',
       customerEmail: '',
@@ -486,10 +570,22 @@ export default function EventSeatingModal({ event, onClose }) {
 
       const data = await res.json();
       if (data.success) {
+        const submittedCount = selectedSeats.length;
+        const apiSeatRequest = data.seat_request || {};
+        const apiSeatCount = Number(apiSeatRequest.total_seats);
+        const apiTotalAmountRaw = normalizeFiniteNumber(apiSeatRequest.total_amount);
+        const computedAmount = apiTotalAmountRaw !== null ? Number(apiTotalAmountRaw.toFixed(2)) : null;
         setPostSubmitPaymentReady(true);
+        setSubmittedSeatCount(Number.isFinite(apiSeatCount) && apiSeatCount > 0 ? apiSeatCount : submittedCount);
+        setSubmittedTotalAmount(computedAmount);
+        setSubmittedCurrency(
+          typeof apiSeatRequest.currency === 'string' && apiSeatRequest.currency.trim()
+            ? apiSeatRequest.currency.trim().toUpperCase()
+            : 'USD'
+        );
         setSuccessMessage('Request submitted successfully! We will contact you soon.');
         setSelectedSeats([]);
-        setShowContactForm(false);
+        setShowContactForm(true);
         fetchEventSeating();
         seatDebugLog('reservation-submit-finish', {
           eventId: event.id,
@@ -498,9 +594,6 @@ export default function EventSeatingModal({ event, onClose }) {
           success: true,
           phase3_post_submit_payment_ready: true,
         });
-        setTimeout(() => {
-          onClose();
-        }, 2000);
       } else {
         clearTransientErrorTimer();
         setErrorMessage(data.message || 'Failed to submit request');
@@ -527,11 +620,25 @@ export default function EventSeatingModal({ event, onClose }) {
   };
 
   const paymentSeatLimit = paymentOption?.limit_seats ?? 6;
-  const paymentProviderType = paymentOption?.provider_type === 'paypal_hosted_button' ? 'paypal_hosted_button' : 'external_link';
-  const showPaymentPanel = showContactForm && paymentOption && !paymentPanelDismissed;
-  const paymentOverLimit = showPaymentPanel && selectedSeats.length > paymentSeatLimit;
+  const paymentProviderType = paymentOption?.provider_type === 'paypal_hosted_button'
+    ? 'paypal_hosted_button'
+    : paymentOption?.provider_type === 'paypal_orders'
+      ? 'paypal_orders'
+      : 'external_link';
+  const paymentSeatCount = postSubmitPaymentReady ? submittedSeatCount : selectedSeats.length;
+  const showPaymentPanel = postSubmitPaymentReady && paymentOption && !paymentPanelDismissed;
+  const paymentOverLimit = showPaymentPanel && paymentSeatCount > paymentSeatLimit;
   const paymentAvailableNotice = Boolean(paymentOption?.enabled ?? paymentOption);
   const paypalContainerId = `paypal-container-${event.id}`;
+  const amountDueCurrency = /^[A-Z]{3}$/.test(submittedCurrency || '') ? submittedCurrency : 'USD';
+  const amountDueLabel = submittedTotalAmount !== null
+    ? new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: amountDueCurrency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(submittedTotalAmount)
+    : '';
 
   useEffect(() => {
     if (!showPaymentPanel) {
@@ -714,9 +821,11 @@ export default function EventSeatingModal({ event, onClose }) {
             <button
               type="button"
               onClick={() => {
-                setShowLargeMap((prev) => !prev);
-                mapFitRequestedRef.current = true;
-                requestAnimationFrame(() => fitSeatsToViewport());
+                if (expanded) {
+                  setShowLargeMap(false);
+                  return;
+                }
+                openLargeMapOverlay();
               }}
               className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-500/50 bg-gray-800 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400/60"
             >
@@ -865,66 +974,9 @@ export default function EventSeatingModal({ event, onClose }) {
           // Contact Form View
           <div className="flex-1 overflow-y-auto p-6">
             <div className="max-w-2xl mx-auto">
-              <h3 className="text-2xl font-bold text-white mb-6">Enter Your Contact Information</h3>
-
-              {showPaymentPanel && (
-                <div className="mb-6 rounded-xl border border-indigo-500/40 bg-indigo-900/30 p-4 space-y-3">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-indigo-100">
-                        {paymentOverLimit ? 'Selected seats exceed the online payment limit.' : 'Optional payment step'}
-                      </p>
-                      <p className="text-xs text-gray-300">
-                        {paymentOverLimit
-                          ? 'Reach out to staff to pay for larger parties.'
-                          : `You can complete payment with ${paymentOption.provider_label || 'our partner'} after submitting your request.`}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentPanelDismissed(true)}
-                      className="text-xs text-gray-300 hover:text-white underline decoration-dotted"
-                    >
-                      Hide
-                    </button>
-                  </div>
-                  {paymentOverLimit ? (
-                    <p className="text-sm text-gray-100">
-                      {paymentOption.over_limit_message || 'Please call the box office to arrange payment for larger groups.'}
-                    </p>
-                  ) : (
-                    <>
-                      {paymentProviderType === 'paypal_hosted_button' ? (
-                        <div className="space-y-2">
-                          <div id={paypalContainerId} className="min-h-[40px]" />
-                          {paypalRenderError && (
-                            <p className="text-xs text-amber-200">{paypalRenderError}</p>
-                          )}
-                        </div>
-                      ) : (
-                        <a
-                          href={paymentOption.payment_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 font-semibold text-white hover:bg-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-300"
-                          aria-label="Open payment link in a new tab"
-                        >
-                          {paymentOption.button_text || 'Pay Online'}
-                        </a>
-                      )}
-                      {paymentOption.fine_print && (
-                        <p className="text-xs text-gray-300">{paymentOption.fine_print}</p>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-              
-              {successMessage && (
-                <div className="p-4 mb-6 bg-green-500/20 border border-green-500 text-green-300 rounded-lg" role="status" aria-live="polite">
-                  {successMessage}
-                </div>
-              )}
+              <h3 className="text-2xl font-bold text-white mb-6">
+                {postSubmitPaymentReady ? 'Request Submitted' : 'Enter Your Contact Information'}
+              </h3>
 
               {errorMessage && (
                 <div className="p-4 mb-6 bg-red-500/20 border border-red-500 text-red-300 rounded-lg" role="alert" aria-live="assertive">
@@ -932,7 +984,92 @@ export default function EventSeatingModal({ event, onClose }) {
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} className="space-y-4">
+              {postSubmitPaymentReady ? (
+                <div className="space-y-4">
+                  {successMessage && (
+                    <div className="p-4 bg-green-500/20 border border-green-500 text-green-300 rounded-lg" role="status" aria-live="polite">
+                      {successMessage}
+                    </div>
+                  )}
+                  {submittedTotalAmount !== null && (
+                    <div className="rounded-lg border border-emerald-500/40 bg-emerald-900/20 px-4 py-3">
+                      <p className="text-xs uppercase tracking-wide text-emerald-200">Amount due</p>
+                      <p className="text-xl font-semibold text-emerald-100 mt-1">
+                        {amountDueLabel}
+                      </p>
+                    </div>
+                  )}
+                  {showPaymentPanel && (
+                    <div className="rounded-xl border border-indigo-500/40 bg-indigo-900/30 p-4 space-y-3">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-indigo-100">
+                            {paymentOverLimit ? 'Selected seats exceed the online payment limit.' : 'Optional payment step'}
+                          </p>
+                          <p className="text-xs text-gray-300">
+                            {paymentOverLimit
+                              ? 'Reach out to staff to pay for larger parties.'
+                              : `You can complete payment with ${paymentOption.provider_label || 'our partner'} now.`}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentPanelDismissed(true)}
+                          className="text-xs text-gray-300 hover:text-white underline decoration-dotted"
+                        >
+                          Hide
+                        </button>
+                      </div>
+                      {paymentOverLimit ? (
+                        <p className="text-sm text-gray-100">
+                          {paymentOption.over_limit_message || 'Please call the box office to arrange payment for larger groups.'}
+                        </p>
+                      ) : (
+                        <>
+                          {paymentProviderType === 'paypal_hosted_button' ? (
+                            <div className="space-y-2">
+                              <div id={paypalContainerId} className="min-h-[40px]" />
+                              {paypalRenderError && (
+                                <p className="text-xs text-amber-200">{paypalRenderError}</p>
+                              )}
+                            </div>
+                          ) : paymentProviderType === 'paypal_orders' ? (
+                            <p className="text-sm text-gray-100">
+                              Online payment will be available after your request is submitted and approved.
+                            </p>
+                          ) : (
+                            <a
+                              href={paymentOption.payment_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 font-semibold text-white hover:bg-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-300"
+                              aria-label="Open payment link in a new tab"
+                            >
+                              {paymentOption.button_text || 'Pay Online'}
+                            </a>
+                          )}
+                          {paymentOption.fine_print && (
+                            <p className="text-xs text-gray-300">{paymentOption.fine_print}</p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition font-medium"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  {paymentAvailableNotice && (
+                    <p className="text-xs text-indigo-200">Online payment available after submitting your seat request.</p>
+                  )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-white mb-2 font-medium" htmlFor={nameInputId}>Your Name *</label>
@@ -1031,12 +1168,13 @@ export default function EventSeatingModal({ event, onClose }) {
                     {submitting ? 'Submitting...' : 'Submit Request'}
                   </button>
                 </div>
-              </form>
+                </form>
+              )}
             </div>
           </div>
         ) : (
           // Seating Chart View
-          <div className="flex-1 overflow-hidden p-6 min-h-0 seat-selection-content">
+          <div ref={seatSelectionContentRef} className="flex-1 overflow-hidden p-6 min-h-0 seat-selection-content">
             {!hasPositions ? (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center text-gray-400">
@@ -1047,6 +1185,20 @@ export default function EventSeatingModal({ event, onClose }) {
             ) : (
               showLargeMap ? (
                 <div className="h-full rounded-xl border border-indigo-500/30 bg-gray-950/40" aria-hidden="true" />
+              ) : overlayOnlySeatChart ? (
+                <div className="h-full rounded-xl border border-indigo-500/30 bg-gray-950/50 p-6 flex flex-col items-center justify-center text-center gap-4">
+                  <h3 className="text-xl font-semibold text-white">Seating chart available in focused view</h3>
+                  <p className="max-w-2xl text-sm text-gray-300">
+                    This screen size leaves too little room for an accurate interactive map. Open the dedicated seating chart to select seats comfortably.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={openLargeMapOverlay}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-500/60 bg-indigo-600/20 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500/30 focus:outline-none focus:ring-2 focus:ring-indigo-300/70"
+                  >
+                    Show seating chart
+                  </button>
+                </div>
               ) : (
                 renderSeatWorkspace()
               )
@@ -1082,6 +1234,28 @@ export default function EventSeatingModal({ event, onClose }) {
               <div className="flex-1 min-h-0 overflow-hidden p-4 sm:p-6">
                 {renderSeatWorkspace({ expanded: true })}
               </div>
+              <div className="border-t border-indigo-500/30 px-4 py-3 sm:px-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-indigo-100">
+                  Selection is saved live while this chart is open.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowLargeMap(false)}
+                    className="inline-flex items-center justify-center rounded-lg border border-gray-600 px-4 py-2 text-sm font-semibold text-gray-200 hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400/60"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowLargeMap(false)}
+                    disabled={selectedSeats.length === 0 || !seatingEnabled}
+                    className="inline-flex items-center justify-center rounded-lg border border-indigo-400/60 bg-indigo-600/20 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500/30 focus:outline-none focus:ring-2 focus:ring-indigo-300/70 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Confirm seats
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -1092,7 +1266,7 @@ export default function EventSeatingModal({ event, onClose }) {
             <div className="flex-1">
               <div className="text-sm uppercase tracking-wide text-gray-400">Selected Seats</div>
               {paymentAvailableNotice && selectedSeats.length === 0 && (
-                <p className="mt-2 text-xs text-indigo-200">Online payment available after selecting seats.</p>
+                <p className="mt-2 text-xs text-indigo-200">Online payment available after submitting your seat request.</p>
               )}
                   {selectedSeats.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -1162,3 +1336,10 @@ export default function EventSeatingModal({ event, onClose }) {
     </div>
   );
 }
+  function normalizeFiniteNumber(value) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }

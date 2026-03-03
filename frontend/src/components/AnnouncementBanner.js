@@ -40,29 +40,30 @@ const SEVERITY_STYLES = {
   },
 };
 
-export default function AnnouncementBanner({ className = '' }) {
+export default function AnnouncementBanner({ className = '', variant = 'default' }) {
   const siteContent = useSiteContent();
   const banner = normalizeBanner(siteContent?.announcement || {});
   if (!banner.enabled || !banner.message) {
     return null;
   }
+  const isOverlay = variant === 'overlay';
   const styles = SEVERITY_STYLES[banner.severity] || SEVERITY_STYLES.info;
   const hasLink = banner.link_url && banner.link_text;
 
   return (
     <section className={className} aria-live="polite">
-      <div className={`border-b ${styles.container}`}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className={`${isOverlay ? 'rounded-xl border shadow-2xl' : 'border-b'} ${styles.container}`}>
+        <div className={`${isOverlay ? 'max-w-4xl mx-auto px-3 sm:px-4 py-2 sm:py-2.5' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3'} flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between`}>
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             {banner.label && (
               <span className={`text-xs font-semibold uppercase tracking-wide px-2 py-1 rounded ${styles.label}`}>
                 {banner.label}
               </span>
             )}
-            <p className="text-sm font-medium">{banner.message}</p>
+            <p className={`text-sm font-medium break-words [overflow-wrap:anywhere] ${isOverlay ? 'max-h-20 sm:max-h-24 overflow-y-auto pr-1' : ''}`}>{banner.message}</p>
           </div>
           {hasLink && (
-            <a href={banner.link_url} className={`text-sm font-semibold ${styles.link}`}>
+            <a href={banner.link_url} className={`text-sm font-semibold break-words [overflow-wrap:anywhere] ${styles.link}`}>
               {banner.link_text}
             </a>
           )}
