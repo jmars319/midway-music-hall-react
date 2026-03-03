@@ -65,6 +65,32 @@ function normalize_nullable_decimal($value): ?string
     return number_format((float) $value, 2, '.', '');
 }
 
+function resolve_seat_request_total_amount(array $event, int $seatCount): ?string
+{
+    if ($seatCount <= 0) {
+        return null;
+    }
+    $priceCandidates = [
+        $event['ticket_price'] ?? null,
+        $event['min_ticket_price'] ?? null,
+        $event['door_price'] ?? null,
+        $event['max_ticket_price'] ?? null,
+    ];
+    $pricePerSeat = null;
+    foreach ($priceCandidates as $candidate) {
+        $normalized = normalize_nullable_decimal($candidate);
+        if ($normalized === null || (float) $normalized < 0) {
+            continue;
+        }
+        $pricePerSeat = (float) $normalized;
+        break;
+    }
+    if ($pricePerSeat === null) {
+        return null;
+    }
+    return number_format($pricePerSeat * $seatCount, 2, '.', '');
+}
+
 function normalize_nullable_int($value): ?int
 {
     if ($value === null || $value === '' || $value === false) {
@@ -816,7 +842,7 @@ function payment_settings_has_disallowed_markup(?string $value): bool
 function normalize_payment_provider_type($value): string
 {
     $providerType = strtolower(trim((string) ($value ?? 'external_link')));
-    if (!in_array($providerType, ['external_link', 'paypal_hosted_button'], true)) {
+    if (!in_array($providerType, ['external_link', 'paypal_hosted_button', 'paypal_orders'], true)) {
         return 'external_link';
     }
     return $providerType;
@@ -942,6 +968,7 @@ function resolve_event_payment_option(array $event, array $lookup): ?array
         'scope' => $candidate['scope'] ?? 'category',
         'category_id' => $candidate['category_id'] ?? null,
         'provider_type' => $providerType,
+        'supports_dynamic_amount' => $providerType === 'paypal_orders',
         'provider_label' => $candidate['provider_label'] ?? null,
         'button_text' => $buttonText,
         'limit_seats' => $limitSeats,
@@ -964,6 +991,11 @@ function resolve_event_payment_option(array $event, array $lookup): ?array
             $paypalPayload['sdk_client_id'] = $sdkClientId;
         }
         $base['paypal'] = $paypalPayload;
+        return $base;
+    }
+    if ($providerType === 'paypal_orders') {
+        $base['paypal_orders_enabled'] = true;
+        $base['currency'] = normalize_paypal_currency($candidate['paypal_currency'] ?? 'USD');
         return $base;
     }
     $paymentUrl = trim((string) ($candidate['payment_url'] ?? ''));
@@ -1864,18 +1896,18 @@ function notify_seat_request_emails(array $seatRequest, array $event): void
     }
 }
 
-function notify_seat_request_confirmed_email(array $seatRequest, array $event): void
+function notify_seat_request_confirmed_email(array $seatRequest, array $event): bool
 {
     try {
         $emailer = Emailer::instance();
     } catch (Throwable $error) {
         error_log('[email] Failed to initialize emailer for seat request confirmation: ' . $error->getMessage());
-        return;
+        return false;
     }
 
     $customerEmail = isset($seatRequest['customer_email']) ? trim((string) $seatRequest['customer_email']) : '';
     if ($customerEmail === '' || !filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) {
-        return;
+        return false;
     }
 
     $eventTitle = trim((string) ($event['title'] ?? ''));
@@ -1923,8 +1955,10 @@ function notify_seat_request_confirmed_email(array $seatRequest, array $event): 
             'reply_to' => $staffInbox,
             'content_type' => 'text/html',
         ]);
+        return true;
     } catch (Throwable $sendError) {
         error_log('[email] Seat request confirmation email failed: ' . $sendError->getMessage());
+        return false;
     }
 }
 
@@ -2737,10 +2771,10 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
 
         $hasCategoryTable = event_categories_table_exists($pdo);
         if ($hasCategoryTable) {
-            $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, e.seat_request_email_override, ec.slug AS category_slug, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
+            $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, e.seat_request_email_override, e.ticket_price, e.door_price, e.min_ticket_price, e.max_ticket_price, ec.slug AS category_slug, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
             $eventStmt->execute([$eventId]);
         } else {
-            $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone, seat_request_email_override FROM events WHERE id = ? LIMIT 1');
+            $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone, seat_request_email_override, ticket_price, door_price, min_ticket_price, max_ticket_price FROM events WHERE id = ? LIMIT 1');
             $eventStmt->execute([$eventId]);
         }
         $event = $eventStmt->fetch();
@@ -2765,6 +2799,9 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
         }
         $holdExpiry = $holdDate ? $holdDate->format('Y-m-d H:i:s') : null;
         $finalizedAt = $status === 'confirmed' ? $now->format('Y-m-d H:i:s') : null;
+        $totalSeats = count($selectedSeats);
+        $totalAmount = resolve_seat_request_total_amount($event, $totalSeats);
+        $currency = 'USD';
 
         $layoutVersionId = $event['layout_version_id'];
         if (!$layoutVersionId && $event['layout_id']) {
@@ -2785,7 +2822,7 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
         }
 
         Database::run(
-            'INSERT INTO seat_requests (event_id, layout_version_id, seat_map_snapshot, customer_name, customer_email, customer_phone, customer_phone_normalized, selected_seats, total_seats, special_requests, status, hold_expires_at, finalized_at, created_by, updated_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+            'INSERT INTO seat_requests (event_id, layout_version_id, seat_map_snapshot, customer_name, customer_email, customer_phone, customer_phone_normalized, selected_seats, total_seats, total_amount, currency, special_requests, status, hold_expires_at, finalized_at, created_by, updated_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
             [
                 $eventId,
                 $layoutVersionId,
@@ -2795,7 +2832,9 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
                 $contactPhone,
                 $customerPhoneNormalized,
                 json_encode($selectedSeats),
-                count($selectedSeats),
+                $totalSeats,
+                $totalAmount,
+                $currency,
                 $payload['special_requests'] ?? $payload['specialRequests'] ?? null,
                 $status,
                 $holdExpiry,
@@ -2867,34 +2906,34 @@ function list_events(Request $request, ?string $scopeOverride = null): array
     }
     if ($status) {
         if ($includeSeriesMasters) {
-            $conditions[] = '(e.status = ? OR e.is_series_master = 1)';
+            $conditions[] = '(COALESCE(e.status, \'draft\') = ? OR e.is_series_master = 1)';
         } else {
-            $conditions[] = 'e.status = ?';
+            $conditions[] = 'COALESCE(e.status, \'draft\') = ?';
         }
         $params[] = $status;
     }
     if ($hasArchivedColumn) {
         if ($archivedFilterRaw === '1') {
-            $conditions[] = '(e.archived_at IS NOT NULL OR e.status = \'archived\')';
+            $conditions[] = '(e.archived_at IS NOT NULL OR COALESCE(e.status, \'draft\') = \'archived\')';
         } elseif ($archivedFilterRaw === 'all') {
             // no-op
         } else {
-            $conditions[] = '(e.archived_at IS NULL AND e.status != \'archived\')';
+            $conditions[] = '(e.archived_at IS NULL AND COALESCE(e.status, \'draft\') != \'archived\')';
         }
     } else {
         if ($archivedFilterRaw === '1') {
-            $conditions[] = 'e.status = ?';
+            $conditions[] = 'COALESCE(e.status, \'draft\') = ?';
             $params[] = 'archived';
         } elseif ($archivedFilterRaw === 'all') {
             // leave rows as-is
         } else {
-            $conditions[] = 'e.status != ?';
+            $conditions[] = 'COALESCE(e.status, \'draft\') != ?';
             $params[] = 'archived';
         }
     }
     if ($scope === 'public') {
-        $conditions[] = "e.status = 'published'";
-        $conditions[] = "e.visibility = 'public'";
+        $conditions[] = "COALESCE(e.status, 'draft') = 'published'";
+        $conditions[] = "COALESCE(e.visibility, 'private') = 'public'";
     }
     $nowExpr = "NOW()";
     $endExpr = event_end_expression('e');
@@ -2976,6 +3015,12 @@ function list_events(Request $request, ?string $scopeOverride = null): array
         if ($scope !== 'public') {
             foreach ($rows as &$row) {
                 [$targetEmail, $targetSource] = determine_seat_request_recipient($row);
+                if (!isset($row['status']) || $row['status'] === null || trim((string) $row['status']) === '') {
+                    $row['status'] = 'draft';
+                }
+                if (!isset($row['visibility']) || $row['visibility'] === null || trim((string) $row['visibility']) === '') {
+                    $row['visibility'] = 'private';
+                }
                 $row['seat_request_target_email'] = $targetEmail;
                 $row['seat_request_target_source'] = $targetSource;
                 $row['missing_schedule'] = event_missing_schedule_metadata($row);
@@ -3670,6 +3715,7 @@ $router->add('GET', '/api/admin/payment-settings', function () {
                 'paypal_hosted_button_id' => payment_settings_table_has_column($pdo, 'paypal_hosted_button_id'),
                 'paypal_currency' => payment_settings_table_has_column($pdo, 'paypal_currency'),
                 'paypal_enable_venmo' => payment_settings_table_has_column($pdo, 'paypal_enable_venmo'),
+                'paypal_orders_scaffold' => true,
             ],
         ]);
     } catch (Throwable $e) {
@@ -3717,6 +3763,9 @@ $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
         }
         if ($enabled && $providerType === 'paypal_hosted_button' && !$paypalHostedButtonId) {
             return Response::error('paypal_hosted_button_id is required when paypal_hosted_button is enabled', 422);
+        }
+        if ($providerType === 'paypal_orders' && $paymentUrlInput !== '') {
+            return Response::error('payment_url must be empty when provider_type is paypal_orders', 422);
         }
         if ($paymentUrlInput !== '' && !preg_match('#^https?://#i', $paymentUrlInput)) {
             return Response::error('payment_url must start with http:// or https://', 422);
@@ -4102,8 +4151,10 @@ $router->add('POST', '/api/events', function (Request $request) {
         $ticketPrice = $payload['ticket_price'] ?? null;
         $doorPrice = $payload['door_price'] ?? null;
         $ticketType = in_array($payload['ticket_type'] ?? 'general_admission', ['general_admission','reserved_seating','hybrid'], true) ? $payload['ticket_type'] : 'general_admission';
-        $status = in_array($payload['status'] ?? 'draft', ['draft','published','archived'], true) ? $payload['status'] : 'draft';
-        $visibility = in_array($payload['visibility'] ?? 'public', ['public','private'], true) ? $payload['visibility'] : 'public';
+        $statusInput = array_key_exists('status', $payload) ? trim((string) $payload['status']) : '';
+        $visibilityInput = array_key_exists('visibility', $payload) ? trim((string) $payload['visibility']) : '';
+        $status = in_array($statusInput, ['draft','published','archived'], true) ? $statusInput : 'draft';
+        $visibility = in_array($visibilityInput, ['public','private'], true) ? $visibilityInput : 'private';
         $hasArchivedColumn = events_table_has_column($pdo, 'archived_at');
         $archivedAt = null;
         if ($status === 'archived') {
@@ -4342,8 +4393,24 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             $venueCode = $existing['venue_code'] ?? 'MMH';
         }
         $ticketType = in_array($payload['ticket_type'] ?? $existing['ticket_type'] ?? 'general_admission', ['general_admission','reserved_seating','hybrid'], true) ? ($payload['ticket_type'] ?? $existing['ticket_type']) : ($existing['ticket_type'] ?? 'general_admission');
-        $status = in_array($payload['status'] ?? $existing['status'] ?? 'draft', ['draft','published','archived'], true) ? ($payload['status'] ?? $existing['status']) : ($existing['status'] ?? 'draft');
-        $visibility = in_array($payload['visibility'] ?? $existing['visibility'] ?? 'public', ['public','private'], true) ? ($payload['visibility'] ?? $existing['visibility']) : ($existing['visibility'] ?? 'public');
+        $existingStatus = trim((string) ($existing['status'] ?? ''));
+        if (!in_array($existingStatus, ['draft', 'published', 'archived'], true)) {
+            $existingStatus = 'draft';
+        }
+        $existingVisibility = trim((string) ($existing['visibility'] ?? ''));
+        if (!in_array($existingVisibility, ['public', 'private'], true)) {
+            $existingVisibility = 'private';
+        }
+        $status = $existingStatus;
+        if (array_key_exists('status', $payload)) {
+            $statusInput = trim((string) $payload['status']);
+            $status = in_array($statusInput, ['draft', 'published', 'archived'], true) ? $statusInput : $existingStatus;
+        }
+        $visibility = $existingVisibility;
+        if (array_key_exists('visibility', $payload)) {
+            $visibilityInput = trim((string) $payload['visibility']);
+            $visibility = in_array($visibilityInput, ['public', 'private'], true) ? $visibilityInput : $existingVisibility;
+        }
         $hasArchivedColumn = events_table_has_column($pdo, 'archived_at');
         $archivedAt = $existing['archived_at'] ?? null;
         $touchArchivedAt = false;
@@ -5158,9 +5225,15 @@ $router->add('GET', '/api/seat-requests', function (Request $request) {
         expire_stale_holds($pdo);
         $filters = [];
         $values = [];
-        if (!empty($request->query['event_id'])) {
+        $hasEventIdFilter = !empty($request->query['event_id']);
+        if ($hasEventIdFilter) {
             $filters[] = 'sr.event_id = ?';
             $values[] = $request->query['event_id'];
+        }
+        $includePastRaw = strtolower(trim((string) ($request->query['include_past'] ?? '0')));
+        $includePast = in_array($includePastRaw, ['1', 'true', 'yes', 'on'], true);
+        if (!$hasEventIdFilter && !$includePast) {
+            $filters[] = "(COALESCE(e.start_datetime, CASE WHEN e.event_date IS NOT NULL THEN TIMESTAMP(e.event_date, COALESCE(e.event_time, '00:00:00')) ELSE NULL END) IS NULL OR COALESCE(e.start_datetime, CASE WHEN e.event_date IS NOT NULL THEN TIMESTAMP(e.event_date, COALESCE(e.event_time, '00:00:00')) ELSE NULL END) >= NOW())";
         }
         $statusFilter = strtolower(trim((string) ($request->query['status'] ?? '')));
         if ($statusFilter !== '' && $statusFilter !== 'all') {
@@ -5348,6 +5421,8 @@ $router->add('POST', '/api/seat-requests/:id/approve', function ($request, $para
         }
         apply_seat_reservations($pdo, $seats);
         $actor = seat_request_admin_actor();
+        $hasConfirmationSentAt = layout_table_has_column($pdo, 'seat_requests', 'confirmation_email_sent_at');
+        $hasConfirmationMessageId = layout_table_has_column($pdo, 'seat_requests', 'confirmation_email_message_id');
         $pdo->prepare('UPDATE seat_requests SET status = ?, finalized_at = NOW(), hold_expires_at = NULL, updated_at = NOW(), updated_by = ?, change_note = ? WHERE id = ?')
             ->execute(['confirmed', $actor, 'approved via admin', $rid]);
         $pdo->commit();
@@ -5365,7 +5440,19 @@ $router->add('POST', '/api/seat-requests/:id/approve', function ($request, $para
             $eventRow = $eventStmt->fetch();
             if ($eventRow) {
                 $requestRow['status'] = 'confirmed';
-                notify_seat_request_confirmed_email($requestRow, $eventRow);
+                $alreadySent = $hasConfirmationSentAt && !empty($requestRow['confirmation_email_sent_at']);
+                if (!$alreadySent) {
+                    $sent = notify_seat_request_confirmed_email($requestRow, $eventRow);
+                    if ($sent && $hasConfirmationSentAt) {
+                        if ($hasConfirmationMessageId) {
+                            $pdo->prepare('UPDATE seat_requests SET confirmation_email_sent_at = NOW(), confirmation_email_message_id = COALESCE(confirmation_email_message_id, ?) WHERE id = ?')
+                                ->execute(['sent-via-sendgrid', $rid]);
+                        } else {
+                            $pdo->prepare('UPDATE seat_requests SET confirmation_email_sent_at = NOW() WHERE id = ?')
+                                ->execute([$rid]);
+                        }
+                    }
+                }
             }
         } catch (Throwable $notifyError) {
             error_log('[email] Seat request confirmation notify failed: ' . $notifyError->getMessage());
@@ -5467,6 +5554,76 @@ $router->add('POST', '/api/seat-requests', function (Request $request) {
             'reason_code' => 'server_error',
         ] : ['reason_code' => 'server_error'];
         Response::error('Failed to submit seat request', 500, $extra);
+    }
+});
+
+$router->add('POST', '/api/seat-requests/:id/payment/create-order', function (Request $request, $params) {
+    try {
+        $pdo = Database::connection();
+        $seatRequestId = (int) ($params['id'] ?? 0);
+        if ($seatRequestId <= 0) {
+            return Response::error('Invalid seat request id', 422);
+        }
+        $stmt = $pdo->prepare("SELECT sr.id, sr.event_id, sr.total_amount, sr.currency, COALESCE(NULLIF(TRIM(e.status), ''), 'draft') AS event_status FROM seat_requests sr INNER JOIN events e ON e.id = sr.event_id WHERE sr.id = ? LIMIT 1");
+        $stmt->execute([$seatRequestId]);
+        $seatRequest = $stmt->fetch();
+        if (!$seatRequest) {
+            return Response::error('Seat request not found', 404);
+        }
+        if (strtolower((string) ($seatRequest['event_status'] ?? 'draft')) !== 'published') {
+            return Response::error('Payment order creation is only available for published events', 409);
+        }
+        $amountRaw = $seatRequest['total_amount'] ?? null;
+        $amount = is_numeric($amountRaw) ? (float) $amountRaw : null;
+        if ($amount === null || $amount <= 0) {
+            return Response::error('Seat request is missing a valid total_amount', 422);
+        }
+        Response::error('PayPal Orders integration is not enabled yet in this environment', 501, [
+            'code' => 'PAYMENT_NOT_IMPLEMENTED',
+            'provider_type' => 'paypal_orders',
+            'seat_request_id' => $seatRequestId,
+            'currency' => normalize_paypal_currency($seatRequest['currency'] ?? 'USD'),
+        ]);
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('POST /api/seat-requests/:id/payment/create-order error: ' . $error->getMessage());
+        }
+        Response::error('Failed to process payment scaffold request', 500);
+    }
+});
+
+$router->add('POST', '/api/seat-requests/:id/payment/capture', function (Request $request, $params) {
+    try {
+        $pdo = Database::connection();
+        $seatRequestId = (int) ($params['id'] ?? 0);
+        if ($seatRequestId <= 0) {
+            return Response::error('Invalid seat request id', 422);
+        }
+        $stmt = $pdo->prepare("SELECT sr.id, sr.event_id, sr.total_amount, sr.currency, COALESCE(NULLIF(TRIM(e.status), ''), 'draft') AS event_status FROM seat_requests sr INNER JOIN events e ON e.id = sr.event_id WHERE sr.id = ? LIMIT 1");
+        $stmt->execute([$seatRequestId]);
+        $seatRequest = $stmt->fetch();
+        if (!$seatRequest) {
+            return Response::error('Seat request not found', 404);
+        }
+        if (strtolower((string) ($seatRequest['event_status'] ?? 'draft')) !== 'published') {
+            return Response::error('Payment capture is only available for published events', 409);
+        }
+        $amountRaw = $seatRequest['total_amount'] ?? null;
+        $amount = is_numeric($amountRaw) ? (float) $amountRaw : null;
+        if ($amount === null || $amount <= 0) {
+            return Response::error('Seat request is missing a valid total_amount', 422);
+        }
+        Response::error('PayPal Orders integration is not enabled yet in this environment', 501, [
+            'code' => 'PAYMENT_NOT_IMPLEMENTED',
+            'provider_type' => 'paypal_orders',
+            'seat_request_id' => $seatRequestId,
+            'currency' => normalize_paypal_currency($seatRequest['currency'] ?? 'USD'),
+        ]);
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('POST /api/seat-requests/:id/payment/capture error: ' . $error->getMessage());
+        }
+        Response::error('Failed to process payment scaffold request', 500);
     }
 });
 
@@ -6176,6 +6333,11 @@ if (APP_DEBUG) {
             $hasPaypalHostedButtonId = payment_settings_table_has_column($pdo, 'paypal_hosted_button_id');
             $hasPaypalCurrency = payment_settings_table_has_column($pdo, 'paypal_currency');
             $hasPaypalEnableVenmo = payment_settings_table_has_column($pdo, 'paypal_enable_venmo');
+            $hasSeatRequestPaymentProvider = layout_table_has_column($pdo, 'seat_requests', 'payment_provider');
+            $hasSeatRequestPaymentStatus = layout_table_has_column($pdo, 'seat_requests', 'payment_status');
+            $hasSeatRequestPaymentOrderId = layout_table_has_column($pdo, 'seat_requests', 'payment_order_id');
+            $hasSeatRequestPaymentCaptureId = layout_table_has_column($pdo, 'seat_requests', 'payment_capture_id');
+            $hasSeatRequestPaymentUpdatedAt = layout_table_has_column($pdo, 'seat_requests', 'payment_updated_at');
             $totalEvents = (int) $pdo->query('SELECT COUNT(*) FROM events')->fetchColumn();
             $nowExpr = "NOW()";
             $endExpr = event_end_expression('e');
@@ -6193,6 +6355,11 @@ if (APP_DEBUG) {
                 'has_paypal_hosted_button_id' => $hasPaypalHostedButtonId,
                 'has_paypal_currency' => $hasPaypalCurrency,
                 'has_paypal_enable_venmo' => $hasPaypalEnableVenmo,
+                'has_seat_request_payment_provider' => $hasSeatRequestPaymentProvider,
+                'has_seat_request_payment_status' => $hasSeatRequestPaymentStatus,
+                'has_seat_request_payment_order_id' => $hasSeatRequestPaymentOrderId,
+                'has_seat_request_payment_capture_id' => $hasSeatRequestPaymentCaptureId,
+                'has_seat_request_payment_updated_at' => $hasSeatRequestPaymentUpdatedAt,
                 'total_events' => $totalEvents,
                 'upcoming_events' => $upcomingEvents,
                 'past_events' => $pastEvents,

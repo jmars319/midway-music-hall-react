@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS payment_settings (
   category_id INT DEFAULT NULL,
   enabled TINYINT(1) NOT NULL DEFAULT 0,
   provider_label VARCHAR(191) DEFAULT NULL,
-  provider_type ENUM('external_link','paypal_hosted_button') NOT NULL DEFAULT 'external_link',
+  provider_type ENUM('external_link','paypal_hosted_button','paypal_orders') NOT NULL DEFAULT 'external_link',
   payment_url VARCHAR(500) DEFAULT NULL,
   paypal_hosted_button_id VARCHAR(64) DEFAULT NULL,
   paypal_currency VARCHAR(8) DEFAULT 'USD',
@@ -139,10 +139,12 @@ CREATE TABLE IF NOT EXISTS payment_settings (
 );
 
 CALL add_constraint_if_missing(@TARGET_DB, 'payment_settings', 'fk_payment_category', 'category_id', 'event_categories', 'id', 'ADD CONSTRAINT fk_payment_category FOREIGN KEY (category_id) REFERENCES event_categories(id) ON DELETE CASCADE');
-CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'provider_type', 'provider_type ENUM(''external_link'',''paypal_hosted_button'') NOT NULL DEFAULT ''external_link'' AFTER provider_label');
+CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'provider_type', 'provider_type ENUM(''external_link'',''paypal_hosted_button'',''paypal_orders'') NOT NULL DEFAULT ''external_link'' AFTER provider_label');
 CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'paypal_hosted_button_id', 'paypal_hosted_button_id VARCHAR(64) DEFAULT NULL AFTER payment_url');
 CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'paypal_currency', 'paypal_currency VARCHAR(8) DEFAULT ''USD'' AFTER paypal_hosted_button_id');
 CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'paypal_enable_venmo', 'paypal_enable_venmo TINYINT(1) NOT NULL DEFAULT 0 AFTER paypal_currency');
+ALTER TABLE payment_settings
+  MODIFY COLUMN provider_type ENUM('external_link','paypal_hosted_button','paypal_orders') NOT NULL DEFAULT 'external_link';
 
 -- VERSIONED LAYOUT SNAPSHOTS
 CREATE TABLE IF NOT EXISTS seating_layout_versions (
@@ -306,7 +308,14 @@ CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'layout_version_id', 'la
 CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'seat_map_snapshot', 'seat_map_snapshot JSON DEFAULT NULL AFTER layout_version_id');
 CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'customer_phone_normalized', 'customer_phone_normalized VARCHAR(20) DEFAULT NULL AFTER customer_phone');
 CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'total_seats', 'total_seats INT DEFAULT 0 AFTER selected_seats');
-CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'special_requests', 'special_requests TEXT AFTER total_seats');
+CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'total_amount', 'total_amount DECIMAL(10,2) DEFAULT NULL AFTER total_seats');
+CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'currency', 'currency VARCHAR(8) NOT NULL DEFAULT ''USD'' AFTER total_amount');
+CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'payment_provider', 'payment_provider VARCHAR(64) DEFAULT NULL AFTER currency');
+CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'payment_status', 'payment_status VARCHAR(64) DEFAULT NULL AFTER payment_provider');
+CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'payment_order_id', 'payment_order_id VARCHAR(191) DEFAULT NULL AFTER payment_status');
+CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'payment_capture_id', 'payment_capture_id VARCHAR(191) DEFAULT NULL AFTER payment_order_id');
+CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'payment_updated_at', 'payment_updated_at DATETIME DEFAULT NULL AFTER payment_capture_id');
+CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'special_requests', 'special_requests TEXT AFTER payment_updated_at');
 CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'hold_expires_at', 'hold_expires_at DATETIME DEFAULT NULL AFTER status');
 CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'finalized_at', 'finalized_at DATETIME DEFAULT NULL AFTER hold_expires_at');
 CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'cutoff_override', 'cutoff_override TINYINT(1) DEFAULT 0 AFTER finalized_at');
@@ -314,7 +323,9 @@ CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'staff_notes', 'staff_no
 CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'change_note', 'change_note VARCHAR(255) DEFAULT NULL AFTER staff_notes');
 CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'created_by', 'created_by VARCHAR(191) DEFAULT NULL AFTER change_note');
 CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'updated_by', 'updated_by VARCHAR(191) DEFAULT NULL AFTER created_by');
-CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'created_at', 'created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER updated_by');
+CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'confirmation_email_sent_at', 'confirmation_email_sent_at DATETIME DEFAULT NULL AFTER updated_by');
+CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'confirmation_email_message_id', 'confirmation_email_message_id VARCHAR(191) DEFAULT NULL AFTER confirmation_email_sent_at');
+CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'created_at', 'created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER confirmation_email_message_id');
 CALL add_column_if_missing(@TARGET_DB, 'seat_requests', 'updated_at', 'updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at');
 
 ALTER TABLE seat_requests

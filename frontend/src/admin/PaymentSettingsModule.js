@@ -8,7 +8,11 @@ const defaultOverLimitCopy = (limit) => `For parties over ${limit} seats, please
 const MARKUP_PATTERN = /<[^>]*>/;
 const PAYPAL_BUTTON_ID_PATTERN = /^[A-Za-z0-9]{5,64}$/;
 
-const normalizeProviderType = (value) => (value === 'paypal_hosted_button' ? 'paypal_hosted_button' : 'external_link');
+const normalizeProviderType = (value) => {
+  if (value === 'paypal_hosted_button') return 'paypal_hosted_button';
+  if (value === 'paypal_orders') return 'paypal_orders';
+  return 'external_link';
+};
 
 const normalizeSetting = (setting = {}, scope = 'category', category = null) => {
   const limit = Number(setting.limit_seats) > 0 ? Number(setting.limit_seats) : DEFAULT_LIMIT;
@@ -117,9 +121,14 @@ export default function PaymentSettingsModule(){
         setError('');
       }
       const next = { ...prev, [key]: { ...current, [field]: value } };
-      if (field === 'provider_type' && value === 'external_link') {
-        next[key].paypal_hosted_button_id = '';
-        next[key].paypal_enable_venmo = false;
+      if (field === 'provider_type') {
+        if (value !== 'paypal_hosted_button') {
+          next[key].paypal_hosted_button_id = '';
+          next[key].paypal_enable_venmo = false;
+        }
+        if (value !== 'external_link') {
+          next[key].payment_url = '';
+        }
       }
       if (field === 'limit_seats') {
         const limit = Number(value) > 0 ? Number(value) : DEFAULT_LIMIT;
@@ -309,6 +318,7 @@ export default function PaymentSettingsModule(){
                   >
                     <option value="external_link">External link</option>
                     <option value="paypal_hosted_button" disabled={!isPaypalModeAvailable}>PayPal hosted button</option>
+                    <option value="paypal_orders">PayPal Orders (scaffold)</option>
                   </select>
                 </div>
                 <div>
@@ -335,7 +345,7 @@ export default function PaymentSettingsModule(){
                       disabled={savingKey === key}
                     />
                   </div>
-                ) : (
+                ) : data.provider_type === 'paypal_hosted_button' ? (
                   <>
                     <div>
                       <label className="block text-sm text-gray-300 mb-1">PayPal Hosted Button ID</label>
@@ -378,6 +388,10 @@ export default function PaymentSettingsModule(){
                       </div>
                     )}
                   </>
+                ) : (
+                  <div className="md:col-span-2 rounded-md border border-indigo-500/40 bg-indigo-900/20 px-3 py-3 text-sm text-indigo-100">
+                    PayPal Orders is scaffolded only in this phase. Customer-facing payment capture is not enabled yet.
+                  </div>
                 )}
 
                 <div>

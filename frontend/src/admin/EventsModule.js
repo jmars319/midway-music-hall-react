@@ -157,7 +157,11 @@ const normalizePaymentConfig = (config = {}) => ({
   scope: config.scope || 'category',
   category_id: config.category_id ?? null,
   enabled: Boolean(config.enabled),
-  provider_type: config.provider_type === 'paypal_hosted_button' ? 'paypal_hosted_button' : 'external_link',
+  provider_type: config.provider_type === 'paypal_hosted_button'
+    ? 'paypal_hosted_button'
+    : config.provider_type === 'paypal_orders'
+      ? 'paypal_orders'
+      : 'external_link',
   provider_label: config.provider_label || '',
   button_text: config.button_text || 'Pay Online',
   payment_url: config.payment_url || '',
@@ -2706,7 +2710,11 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                       <div>
                         <p className="text-xs text-gray-400 uppercase tracking-wide">Type</p>
                         <p className="text-white font-medium">
-                          {activePaymentConfig.provider_type === 'paypal_hosted_button' ? 'PayPal hosted button' : 'External link'}
+                          {activePaymentConfig.provider_type === 'paypal_hosted_button'
+                            ? 'PayPal hosted button'
+                            : activePaymentConfig.provider_type === 'paypal_orders'
+                              ? 'PayPal Orders (scaffold)'
+                              : 'External link'}
                         </p>
                       </div>
                       <div>
@@ -2728,6 +2736,11 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                             <p className="text-white font-medium">{activePaymentConfig.paypal_currency || 'USD'}</p>
                           </div>
                         </>
+                      ) : activePaymentConfig.provider_type === 'paypal_orders' ? (
+                        <div className="md:col-span-2">
+                          <p className="text-xs text-gray-400 uppercase tracking-wide">Orders scaffold</p>
+                          <p className="text-white">Dynamic amount capture is planned but not enabled in production yet.</p>
+                        </div>
                       ) : (
                         <div className="md:col-span-2">
                           <p className="text-xs text-gray-400 uppercase tracking-wide">Payment URL</p>
