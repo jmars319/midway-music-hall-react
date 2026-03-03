@@ -4,9 +4,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 cleanup() {
+  bash ./scripts/dev-clean-verify-artifacts.sh >/dev/null 2>&1 || true
   bash ./scripts/dev-stop.sh >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
+
+bash ./scripts/dev-clean-verify-artifacts.sh
 
 ( cd frontend && npm run lint )
 ( cd frontend && npm run build )
