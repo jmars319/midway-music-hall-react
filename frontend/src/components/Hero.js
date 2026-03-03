@@ -246,8 +246,8 @@ export default function Hero({ variant = 'main', ctaTarget, topOverlay = null })
         />
       </div>
       {topOverlay && (
-        <div className="pointer-events-none absolute inset-x-0 top-3 sm:top-4 z-20 px-3 sm:px-4">
-          <div className="mx-auto max-w-5xl pointer-events-auto">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
+          <div className="w-full pointer-events-auto">
             {topOverlay}
           </div>
         </div>

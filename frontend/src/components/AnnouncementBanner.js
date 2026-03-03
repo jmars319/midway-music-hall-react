@@ -52,8 +52,8 @@ export default function AnnouncementBanner({ className = '', variant = 'default'
 
   return (
     <section className={className} aria-live="polite">
-      <div className={`${isOverlay ? 'rounded-xl border shadow-2xl' : 'border-b'} ${styles.container}`}>
-        <div className={`${isOverlay ? 'max-w-4xl mx-auto px-3 sm:px-4 py-2 sm:py-2.5' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3'} flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between`}>
+      <div className={`${isOverlay ? 'border-b shadow-lg' : 'border-b'} ${styles.container}`}>
+        <div className={`${isOverlay ? 'w-full px-3 sm:px-4 py-2 sm:py-2.5' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3'} flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between`}>
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             {banner.label && (
               <span className={`text-xs font-semibold uppercase tracking-wide px-2 py-1 rounded ${styles.label}`}>
