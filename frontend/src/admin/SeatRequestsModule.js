@@ -253,7 +253,7 @@ const buildDisplaySeatList = (request) => {
     const normalizedLabels = request.seat_display_labels.map((label) => describeSeatSelection(label));
     return normalizedLabels.map((normalized) => {
       const explicit = withSeatDash(normalized);
-      if (explicit) return explicit;
+      if (explicit && !isPlainNumericToken(explicit)) return explicit;
       const fromSnapshot = resolveLegacyNumericSeat(normalized, snapshotSeatRows);
       if (fromSnapshot) return fromSnapshot;
       const heuristic = resolveLegacyNumericSeatHeuristic(normalized);
