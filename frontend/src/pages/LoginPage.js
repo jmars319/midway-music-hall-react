@@ -4,7 +4,7 @@ import { API_BASE } from '../apiConfig';
 import BrandImage from '../components/BrandImage';
 
 export default function LoginPage({ onLogin, onBack }) {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -19,7 +19,7 @@ export default function LoginPage({ onLogin, onBack }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email: identifier, password })
       });
       const data = await res.json();
       if (data.success) {
@@ -54,12 +54,15 @@ export default function LoginPage({ onLogin, onBack }) {
 
         <form onSubmit={handleSubmit}>
           <div className="mb-3">
-            <label className="block text-white mb-2" htmlFor="admin-login-email">Email</label>
+            <label className="block text-white mb-2" htmlFor="admin-login-identifier">Email or Username</label>
             <input
-              id="admin-login-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              id="admin-login-identifier"
+              type="text"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              autoComplete="username"
+              inputMode="text"
+              placeholder="Email or username"
               className="w-full px-4 py-3 bg-gray-700 text-white rounded-lg"
               required
             />
