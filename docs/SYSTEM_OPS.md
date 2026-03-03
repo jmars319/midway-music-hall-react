@@ -39,3 +39,10 @@ This document covers deployment, hosting, data model rationale, and operational 
 - **Audit log:** `/api/audit-log` for admin actions.
 - **Health check:** `/api/health` for API reachability.
 - **Image audit:** `backend/scripts/check_image_variants.php`.
+
+## Phase 3 payment plan (scaffolding only)
+- **Target UX sequence:** seat selection -> contact info submit -> request success -> payment section.
+- **Current constraint:** keep existing PayPal Hosted Buttons integration type and avoid webhook/capture rewrites in this phase.
+- **Feasibility note:** Hosted Buttons typically do not support dynamic per-seat totals without moving to a different PayPal order/capture integration.
+- **UI scaffolding direction:** retain existing payment config resolution, add a post-submit payment panel state gate, and keep pre-submit behavior unchanged until dedicated payment phase.
+- **Future data fields (when enabled):** `seat_requests.total_amount`, `currency`, `payment_provider`, `payment_status`, `payment_started_at`, `payment_completed_at`.

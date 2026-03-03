@@ -117,6 +117,9 @@ bash ./scripts/dev-start.sh
 bash ./scripts/dev-verify-admin-api.sh
 bash ./scripts/dev-verify-event-reschedule.sh
 bash ./scripts/dev-verify-announcement-banner.sh
+bash ./scripts/dev-verify-login-identifiers.sh
+bash ./scripts/dev-verify-seating-large-map.sh
+bash ./scripts/dev-verify-seat-marker-print.sh
 bash ./scripts/dev-verify-payment-settings.sh
 bash ./scripts/dev-verify-paypal-hosted-buttons-api.sh
 bash ./scripts/dev-verify-seating-guardrails.sh
