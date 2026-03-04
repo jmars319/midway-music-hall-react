@@ -89,11 +89,19 @@ export default function Table6({ row, size = 80, selectedSeats = [], pendingSeat
         const x = startX + i * (seatSize + gap);
         const y = topY;
         const seatId = `${row.section_name || row.section}-${row.row_label}-${seatNum}`;
-  const classes = `absolute flex items-center justify-center rounded-full ${seatClasses(seatId)}`;
+        const classes = `absolute flex items-center justify-center rounded-full ${seatClasses(seatId)}`;
+        const ariaLabel = `Toggle seat ${row.row_label || 'table'}-${seatNum}`;
         const style = { left: x, top: y, transform: 'translate(-50%, -50%)', width: seatSize, height: seatSize };
         if (interactive) {
           return (
-            <button key={seatId} onClick={() => onToggleSeat && onToggleSeat(seatId)} className={classes} style={style}>
+            <button
+              key={seatId}
+              onClick={() => onToggleSeat && onToggleSeat(seatId)}
+              className={classes}
+              style={style}
+              type="button"
+              aria-label={ariaLabel}
+            >
               <Armchair className="h-4 w-4" />
             </button>
           );
@@ -111,11 +119,19 @@ export default function Table6({ row, size = 80, selectedSeats = [], pendingSeat
         const x = startX + i * (seatSize + gap);
         const y = bottomY;
         const seatId = `${row.section_name || row.section}-${row.row_label}-${seatNum}`;
-  const classes = `absolute flex items-center justify-center rounded-full ${seatClasses(seatId)}`;
+        const classes = `absolute flex items-center justify-center rounded-full ${seatClasses(seatId)}`;
+        const ariaLabel = `Toggle seat ${row.row_label || 'table'}-${seatNum}`;
         const style = { left: x, top: y, transform: 'translate(-50%, -50%)', width: seatSize, height: seatSize };
         if (interactive) {
           return (
-            <button key={seatId} onClick={() => onToggleSeat && onToggleSeat(seatId)} className={classes} style={style}>
+            <button
+              key={seatId}
+              onClick={() => onToggleSeat && onToggleSeat(seatId)}
+              className={classes}
+              style={style}
+              type="button"
+              aria-label={ariaLabel}
+            >
               <Armchair className="h-4 w-4" />
             </button>
           );
@@ -135,11 +151,19 @@ export default function Table6({ row, size = 80, selectedSeats = [], pendingSeat
         const y = center + Math.sin(rad) * radius;
         const seatNum = i + 1;
         const seatId = `${row.section_name || row.section}-${row.row_label}-${seatNum}`;
-  const classes = `absolute flex items-center justify-center rounded-full ${seatClasses(seatId)}`;
+        const classes = `absolute flex items-center justify-center rounded-full ${seatClasses(seatId)}`;
+        const ariaLabel = `Toggle seat ${row.row_label || 'table'}-${seatNum}`;
         const style = { left: x, top: y, transform: 'translate(-50%, -50%)', width: seatSize, height: seatSize };
         if (interactive) {
           return (
-            <button key={seatId} onClick={() => onToggleSeat && onToggleSeat(seatId)} className={classes} style={style}>
+            <button
+              key={seatId}
+              onClick={() => onToggleSeat && onToggleSeat(seatId)}
+              className={classes}
+              style={style}
+              type="button"
+              aria-label={ariaLabel}
+            >
               <Armchair className="h-4 w-4" />
             </button>
           );

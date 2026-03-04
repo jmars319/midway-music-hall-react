@@ -441,7 +441,12 @@ function SuggestionDetailModal({ suggestion, onClose, onSave, saving }) {
               Update artist info, contact details, and review notes before saving.
             </p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-800 text-gray-400">
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg hover:bg-gray-800 text-gray-400"
+            aria-label="Close edit submission modal"
+            type="button"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>

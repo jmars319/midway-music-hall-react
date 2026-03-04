@@ -772,7 +772,12 @@ export default function SeatingChart({
           <div className="bg-gray-800 rounded-xl max-w-lg w-full p-6 border border-purple-500/20">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-2xl font-bold">Request Seats</h3>
-              <button onClick={closeModal} className="text-gray-400 hover:text-white">
+              <button
+                onClick={closeModal}
+                className="text-gray-400 hover:text-white"
+                aria-label="Close seat request dialog"
+                type="button"
+              >
                 <X className="h-6 w-6" />
               </button>
             </div>
