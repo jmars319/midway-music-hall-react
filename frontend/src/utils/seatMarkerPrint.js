@@ -1,4 +1,4 @@
-import { formatSeatLabel } from './seatLabelUtils.js';
+import { buildSeatLookupMap, describeSeatSelection, formatSeatLabel, isSeatRow } from './seatLabelUtils.js';
 
 const parseSeats = (value) => {
   if (!value) return [];
@@ -19,6 +19,28 @@ const withSeatDash = (value) => {
     return `${direct[1]}-${direct[2].toUpperCase()}`;
   }
   return raw;
+};
+
+const parseSeatSnapshot = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'object' && Array.isArray(value.layout_data)) return value.layout_data;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.layout_data)) return parsed.layout_data;
+    } catch (err) {
+      return [];
+    }
+  }
+  return [];
+};
+
+const resolveDisplaySeatLabel = (seatId, lookup = {}) => {
+  const mappedLabel = lookup[seatId] || '';
+  const display = mappedLabel ? describeSeatSelection(seatId, mappedLabel) : describeSeatSelection(seatId);
+  return withSeatDash(display);
 };
 
 const escapeHtml = (value) =>
@@ -50,8 +72,8 @@ const formatEventDate = (request = {}) => {
 const eventNameForRequest = (request = {}) =>
   request.event_display_name || request.event_artist_name || request.event_title || `Event ${request.event_id || ''}`.trim();
 
-const markerForSeat = (request, seatId) => {
-  const seatLabel = withSeatDash(formatSeatLabel(seatId, { mode: 'seat' }));
+const markerForSeat = (request, seatId, lookup = {}) => {
+  const seatLabel = resolveDisplaySeatLabel(seatId, lookup) || withSeatDash(formatSeatLabel(seatId, { mode: 'seat' }));
   const tableLabel = formatSeatLabel(seatId, { mode: 'table' });
   return {
     kind: 'seat',
@@ -67,9 +89,11 @@ const buildMarkersForRequest = (request = {}, options = {}) => {
   const mode = options.mode === 'seat' ? 'seat' : 'table';
   const seats = parseSeats(request.selected_seats).filter(Boolean);
   if (!seats.length) return [];
+  const snapshotRows = parseSeatSnapshot(request.seat_map_snapshot).filter(isSeatRow);
+  const seatLookup = buildSeatLookupMap(snapshotRows);
   // Simplified behavior: always print one marker per seat.
   if (mode === 'seat' || mode === 'table') {
-    return seats.map((seatId) => markerForSeat(request, seatId));
+    return seats.map((seatId) => markerForSeat(request, seatId, seatLookup));
   }
   return [];
 };
