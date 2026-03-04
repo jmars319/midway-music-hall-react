@@ -127,9 +127,11 @@ export default function LayoutsModule() {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [panMode, setPanMode] = useState(false);
+  const [mapInteractionEnabled, setMapInteractionEnabled] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const panRef = useRef({ startX: 0, startY: 0, startPan: { x: 0, y: 0 } });
   const [selectedRowId, setSelectedRowId] = useState(null);
+  const [hoveredRowId, setHoveredRowId] = useState(null);
   const [, setResizingMarker] = useState(null);
   const [debugOverlay, setDebugOverlay] = useState(null);
 
@@ -155,13 +157,49 @@ export default function LayoutsModule() {
   useEffect(() => {
     if (!showEditor) {
       setPanMode(false);
+      setMapInteractionEnabled(false);
       setZoom(1);
       setPan({ x: 0, y: 0 });
+      setHoveredRowId(null);
       setSelectedRowId(null);
       if (isDevBuild) {
         setDebugOverlay(null);
       }
     }
+  }, [showEditor]);
+
+  useEffect(() => {
+    if (!showEditor) return undefined;
+    const handlePointerDown = (event) => {
+      const mapNode = containerRef.current;
+      if (!mapNode) return;
+      if (mapNode.contains(event.target)) {
+        setMapInteractionEnabled(true);
+        const target = event.target;
+        const clickedRow = typeof target.closest === 'function' ? target.closest('[data-layout-row="true"]') : null;
+        const clickedStage = typeof target.closest === 'function' ? target.closest('[data-layout-stage="true"]') : null;
+        if (!clickedRow && !clickedStage) {
+          setSelectedRowId(null);
+          setHoveredRowId(null);
+        }
+      } else {
+        setMapInteractionEnabled(false);
+        setIsPanning(false);
+        setSelectedRowId(null);
+        setHoveredRowId(null);
+      }
+    };
+    const handleEscape = (event) => {
+      if (event.key !== 'Escape') return;
+      setMapInteractionEnabled(false);
+      setIsPanning(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, [showEditor]);
 
   const openAdd = () => {
@@ -497,10 +535,11 @@ export default function LayoutsModule() {
   };
 
   const handleWheel = (e) => {
-    if (!showEditor) return;
+    if (!showEditor || !mapInteractionEnabled) return;
     if (e.ctrlKey || e.metaKey) return;
     e.preventDefault();
-    const delta = e.deltaY < 0 ? 0.1 : -0.1;
+    const delta = Math.max(-0.08, Math.min(0.08, -e.deltaY * 0.002));
+    if (Math.abs(delta) < 0.003) return;
     setZoom(prev => {
       const next = Math.max(0.5, Math.min(2, parseFloat((prev + delta).toFixed(2))));
       return next;
@@ -508,7 +547,7 @@ export default function LayoutsModule() {
   };
 
   const handlePanMouseDown = (e) => {
-    if (!panMode || draggingRow || draggingStage) return;
+    if (!mapInteractionEnabled || !panMode || draggingRow || draggingStage) return;
     e.preventDefault();
     setIsPanning(true);
     panRef.current = {
@@ -1057,6 +1096,20 @@ export default function LayoutsModule() {
                   <Move className="h-4 w-4" />
                   {panMode ? 'Panning Enabled' : 'Pan View'}
                 </button>
+
+                <button
+                  onClick={() => {
+                    setMapInteractionEnabled((prev) => {
+                      const next = !prev;
+                      if (!next) setIsPanning(false);
+                      return next;
+                    });
+                  }}
+                  className={`px-3 py-1.5 rounded text-sm ${mapInteractionEnabled ? 'bg-emerald-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+                  title="Enable/disable trackpad scroll-to-zoom and canvas panning. Click outside the map or press Escape to disable."
+                >
+                  {mapInteractionEnabled ? 'Map Active' : 'Enable Map'}
+                </button>
               </div>
 
               {/* Main Editor Area */}
@@ -1064,7 +1117,7 @@ export default function LayoutsModule() {
               {/* Canvas */}
               <div 
                 ref={containerRef}
-                className={`flex-1 bg-gray-100 dark:bg-gray-900 relative overflow-hidden ${panMode ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
+                className={`flex-1 bg-gray-100 dark:bg-gray-900 relative overflow-hidden ${mapInteractionEnabled && panMode ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
                 onDrop={handleCanvasDrop}
                 onDragOver={handleCanvasDragOver}
                 onWheel={handleWheel}
@@ -1080,6 +1133,11 @@ export default function LayoutsModule() {
                   backgroundSize: showGrid ? `${gridSize}% ${gridSize}%` : 'auto'
                 }}
               >
+                {!mapInteractionEnabled && (
+                  <div className="absolute top-3 right-3 z-40 text-xs px-3 py-2 rounded bg-black/65 text-white border border-white/20 pointer-events-none">
+                    Click map to enable scroll/zoom
+                  </div>
+                )}
                 {isDevBuild && debugOverlay && (
                   <div className="absolute top-3 left-3 bg-black/70 text-white text-xs px-3 py-2 rounded z-40 pointer-events-none space-y-1">
                     <div>Zoom: {Math.round((debugOverlay.zoom || 0) * 100)}%</div>
@@ -1124,6 +1182,7 @@ export default function LayoutsModule() {
 
                   {/* Stage */}
                   <div 
+                    data-layout-stage="true"
                     draggable
                     onDragStart={handleStageDragStart}
                     className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg cursor-move hover:ring-2 hover:ring-amber-500 z-10 flex items-center justify-center"
@@ -1203,6 +1262,8 @@ export default function LayoutsModule() {
                   {layoutRows.map((row) => {
                     const type = row.element_type || 'table';
                     const isSelected = selectedRowId === row.id;
+                    const isHovered = hoveredRowId === row.id;
+                    const showRowControls = isSelected || isHovered;
                     const baseStyle = {
                       left: `${row.pos_x}%`,
                       top: `${row.pos_y}%`,
@@ -1215,9 +1276,12 @@ export default function LayoutsModule() {
                       return (
                         <div
                           key={row.id}
+                          data-layout-row="true"
                           draggable
                           onDragStart={(e) => handleRowDragStart(e, row)}
                           onClick={() => setSelectedRowId(row.id)}
+                          onMouseEnter={() => setHoveredRowId(row.id)}
+                          onMouseLeave={() => setHoveredRowId((prev) => (prev === row.id ? null : prev))}
                           className={`absolute cursor-move ${isSelected ? 'ring-2 ring-purple-400' : 'hover:ring-2 hover:ring-purple-500'} rounded-lg`}
                           style={{ ...baseStyle, transform: `translate(-50%, -50%) rotate(${rotation}deg)` }}
                         >
@@ -1238,28 +1302,33 @@ export default function LayoutsModule() {
                               title="Resize"
                             />
                           </div>
-                          <div className="mt-1 flex justify-center gap-1">
-                            <button
-                              onClick={() => handleRotateRow(row.id, -15)}
-                              className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
-                              title="Rotate -15°"
-                            >
-                              ↶
-                            </button>
-                            <button
-                              onClick={() => handleRotateRow(row.id, 15)}
-                              className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
-                              title="Rotate +15°"
-                            >
-                              ↷
-                            </button>
-                            <button
-                              onClick={() => handleDeleteRow(row.id)}
-                              className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </button>
-                          </div>
+                          {showRowControls && (
+                            <div className="mt-1 flex justify-center gap-1">
+                              <button
+                                onClick={() => handleRotateRow(row.id, -15)}
+                                className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
+                                title="Rotate -15°"
+                                type="button"
+                              >
+                                ↶
+                              </button>
+                              <button
+                                onClick={() => handleRotateRow(row.id, 15)}
+                                className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
+                                title="Rotate +15°"
+                                type="button"
+                              >
+                                ↷
+                              </button>
+                              <button
+                                onClick={() => handleDeleteRow(row.id)}
+                                className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
+                                type="button"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     }
@@ -1270,9 +1339,12 @@ export default function LayoutsModule() {
                     return (
                       <div
                         key={row.id}
+                        data-layout-row="true"
                         draggable
                         onDragStart={(e) => handleRowDragStart(e, row)}
                         onClick={() => setSelectedRowId(row.id)}
+                        onMouseEnter={() => setHoveredRowId(row.id)}
+                        onMouseLeave={() => setHoveredRowId((prev) => (prev === row.id ? null : prev))}
                         className={`absolute cursor-move rounded ${isSelected ? 'ring-2 ring-purple-400' : 'hover:ring-2 hover:ring-purple-500'}`}
                         style={{
                           ...baseStyle,
@@ -1282,7 +1354,7 @@ export default function LayoutsModule() {
                           minHeight: `${containerHeight}px`,
                         }}
                       >
-                        {(() => {
+                        {showRowControls && (() => {
                           const headerLabels = resolveRowHeaderLabels(row);
                           if (!headerLabels.sectionLabel && !headerLabels.rowLabel) {
                             return null;
@@ -1314,26 +1386,31 @@ export default function LayoutsModule() {
                             />
                           </div>
                         </div>
-                        <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1 z-20">
-                          <button
-                            onClick={() => handleRotateRow(row.id, -45)}
-                            className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
-                          >
-                            ↶
-                          </button>
-                          <button
-                            onClick={() => handleRotateRow(row.id, 45)}
-                            className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
-                          >
-                            ↷
-                          </button>
-                          <button
-                            onClick={() => handleDeleteRow(row.id)}
-                            className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
+                        {showRowControls && (
+                          <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1 z-20">
+                            <button
+                              onClick={() => handleRotateRow(row.id, -45)}
+                              className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
+                              type="button"
+                            >
+                              ↶
+                            </button>
+                            <button
+                              onClick={() => handleRotateRow(row.id, 45)}
+                              className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
+                              type="button"
+                            >
+                              ↷
+                            </button>
+                            <button
+                              onClick={() => handleDeleteRow(row.id)}
+                              className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
+                              type="button"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
