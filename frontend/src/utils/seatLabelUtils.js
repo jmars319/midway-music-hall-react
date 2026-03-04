@@ -126,47 +126,78 @@ const normalizeTableToken = (token) => {
   return raw;
 };
 
-const formatSeatLabel = (rawSeatId, options = {}) => {
-  const mode = options.mode === 'table' ? 'table' : 'seat';
-  const raw = String(rawSeatId || '').trim();
-  if (!raw) return '';
+const sanitizeSeatToken = (value) =>
+  String(value || '')
+    .trim()
+    .replace(/^(?:\(|\[|\s)+/, '')
+    .replace(/(?:\)|\]|\s)+$/, '');
 
-  const directSeatMatch = raw.match(/^(\d+)\s*[- ]?\s*([A-Za-z]+)$/);
+const parseTableAndSeatIndex = (rawValue) => {
+  const raw = sanitizeSeatToken(rawValue);
+  if (!raw) return { table: '', seatIndex: null, raw };
+
+  // Handles forms like "28A", "28-A", "Table 28A", "Table 28 A".
+  const directSeatMatch = raw.match(/(\d+)\s*[- ]?\s*([A-Za-z]+)$/);
   if (directSeatMatch) {
     const table = directSeatMatch[1];
-    const seat = directSeatMatch[2].toUpperCase();
-    return mode === 'table' ? table : `${table}${seat}`;
+    const seatLetters = directSeatMatch[2].toUpperCase();
+    return { table, seatIndex: null, seatLetters, raw };
   }
 
+  // Canonical layout IDs: "Section-Table 28-4" (seatIndex is authoritative)
   const parts = raw.split('-').map((part) => part.trim()).filter(Boolean);
-  if (parts.length < 2) {
-    return raw;
-  }
-
-  const seatPart = parts[parts.length - 1];
-  const rowPart = parts[parts.length - 2];
-  const table = normalizeTableToken(rowPart) || rowPart;
-  if (mode === 'table') {
-    return table || raw;
-  }
-
-  const seatNumber = Number(seatPart);
-  if (Number.isFinite(seatNumber) && seatNumber > 0) {
-    const letter = seatLetterFromIndex(seatNumber);
-    if (table && letter) {
-      return `${table}${letter}`;
+  if (parts.length >= 2) {
+    const seatPart = parts[parts.length - 1];
+    const rowPart = parts[parts.length - 2];
+    const table = normalizeTableToken(rowPart) || rowPart;
+    const seatIndex = Number(seatPart);
+    if (table && Number.isFinite(seatIndex) && seatIndex > 0) {
+      return { table, seatIndex, raw };
     }
   }
 
-  const seatSuffix = String(seatPart || '').trim();
-  if (table && seatSuffix) {
-    return `${table}${seatSuffix.toUpperCase()}`;
+  // Legacy compact numeric tokens: "301" => table 30, seatIndex 1.
+  if (/^\d{2,}$/.test(raw)) {
+    for (let split = 1; split <= 2 && split < raw.length; split += 1) {
+      const tableRaw = raw.slice(0, raw.length - split);
+      const seatIndex = Number(raw.slice(raw.length - split));
+      const table = String(Number(tableRaw));
+      if (!table || table === 'NaN') continue;
+      if (!Number.isFinite(seatIndex) || seatIndex <= 0 || seatIndex > 26) continue;
+      return { table, seatIndex, raw };
+    }
   }
+
+  return { table: '', seatIndex: null, raw };
+};
+
+const formatSeatLabel = (rawSeatId, options = {}) => {
+  const mode = options.mode === 'table' ? 'table' : 'seat';
+  const raw = sanitizeSeatToken(rawSeatId);
+  if (!raw) return '';
+  const parsed = parseTableAndSeatIndex(raw);
+  const table = parsed.table;
+  if (mode === 'table') {
+    return table || raw;
+  }
+  if (table && parsed.seatLetters) {
+    return `${table}${parsed.seatLetters}`;
+  }
+  if (table && Number.isFinite(parsed.seatIndex) && parsed.seatIndex > 0) {
+    const letter = seatLetterFromIndex(parsed.seatIndex);
+    if (letter) {
+      return `${table}${letter}`;
+    }
+  }
+  // Defensive fallback: if we cannot parse seatIndex/table reliably, do not guess.
   return raw;
 };
 
 const describeSeatSelection = (seatId, label) => {
-  const formatted = formatSeatLabel(label || seatId, { mode: 'seat' });
+  const labelString = String(label || '').trim();
+  // A label like "A"/"B" is non-authoritative without a table number.
+  const preferredSource = labelString && /\d/.test(labelString) ? labelString : seatId;
+  const formatted = formatSeatLabel(preferredSource || seatId, { mode: 'seat' });
   if (formatted) return formatted;
   return formatSeatLabel(seatId, { mode: 'seat' }) || String(seatId || '').trim();
 };
