@@ -186,6 +186,23 @@ const withSeatDash = (value) => {
   return raw;
 };
 
+const normalizeDisplaySeat = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  // API may provide combined labels like "14E (Section-Table 14-1)".
+  // Prefer the label prefix before any parenthesized raw id.
+  const prefixMatch = raw.match(/^(.+?)\s*\([^)]*\)\s*$/);
+  const candidates = prefixMatch ? [prefixMatch[1], raw] : [raw];
+
+  for (const candidate of candidates) {
+    const formatted = withSeatDash(formatSeatLabel(candidate, { mode: 'seat' }));
+    if (formatted && !isPlainNumericToken(formatted)) return formatted;
+  }
+
+  return raw;
+};
+
 const resolveLegacyNumericSeat = (seatId, rows = []) => {
   const raw = sanitizeSeatToken(seatId);
   if (!/^\d+$/.test(raw) || !rows.length) return '';
@@ -249,35 +266,24 @@ const buildDisplaySeatList = (request) => {
   if (!seats.length) return [];
   const snapshotRows = parseSeatSnapshot(request.seat_map_snapshot);
   const snapshotSeatRows = snapshotRows.filter(isSeatRow);
-  if (Array.isArray(request.seat_display_labels) && request.seat_display_labels.length) {
-    const normalizedLabels = request.seat_display_labels.map((label) => describeSeatSelection(label));
-    return normalizedLabels.map((normalized) => {
-      const explicit = withSeatDash(normalized);
-      if (explicit && !isPlainNumericToken(explicit)) return explicit;
-      const fromSnapshot = resolveLegacyNumericSeat(normalized, snapshotSeatRows);
-      if (fromSnapshot) return fromSnapshot;
-      const heuristic = resolveLegacyNumericSeatHeuristic(normalized);
-      if (heuristic) return heuristic;
-      return normalized;
-    });
-  }
   if (!snapshotSeatRows.length) {
     return seats.map((seatId) => {
-      const normalized = withSeatDash(describeSeatSelection(seatId));
-      if (!normalized || isPlainNumericToken(normalized)) {
-        return resolveLegacyNumericSeatHeuristic(seatId) || normalized || describeSeatSelection(seatId);
-      }
-      return normalized;
+      const canonical = withSeatDash(describeSeatSelection(seatId));
+      if (canonical && !isPlainNumericToken(canonical)) return canonical;
+      const fromHeuristic = resolveLegacyNumericSeatHeuristic(seatId);
+      if (fromHeuristic) return fromHeuristic;
+      return canonical || describeSeatSelection(seatId);
     });
   }
   const lookup = buildSeatLookupMap(snapshotSeatRows);
   return seats.map((seatId) => {
+    // Canonical selected_seats values are authoritative for admin display labels.
+    const canonical = withSeatDash(describeSeatSelection(seatId));
+    if (canonical && !isPlainNumericToken(canonical)) return canonical;
     const resolved = lookup[seatId] ? describeSeatSelection(seatId, lookup[seatId]) : resolveLegacyNumericSeat(seatId, snapshotSeatRows);
-    const normalized = withSeatDash(resolved || describeSeatSelection(seatId));
-    if (!normalized || isPlainNumericToken(normalized)) {
-      return resolveLegacyNumericSeatHeuristic(seatId) || normalized || describeSeatSelection(seatId);
-    }
-    return normalized;
+    const normalized = withSeatDash(resolved);
+    if (normalized && !isPlainNumericToken(normalized)) return normalized;
+    return resolveLegacyNumericSeatHeuristic(seatId) || normalized || canonical || describeSeatSelection(seatId);
   });
 };
 
@@ -293,7 +299,7 @@ export default function SeatRequestsModule() {
   const [savingDetail, setSavingDetail] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
   const displaySeatsForSelected = useMemo(
-    () => (selectedRequest ? buildDisplaySeatList(selectedRequest) : []),
+    () => (selectedRequest ? buildDisplaySeatList(selectedRequest).map((seat) => normalizeDisplaySeat(seat)) : []),
     [selectedRequest]
   );
 
@@ -435,7 +441,7 @@ export default function SeatRequestsModule() {
     }
     const rowsHtml = printableRequests.length
       ? printableRequests.map((req) => {
-        const seatLabels = buildDisplaySeatList(req);
+        const seatLabels = buildDisplaySeatList(req).map((seat) => normalizeDisplaySeat(seat));
         const seatList = seatLabels.length ? seatLabels.join(', ') : '';
         const seatCount = req.total_seats || seatLabels.length || '';
         const contactLines = [req.customer_phone, req.customer_email].filter(Boolean).map(escapeHtml).join('<br />');
@@ -917,7 +923,7 @@ export default function SeatRequestsModule() {
           </thead>
           <tbody>
             {data.map((req) => {
-              const displaySeats = buildDisplaySeatList(req);
+              const displaySeats = buildDisplaySeatList(req).map((seat) => normalizeDisplaySeat(seat));
               const status = normalizeStatus(req.status);
               const badge = STATUS_BADGES[status] || 'bg-gray-500/15 text-gray-200 border border-gray-500/30';
               const expiredHold = isHoldExpired(req.hold_expires_at) && isOpenStatus(status);
