@@ -195,7 +195,13 @@ const formatSeatLabel = (rawSeatId, options = {}) => {
 
 const describeSeatSelection = (seatId, label) => {
   const labelString = String(label || '').trim();
-  // A label like "A"/"B" is non-authoritative without a table number.
+  if (labelString && !/\d/.test(labelString)) {
+    const table = formatSeatLabel(seatId, { mode: 'table' });
+    const letters = labelString.replace(/[^A-Za-z]/g, '').toUpperCase();
+    if (table && letters) {
+      return `${table}${letters}`;
+    }
+  }
   const preferredSource = labelString && /\d/.test(labelString) ? labelString : seatId;
   const formatted = formatSeatLabel(preferredSource || seatId, { mode: 'seat' });
   if (formatted) return formatted;

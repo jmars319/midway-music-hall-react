@@ -277,12 +277,14 @@ const buildDisplaySeatList = (request) => {
   }
   const lookup = buildSeatLookupMap(snapshotSeatRows);
   return seats.map((seatId) => {
-    // Canonical selected_seats values are authoritative for admin display labels.
-    const canonical = withSeatDash(describeSeatSelection(seatId));
-    if (canonical && !isPlainNumericToken(canonical)) return canonical;
-    const resolved = lookup[seatId] ? describeSeatSelection(seatId, lookup[seatId]) : resolveLegacyNumericSeat(seatId, snapshotSeatRows);
+    // selected_seats is authoritative for identity, snapshot lookup for custom letters.
+    const resolved = lookup[seatId]
+      ? describeSeatSelection(seatId, lookup[seatId])
+      : resolveLegacyNumericSeat(seatId, snapshotSeatRows);
     const normalized = withSeatDash(resolved);
     if (normalized && !isPlainNumericToken(normalized)) return normalized;
+    const canonical = withSeatDash(describeSeatSelection(seatId));
+    if (canonical && !isPlainNumericToken(canonical)) return canonical;
     return resolveLegacyNumericSeatHeuristic(seatId) || normalized || canonical || describeSeatSelection(seatId);
   });
 };

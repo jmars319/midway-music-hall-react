@@ -63,6 +63,16 @@ assertEq(
   mod.describeSeatSelection('Section-Table 14-2', 'B'),
   '14B'
 );
+assertEq(
+  'describeSeatSelection("Section-Table 14-1", "F")',
+  mod.describeSeatSelection('Section-Table 14-1', 'F'),
+  '14F'
+);
+assertEq(
+  'describeSeatSelection("Section-Table 14-2", "E")',
+  mod.describeSeatSelection('Section-Table 14-2', 'E'),
+  '14E'
+);
 
 // Defensive behavior for non-seat tokens.
 const nonSeatInputs = ['door', 'dancefloor'];
