@@ -28,9 +28,27 @@ const sampleRequest = {
   ]),
 };
 
+const customLabelRequest = {
+  event_id: 778,
+  customer_name: 'Custom Label Guest',
+  event_title: 'Beach Band Night',
+  start_datetime: '2026-06-21 19:00:00',
+  selected_seats: JSON.stringify(['Section-Table 19-1', 'Section-Table 19-2']),
+  seat_map_snapshot: JSON.stringify([
+    {
+      element_type: 'table',
+      section_name: 'Section',
+      row_label: 'Table 19',
+      total_seats: 2,
+      seat_labels: { '1': 'F', '2': 'E' }
+    }
+  ]),
+};
+
 const tableMarkers = mod.buildMarkersForRequest(sampleRequest, { mode: 'table' });
 const seatMarkers = mod.buildMarkersForRequest(sampleRequest, { mode: 'seat' });
-const html = mod.buildSeatMarkerPrintHtml([...tableMarkers, ...seatMarkers], { title: 'Print Seat Markers' });
+const customMarkers = mod.buildMarkersForRequest(customLabelRequest, { mode: 'seat' });
+const html = mod.buildSeatMarkerPrintHtml([...tableMarkers, ...seatMarkers, ...customMarkers], { title: 'Print Seat Markers' });
 
 const requiredTokens = [
   'Print Seat Markers',
@@ -38,6 +56,8 @@ const requiredTokens = [
   'marker-card',
   'Seat 19-A',
   'Seat 19-B',
+  'Seat 19-F',
+  'Seat 19-E',
   'Test Guest',
   'Beach Band Night',
   'dashed',

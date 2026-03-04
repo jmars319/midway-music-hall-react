@@ -615,7 +615,7 @@ export default function SeatRequestsModule() {
 
   const printTableMarkerForRequest = useCallback((request) => {
     const markers = buildMarkersForRequest(request, { mode: 'table' });
-    openMarkerPrintView(markers, 'Print Table Marker');
+    openMarkerPrintView(markers, 'Print Seat Markers');
   }, [openMarkerPrintView]);
 
   const deleteRequest = async (id) => {
@@ -872,7 +872,7 @@ export default function SeatRequestsModule() {
           onClick={() => printTableMarkerForRequest(req)}
           className="px-2 py-1 text-[11px] bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-100 rounded"
         >
-          Print Table Marker
+          Print Seat Markers
         </button>
       );
     }
@@ -1393,6 +1393,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
     [layoutRows]
   );
   const seatRows = useMemo(() => activeRows.filter((row) => isSeatRow(row)), [activeRows]);
+  const seatLabelMap = useMemo(() => buildSeatLookupMap(seatRows), [seatRows]);
   const decorRows = useMemo(() => activeRows.filter((row) => !isSeatRow(row)), [activeRows]);
   const reservedSeatSet = useMemo(() => new Set(reservedSeats || []), [reservedSeats]);
   const pendingSeatSet = useMemo(() => new Set(pendingSeats || []), [pendingSeats]);
@@ -1765,7 +1766,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                 <div className="flex flex-wrap gap-2">
                   {selectedSeats.map((seatId) => (
                     <span key={seatId} className="px-3 py-1 bg-purple-600/60 text-white rounded text-xs">
-                      {formatSeatLabel(seatId, { mode: 'seat' })}
+                      {withSeatDash(describeSeatSelection(seatId, seatLabelMap[seatId]))}
                     </span>
                   ))}
                   {selectedSeats.length === 0 && (

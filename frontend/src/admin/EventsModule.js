@@ -153,6 +153,25 @@ const formatPriceDisplay = (event) => {
   return formatPrice(event.ticket_price) || formatPrice(event.door_price) || 'TBD';
 };
 
+const formatSnapshotSeatBadgeLabel = (seatId) => {
+  const raw = String(seatId || '').trim();
+  if (!raw) return '';
+  const parts = raw.split('-').map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const seatIndex = parts[parts.length - 1];
+    const rowPart = parts[parts.length - 2];
+    if (/^\d+$/.test(seatIndex)) {
+      const tableMatch = rowPart.match(/\d+/);
+      const table = tableMatch ? tableMatch[0] : rowPart;
+      if (table) return `${table}-${seatIndex}`;
+    }
+  }
+  const normalized = formatSeatLabel(raw, { mode: 'seat' });
+  const compact = String(normalized || '').match(/^(\d+)([A-Za-z]+)$/);
+  if (compact) return `${compact[1]}-${compact[2].toUpperCase()}`;
+  return normalized || raw;
+};
+
 const normalizePaymentConfig = (config = {}) => ({
   scope: config.scope || 'category',
   category_id: config.category_id ?? null,
@@ -1586,7 +1605,7 @@ export default function EventsModule(){
       <div className="flex flex-wrap gap-1">
         {seats.map((seat) => (
           <span key={seat} className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-100 border border-gray-600">
-            {formatSeatLabel(seat, { mode: 'seat' })}
+            {formatSnapshotSeatBadgeLabel(seat)}
           </span>
         ))}
       </div>
