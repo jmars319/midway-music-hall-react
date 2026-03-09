@@ -4,6 +4,7 @@ import useSiteContent from '../hooks/useSiteContent';
 
 const POPUP_DISMISS_KEY_PREFIX = 'mmh_announcement_popup_dismissed_v2_';
 const POPUP_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const POPUP_DIALOG_DATA_ATTR = 'data-announcement-popup-dialog';
 
 const DEFAULT_POPUP = {
   enabled: false,
@@ -36,9 +37,30 @@ const normalizePopup = (raw) => {
   return merged;
 };
 
-const hasAnyModalOpen = () => {
+const isSeatSelectionDialog = (dialogNode) => {
+  if (!dialogNode || typeof dialogNode.getAttribute !== 'function') return false;
+  const labelledBy = String(dialogNode.getAttribute('aria-labelledby') || '').toLowerCase();
+  if (labelledBy.includes('event-seating-title-') || labelledBy.includes('large-map-title')) {
+    return true;
+  }
+  if (dialogNode.classList?.contains('seat-selection-mobile')) {
+    return true;
+  }
+  return Boolean(dialogNode.querySelector('.seat-selection-content'));
+};
+
+const shouldBlockForOpenDialogs = (popupConfig) => {
   if (typeof document === 'undefined') return false;
-  return Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
+  const dialogs = Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).filter(
+    (dialog) => dialog.getAttribute(POPUP_DIALOG_DATA_ATTR) !== 'true'
+  );
+  if (!dialogs.length) {
+    return false;
+  }
+  if (popupConfig?.allow_during_seat_selection) {
+    return dialogs.some((dialog) => !isSeatSelectionDialog(dialog));
+  }
+  return true;
 };
 
 const popupVersionHash = (popup) => {
@@ -75,20 +97,39 @@ export default function AnnouncementPopup() {
   const siteContent = useSiteContent();
   const popup = useMemo(() => normalizePopup(siteContent?.announcement_popup || {}), [siteContent]);
   const popupDismissKey = useMemo(() => dismissStorageKey(popup), [popup]);
+  const popupModalConfig = useMemo(
+    () => ({ allow_during_seat_selection: popup.allow_during_seat_selection }),
+    [popup.allow_during_seat_selection]
+  );
   const [dismissed, setDismissed] = useState(false);
-  const [isBlockedByModal, setIsBlockedByModal] = useState(() => hasAnyModalOpen());
+  const [cooldownBlocked, setCooldownBlocked] = useState(() => isInCooldownWindow(popupDismissKey));
+  const [isBlockedByModal, setIsBlockedByModal] = useState(() => shouldBlockForOpenDialogs(popupModalConfig));
+  const [isOpenLatched, setIsOpenLatched] = useState(false);
+  const popupTitleId = 'announcement-popup-title';
 
   useEffect(() => {
     setDismissed(false);
-  }, [popup.enabled, popup.message, popup.severity, popup.link_url, popup.link_text, popupDismissKey]);
+    setCooldownBlocked(isInCooldownWindow(popupDismissKey));
+    setIsBlockedByModal(shouldBlockForOpenDialogs(popupModalConfig));
+    setIsOpenLatched(false);
+  }, [
+    popup.enabled,
+    popup.message,
+    popup.severity,
+    popup.link_url,
+    popup.link_text,
+    popupModalConfig,
+    popupDismissKey,
+  ]);
+
+  const canEvaluateVisibility = popup.enabled && Boolean(popup.message) && !dismissed && !cooldownBlocked;
 
   useLayoutEffect(() => {
-    if (!popup.enabled) {
-      setIsBlockedByModal(false);
+    if (!canEvaluateVisibility || isOpenLatched) {
       return undefined;
     }
     const updateModalState = () => {
-      const nextState = hasAnyModalOpen();
+      const nextState = shouldBlockForOpenDialogs(popupModalConfig);
       setIsBlockedByModal((prev) => (prev === nextState ? prev : nextState));
     };
     updateModalState();
@@ -105,16 +146,23 @@ export default function AnnouncementPopup() {
       attributeFilter: ['role', 'aria-modal', 'aria-labelledby', 'class', 'style'],
     });
     return () => observer.disconnect();
-  }, [popup.enabled]);
+  }, [popupModalConfig, canEvaluateVisibility, isOpenLatched]);
 
-  const blockedByModalNow = popup.enabled && hasAnyModalOpen();
+  useEffect(() => {
+    if (!canEvaluateVisibility || isOpenLatched || isBlockedByModal) {
+      return;
+    }
+    setIsOpenLatched(true);
+  }, [canEvaluateVisibility, isBlockedByModal, isOpenLatched]);
 
-  if (!popup.enabled || !popup.message || dismissed || isInCooldownWindow(popupDismissKey) || isBlockedByModal || blockedByModalNow) {
+  if (!canEvaluateVisibility || isBlockedByModal || !isOpenLatched) {
     return null;
   }
 
   const dismissPopup = () => {
     setDismissed(true);
+    setIsOpenLatched(false);
+    setCooldownBlocked(true);
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         window.localStorage.setItem(popupDismissKey, String(Date.now()));
@@ -128,7 +176,8 @@ export default function AnnouncementPopup() {
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center p-4"
+      data-announcement-popup-dialog="true"
+      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
       onClick={dismissPopup}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
@@ -136,14 +185,18 @@ export default function AnnouncementPopup() {
           dismissPopup();
         }
       }}
-      role="presentation"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={popupTitleId}
+      tabIndex={-1}
     >
-      <div className="absolute inset-0 bg-black/30" aria-hidden="true" />
+      <div data-announcement-popup-backdrop="true" className="absolute inset-0 bg-black/30" aria-hidden="true" />
       <div
         className={`relative z-10 w-full max-w-xl rounded-xl border shadow-2xl ${styleClass}`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="p-4 sm:p-5 flex items-start gap-3">
+          <h2 id={popupTitleId} className="sr-only">Announcement</h2>
           <div className="flex-1 min-w-0">
             <p className="text-sm sm:text-base font-medium break-words [overflow-wrap:anywhere]">{popup.message}</p>
             {popup.link_url && popup.link_text && (
@@ -160,6 +213,7 @@ export default function AnnouncementPopup() {
             onClick={dismissPopup}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/15 hover:bg-black/25"
             aria-label="Dismiss announcement"
+            autoFocus
           >
             <X className="h-4 w-4" />
           </button>

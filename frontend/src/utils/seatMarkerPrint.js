@@ -1,5 +1,8 @@
 import { buildSeatLookupMap, describeSeatSelection, formatSeatLabel, isSeatRow } from './seatLabelUtils.js';
 
+const MARKERS_PER_PAGE = 4;
+const seatSortCollator = new Intl.Collator('en-US', { sensitivity: 'base', numeric: true });
+
 const parseSeats = (value) => {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -85,15 +88,65 @@ const markerForSeat = (request, seatId, lookup = {}) => {
   };
 };
 
+const seatSortParts = (displayLabel, seatId) => {
+  const display = String(displayLabel || '').trim();
+  const resolvedSeat = formatSeatLabel(display || seatId, { mode: 'seat' }) || '';
+  const tableFromDisplay = formatSeatLabel(display || resolvedSeat || seatId, { mode: 'table' }) || '';
+  const tableToken = String(tableFromDisplay).trim();
+  const tableNumberMatch = tableToken.match(/\d+/);
+  const tableNumber = tableNumberMatch ? Number(tableNumberMatch[0]) : Number.POSITIVE_INFINITY;
+  const lettersMatch = (resolvedSeat || display).match(/([A-Za-z]+)$/);
+  const seatLetters = lettersMatch ? lettersMatch[1].toUpperCase() : '';
+  return {
+    tableNumber,
+    tableToken,
+    seatLetters,
+    display,
+    seatId: String(seatId || '').trim(),
+  };
+};
+
+const compareSeatEntries = (left, right) => {
+  const leftSort = seatSortParts(left.displayLabel, left.seatId);
+  const rightSort = seatSortParts(right.displayLabel, right.seatId);
+  if (leftSort.tableNumber !== rightSort.tableNumber) {
+    return leftSort.tableNumber - rightSort.tableNumber;
+  }
+  const tableTokenCmp = seatSortCollator.compare(leftSort.tableToken, rightSort.tableToken);
+  if (tableTokenCmp !== 0) return tableTokenCmp;
+  const seatLabelCmp = seatSortCollator.compare(leftSort.seatLetters, rightSort.seatLetters);
+  if (seatLabelCmp !== 0) return seatLabelCmp;
+  const displayCmp = seatSortCollator.compare(leftSort.display, rightSort.display);
+  if (displayCmp !== 0) return displayCmp;
+  return seatSortCollator.compare(leftSort.seatId, rightSort.seatId);
+};
+
+const chunkMarkers = (markers = []) => {
+  if (!markers.length) return [];
+  const pages = [];
+  for (let i = 0; i < markers.length; i += MARKERS_PER_PAGE) {
+    pages.push(markers.slice(i, i + MARKERS_PER_PAGE));
+  }
+  return pages;
+};
+
 const buildMarkersForRequest = (request = {}, options = {}) => {
   const mode = options.mode === 'seat' ? 'seat' : 'table';
   const seats = parseSeats(request.selected_seats).filter(Boolean);
   if (!seats.length) return [];
   const snapshotRows = parseSeatSnapshot(request.seat_map_snapshot).filter(isSeatRow);
   const seatLookup = buildSeatLookupMap(snapshotRows);
+  const sortedSeats = seats
+    .map((seatId) => ({
+      seatId,
+      // Sorting is display-only and based on the same resolved labels used elsewhere.
+      displayLabel: resolveDisplaySeatLabel(seatId, seatLookup) || withSeatDash(formatSeatLabel(seatId, { mode: 'seat' })),
+    }))
+    .sort(compareSeatEntries)
+    .map((entry) => entry.seatId);
   // Simplified behavior: always print one marker per seat.
   if (mode === 'seat' || mode === 'table') {
-    return seats.map((seatId) => markerForSeat(request, seatId, seatLookup));
+    return sortedSeats.map((seatId) => markerForSeat(request, seatId, seatLookup));
   }
   return [];
 };
@@ -111,9 +164,16 @@ const markerCardHtml = (marker) => `
 
 const buildSeatMarkerPrintHtml = (markers = [], options = {}) => {
   const title = options.title || 'Seat Markers';
-  const renderedMarkers = markers.length
-    ? markers.map((marker) => markerCardHtml(marker)).join('')
-    : '<p class="empty">No markers available for the selected filters.</p>';
+  const pages = chunkMarkers(markers);
+  const renderedPages = pages.length
+    ? pages.map((pageMarkers) => `
+      <section class="sheet">
+        <div class="markers-grid">
+          ${pageMarkers.map((marker) => markerCardHtml(marker)).join('')}
+        </div>
+      </section>
+    `).join('')
+    : '<section class="sheet"><p class="empty">No markers available for the selected filters.</p></section>';
   return `<!doctype html>
 <html>
   <head>
@@ -121,11 +181,14 @@ const buildSeatMarkerPrintHtml = (markers = [], options = {}) => {
     <title>${escapeHtml(title)}</title>
     <style>
       :root { color-scheme: light; }
-      body { margin: 0; font-family: "Helvetica Neue", Arial, sans-serif; background: #fff; color: #111827; }
+      @page { margin: 0.25in; }
+      html, body { margin: 0; padding: 0; }
+      body { font-family: "Helvetica Neue", Arial, sans-serif; background: #fff; color: #111827; display: flex; flex-direction: column; min-height: 100%; }
       .toolbar { padding: 14px 18px; border-bottom: 1px solid #e5e7eb; display: flex; gap: 10px; align-items: center; }
       .toolbar button { padding: 8px 12px; border: 1px solid #1f2937; background: #111827; color: #fff; border-radius: 6px; cursor: pointer; }
-      .page { width: 100%; min-height: 100vh; padding: 8px; box-sizing: border-box; }
-      .markers-grid { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: calc(50vh - 12px); gap: 8px; }
+      .pages { flex: 1; width: 100%; }
+      .sheet { width: 100%; min-height: 10.5in; box-sizing: border-box; padding: 4px; }
+      .markers-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; height: 100%; gap: 4px; }
       .marker-card { border: 1px dashed #9ca3af; box-sizing: border-box; padding: 10px; display: flex; }
       .marker-inner {
         border: 1px solid #e5e7eb;
@@ -167,8 +230,20 @@ const buildSeatMarkerPrintHtml = (markers = [], options = {}) => {
       }
       .empty { padding: 24px; color: #6b7280; }
       @media print {
+        html, body { width: 100%; height: 100%; }
         .toolbar { display: none; }
-        .page { padding: 0; }
+        .pages { height: 100%; }
+        .sheet {
+          padding: 0;
+          min-height: 0;
+          height: 100%;
+          break-after: page;
+          page-break-after: always;
+        }
+        .sheet:last-child {
+          break-after: auto;
+          page-break-after: auto;
+        }
         .markers-grid { gap: 0; }
         .marker-card { page-break-inside: avoid; }
       }
@@ -180,11 +255,7 @@ const buildSeatMarkerPrintHtml = (markers = [], options = {}) => {
       <button onclick="window.close()">Close</button>
       <span>${escapeHtml(title)}</span>
     </div>
-    <main class="page">
-      <section class="markers-grid">
-        ${renderedMarkers}
-      </section>
-    </main>
+    <main class="pages">${renderedPages}</main>
   </body>
 </html>`;
 };
