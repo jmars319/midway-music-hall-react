@@ -5,6 +5,12 @@ import { API_BASE, getImageUrlSync } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
 import { getEventEditorFlags } from './eventEditorFlags';
 import { formatSeatLabel } from '../utils/seatLabelUtils';
+import {
+  formatEventDateForInput,
+  formatEventTimeForInput,
+  parseFriendlyEventDate,
+  parseFriendlyEventTime,
+} from '../utils/adminEventDateTimeInput';
 const SECTION_STORAGE_KEY = 'mmh_event_sections';
 
 const VENUE_LABELS = {
@@ -29,6 +35,9 @@ const MAX_PREVIEW_SEATS = 50;
 const MAX_COMPARISON_SEATS = 20;
 
 const SESSION_TIMEZONE = 'America/New_York';
+const DATE_INPUT_ERROR = 'Use MM/DD/YYYY';
+const TIME_INPUT_ERROR = 'Use h:mm AM/PM (example: 7:00 PM)';
+const SCHEDULE_VALIDATION_SUMMARY = 'Please fix the highlighted fields.';
 
 const SORT_OPTIONS = [
   { value: 'start_asc', label: 'Start date (upcoming first)' },
@@ -90,31 +99,6 @@ const formatDoorTime = (event) => {
     hour: 'numeric',
     minute: '2-digit'
   }).format(date);
-};
-
-const deriveDoorTimeInput = (value) => {
-  if (!value) return '';
-  const raw = String(value).trim();
-  if (!raw) return '';
-  const timePortion = raw.includes('T') ? raw.split('T')[1] : raw.includes(' ') ? raw.split(' ')[1] : raw;
-  if (timePortion && timePortion.includes(':')) {
-    const [hour, minute] = timePortion.split(':');
-    if (hour !== undefined && minute !== undefined) {
-      return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
-    }
-  }
-  const match = raw.match(/(\d{1,2}):(\d{2})/);
-  if (match) {
-    const hour = match[1].padStart(2, '0');
-    return `${hour}:${match[2]}`;
-  }
-  return '';
-};
-
-const combineDateAndTime = (date, time) => {
-  if (!date || !time) return null;
-  const safeTime = time.length === 5 ? `${time}:00` : time;
-  return `${date} ${safeTime}`;
 };
 
 const valuesDiffer = (next, original) => {
@@ -208,6 +192,8 @@ const normalizePriceInput = (value) => {
   return Number(num.toFixed(2));
 };
 
+const isLikelyValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+
 const isRecurringEvent = (event) => Boolean(event.is_series_master || event.series_master_id);
 
 const normalizeVenueKey = (venueCode) => {
@@ -260,6 +246,7 @@ export default function EventsModule(){
   const [imagePreview, setImagePreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
   const [imageUploading, setImageUploading] = useState(false);
   const [imageUploadProgress, setImageUploadProgress] = useState(0);
   const [imageUploadProcessing, setImageUploadProcessing] = useState(false);
@@ -284,6 +271,7 @@ export default function EventsModule(){
   const [refreshLayoutError, setRefreshLayoutError] = useState('');
   const [layoutConfirmState, setLayoutConfirmState] = useState({ open: false, pendingValue: '' });
   const [layoutChangeToast, setLayoutChangeToast] = useState('');
+  const [saveToast, setSaveToast] = useState('');
   const [seatingSnapshotsState, setSeatingSnapshotsState] = useState({ loading: false, items: [], error: '', eventId: null });
   const [snapshotCopyMessage, setSnapshotCopyMessage] = useState('');
   const [snapshotRestoreState, setSnapshotRestoreState] = useState({
@@ -300,6 +288,17 @@ export default function EventsModule(){
   });
   const previewModalRef = useRef(null);
   const previewCloseButtonRef = useRef(null);
+  const scheduleInputRefs = useRef({
+    event_date: null,
+    event_time: null,
+    door_time: null,
+  });
+
+  useEffect(() => {
+    if (!saveToast) return undefined;
+    const timer = setTimeout(() => setSaveToast(''), 4500);
+    return () => clearTimeout(timer);
+  }, [saveToast]);
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -1382,6 +1381,9 @@ export default function EventsModule(){
     setFormData(initialForm);
     setImageFile(null);
     setImagePreview(null);
+    setError('');
+    setFieldErrors({});
+    setSaveToast('');
     setRefreshLayoutError('');
     setRefreshLayoutMessage('');
     setLayoutConfirmState({ open: false, pendingValue: '' });
@@ -1390,13 +1392,16 @@ export default function EventsModule(){
 
   const openEdit = (event) => {
     setEditing(event);
+    setError('');
+    setFieldErrors({});
+    setSaveToast('');
     setRefreshLayoutError('');
     setRefreshLayoutMessage('');
     setFormData({
       artist_name: event.artist_name || '',
-      event_date: event.event_date || '',
-      event_time: event.event_time || '',
-      door_time: deriveDoorTimeInput(event.door_time),
+      event_date: formatEventDateForInput(event.event_date),
+      event_time: formatEventTimeForInput(event.event_time),
+      door_time: formatEventTimeForInput(event.door_time),
       genre: event.genre || '',
       description: event.description || '',
       series_schedule_label: event.series_schedule_label || '',
@@ -1589,7 +1594,46 @@ export default function EventsModule(){
       setFormData((prev) => ({ ...prev, image_url: nextValue, poster_image_id: null, hero_image_id: null }));
       return;
     }
+    if (
+      name === 'event_date' ||
+      name === 'event_time' ||
+      name === 'door_time' ||
+      name === 'seat_request_email_override' ||
+      name === 'contact_email'
+    ) {
+      setFieldErrors((prev) => {
+        if (!prev[name]) return prev;
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+      if (error === SCHEDULE_VALIDATION_SUMMARY) {
+        setError('');
+      }
+    }
     setFormData((prev) => ({ ...prev, [name]: nextValue }));
+  };
+
+  const handleScheduleBlur = (e) => {
+    const { name, value } = e.target;
+    const raw = String(value || '').trim();
+    if (!raw) return;
+    let normalized = '';
+    if (name === 'event_date') {
+      normalized = formatEventDateForInput(raw);
+    } else if (name === 'event_time' || name === 'door_time') {
+      normalized = formatEventTimeForInput(raw);
+    }
+    if (!normalized || normalized === value) {
+      return;
+    }
+    setFormData((prev) => ({ ...prev, [name]: normalized }));
+    setFieldErrors((prev) => {
+      if (!prev[name]) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   };
 
   const confirmLayoutChange = () => {
@@ -1682,6 +1726,16 @@ const parseJsonSafely = (payload) => {
   try {
     return JSON.parse(payload);
   } catch (err) {
+    const start = payload.indexOf('{');
+    const end = payload.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+      try {
+        return JSON.parse(payload.slice(start, end + 1));
+      } catch (innerErr) {
+        console.error('Failed to parse JSON payload', innerErr, payload);
+        return null;
+      }
+    }
     console.error('Failed to parse JSON payload', err, payload);
     return null;
   }
@@ -1768,6 +1822,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
     e.preventDefault();
     setSubmitting(true);
     setError('');
+    setFieldErrors({});
     try {
       let finalImageUrl = formData.image_url;
       let posterImageId = formData.poster_image_id || null;
@@ -1839,12 +1894,12 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       const originalLayoutKey = editing?.layout_id ? String(editing.layout_id) : '';
       const newLayoutKey = normalizedLayoutId ? String(normalizedLayoutId) : '';
       const layoutChanged = Boolean(editing) && originalLayoutKey !== newLayoutKey;
-      const eventDateValue = (payload.event_date || '').trim();
-      const eventTimeValue = (payload.event_time || '').trim();
-      const doorTimeValue = (payload.door_time || '').trim();
-      const originalEventDate = (editing?.event_date || '').trim();
-      const originalEventTime = (editing?.event_time || '').trim();
-      const originalDoorTimeValue = deriveDoorTimeInput(editing?.door_time);
+      const eventDateValue = String(payload.event_date || '').trim();
+      const eventTimeValue = String(payload.event_time || '').trim();
+      const doorTimeValue = String(payload.door_time || '').trim();
+      const originalEventDate = formatEventDateForInput(editing?.event_date);
+      const originalEventTime = formatEventTimeForInput(editing?.event_time);
+      const originalDoorTimeValue = formatEventTimeForInput(editing?.door_time);
       const startOrEndProvided = Boolean(payload.start_datetime || payload.end_datetime);
       const scheduleFieldsChanged = editing
         ? startOrEndProvided ||
@@ -1853,29 +1908,66 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
           valuesDiffer(doorTimeValue, originalDoorTimeValue)
         : Boolean(eventDateValue || eventTimeValue || doorTimeValue || startOrEndProvided);
       const mustRequireSchedule = editorFlags.requireScheduleFields || scheduleFieldsChanged;
-      if (eventDateValue) {
-        payload.event_date = eventDateValue;
-      }
-      if (eventTimeValue) {
-        payload.event_time = eventTimeValue;
-      }
       if (mustRequireSchedule) {
-        if (!eventDateValue || !eventTimeValue) {
-          setError('Event date and start time are required.');
+        const parsedEventDate = parseFriendlyEventDate(eventDateValue);
+        const parsedEventTime = parseFriendlyEventTime(eventTimeValue);
+        const parsedDoorTime = parseFriendlyEventTime(doorTimeValue);
+        const nextFieldErrors = {};
+        if (!parsedEventDate) {
+          nextFieldErrors.event_date = DATE_INPUT_ERROR;
+        }
+        if (!parsedEventTime) {
+          nextFieldErrors.event_time = TIME_INPUT_ERROR;
+        }
+        if (!parsedDoorTime) {
+          nextFieldErrors.door_time = TIME_INPUT_ERROR;
+        }
+        if (Object.keys(nextFieldErrors).length > 0) {
+          setFieldErrors(nextFieldErrors);
+          setError(SCHEDULE_VALIDATION_SUMMARY);
           setSubmitting(false);
+          const firstInvalid = ['event_date', 'event_time', 'door_time'].find((field) => nextFieldErrors[field]);
+          if (firstInvalid) {
+            requestAnimationFrame(() => {
+              const input = scheduleInputRefs.current[firstInvalid];
+              if (input && typeof input.focus === 'function') {
+                input.focus();
+              }
+            });
+          }
           return;
         }
-        const normalizedDoorTime = combineDateAndTime(eventDateValue, doorTimeValue);
-        if (!normalizedDoorTime) {
-          setError('Doors open time requires both an event date and a time.');
-          setSubmitting(false);
-          return;
-        }
-        payload.door_time = normalizedDoorTime;
+        payload.event_date = parsedEventDate;
+        payload.event_time = parsedEventTime;
+        payload.door_time = `${parsedEventDate} ${parsedDoorTime}`;
       } else {
         delete payload.event_date;
         delete payload.event_time;
         delete payload.door_time;
+      }
+      const seatOverrideValue = String(payload.seat_request_email_override || '').trim();
+      const contactEmailValue = String(payload.contact_email || '').trim();
+      const emailFieldErrors = {};
+      if (seatOverrideValue && !isLikelyValidEmail(seatOverrideValue)) {
+        emailFieldErrors.seat_request_email_override = 'Use a valid email (example: name@example.com).';
+      }
+      if (contactEmailValue && !isLikelyValidEmail(contactEmailValue)) {
+        emailFieldErrors.contact_email = 'Use a valid email (example: name@example.com).';
+      }
+      if (Object.keys(emailFieldErrors).length > 0) {
+        setFieldErrors(emailFieldErrors);
+        setError(SCHEDULE_VALIDATION_SUMMARY);
+        setSubmitting(false);
+        const firstInvalidEmailField = ['seat_request_email_override', 'contact_email'].find((field) => emailFieldErrors[field]);
+        if (firstInvalidEmailField) {
+          requestAnimationFrame(() => {
+            const input = document.querySelector(`[name="${firstInvalidEmailField}"]`);
+            if (input && typeof input.focus === 'function') {
+              input.focus();
+            }
+          });
+        }
+        return;
       }
       ['contact_name', 'contact_email', 'contact_phone_raw', 'contact_notes', 'series_schedule_label', 'series_summary', 'series_footer_note'].forEach((field) => {
         if (typeof payload[field] === 'string') {
@@ -1891,8 +1983,10 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (data && data.success) {
+      const responseText = await res.text();
+      const data = parseJsonSafely(responseText) || {};
+      const treatAsSuccess = Boolean(data?.success) || (res.ok && responseText.trim() === '');
+      if (treatAsSuccess) {
         if (layoutChanged) {
           const snapshotId = data.seating_snapshot_id || data.snapshot_id || null;
           const toastCopy = snapshotId
@@ -1900,13 +1994,22 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
             : 'Seating layout updated and a recovery snapshot was saved.';
           setLayoutChangeToast(toastCopy);
         }
+        const savedName = String(payload.artist_name || payload.title || '').trim();
+        const label = savedName || 'event';
+        setSaveToast(editing ? `Updated "${label}" successfully.` : `Created "${label}" successfully.`);
         setShowForm(false);
         setSeatingSnapshotsState({ loading: false, items: [], error: '', eventId: null });
         setSnapshotCopyMessage('');
         setLayoutConfirmState({ open: false, pendingValue: '' });
         fetchEvents();
       } else {
-        setError(data?.message || 'Failed to save event');
+        if (typeof data?.message === 'string' && data.message.includes('seat_request_email_override')) {
+          setFieldErrors((prev) => ({
+            ...prev,
+            seat_request_email_override: 'Use a valid email (example: name@example.com).',
+          }));
+        }
+        setError(data?.message || data?.error || `Server returned status ${res.status}.`);
       }
     } catch (err) {
       console.error('Save event error', err);
@@ -2183,6 +2286,24 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
           </button>
         </div>
       )}
+      {saveToast && (
+        <div className="fixed right-5 top-5 z-[80] w-[min(92vw,34rem)] rounded-xl border border-emerald-300 bg-emerald-500 px-4 py-3 text-emerald-950 shadow-2xl">
+          <div className="flex items-start gap-3">
+            <CheckCircle className="h-5 w-5 mt-0.5 shrink-0" aria-hidden="true" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-extrabold uppercase tracking-[0.08em]">Success</p>
+              <p className="text-sm font-semibold break-words">{saveToast}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSaveToast('')}
+              className="text-xs font-semibold text-emerald-900 hover:text-emerald-950"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-gray-900 border border-purple-500/20 rounded-xl p-4 mb-6 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
@@ -2397,7 +2518,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <form noValidate onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Artist Name*</label>
                 <input name="artist_name" value={formData.artist_name} onChange={handleChange} required className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
@@ -2430,41 +2551,88 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Event Date*</label>
                 <input
-                  type="date"
+                  type="text"
                   name="event_date"
                   value={formData.event_date}
                   onChange={handleChange}
-                  required={scheduleInputsRequired}
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  onBlur={handleScheduleBlur}
+                  placeholder="MM/DD/YYYY"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  aria-required={scheduleInputsRequired}
+                  aria-invalid={fieldErrors.event_date ? 'true' : 'false'}
+                  aria-describedby={fieldErrors.event_date ? 'event-date-error' : undefined}
+                  ref={(node) => { scheduleInputRefs.current.event_date = node; }}
+                  className={`w-full px-4 py-2 rounded border text-white ${
+                    fieldErrors.event_date
+                      ? 'border-red-500 bg-red-900/25 focus:ring-2 focus:ring-red-500 focus:border-red-500'
+                      : 'border-gray-600 bg-gray-700 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
+                  }`}
                 />
+                {fieldErrors.event_date && (
+                  <p id="event-date-error" className="text-xs text-red-300 mt-1">
+                    {fieldErrors.event_date}
+                  </p>
+                )}
               </div>
 
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Event Time*</label>
                 <input
-                  type="time"
+                  type="text"
                   name="event_time"
                   value={formData.event_time}
                   onChange={handleChange}
-                  required={scheduleInputsRequired}
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  onBlur={handleScheduleBlur}
+                  placeholder="h:mm AM/PM"
+                  inputMode="text"
+                  autoComplete="off"
+                  aria-required={scheduleInputsRequired}
+                  aria-invalid={fieldErrors.event_time ? 'true' : 'false'}
+                  aria-describedby={fieldErrors.event_time ? 'event-time-error' : undefined}
+                  ref={(node) => { scheduleInputRefs.current.event_time = node; }}
+                  className={`w-full px-4 py-2 rounded border text-white ${
+                    fieldErrors.event_time
+                      ? 'border-red-500 bg-red-900/25 focus:ring-2 focus:ring-red-500 focus:border-red-500'
+                      : 'border-gray-600 bg-gray-700 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
+                  }`}
                 />
+                {fieldErrors.event_time && (
+                  <p id="event-time-error" className="text-xs text-red-300 mt-1">
+                    {fieldErrors.event_time}
+                  </p>
+                )}
               </div>
 
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Doors Open Time*</label>
                 <input
-                  type="time"
+                  type="text"
                   name="door_time"
                   value={formData.door_time}
                   onChange={handleChange}
-                  required={scheduleInputsRequired}
-                  aria-describedby="door-time-help"
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  onBlur={handleScheduleBlur}
+                  placeholder="h:mm AM/PM"
+                  inputMode="text"
+                  autoComplete="off"
+                  aria-required={scheduleInputsRequired}
+                  aria-invalid={fieldErrors.door_time ? 'true' : 'false'}
+                  aria-describedby={fieldErrors.door_time ? 'door-time-help door-time-error' : 'door-time-help'}
+                  ref={(node) => { scheduleInputRefs.current.door_time = node; }}
+                  className={`w-full px-4 py-2 rounded border text-white ${
+                    fieldErrors.door_time
+                      ? 'border-red-500 bg-red-900/25 focus:ring-2 focus:ring-red-500 focus:border-red-500'
+                      : 'border-gray-600 bg-gray-700 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
+                  }`}
                 />
                 <p id="door-time-help" className="text-xs text-gray-400 mt-1">
                   This feeds the “Doors Open” line on the public schedule.
                 </p>
+                {fieldErrors.door_time && (
+                  <p id="door-time-error" className="text-xs text-red-300 mt-1">
+                    {fieldErrors.door_time}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -2680,11 +2848,19 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
               <div className="md:col-span-2">
                 <label className="block text-sm text-gray-300 mb-1">Seat request email (optional)</label>
                 <input
-                  type="email"
+                  type="text"
+                  inputMode="email"
+                  autoComplete="email"
                   name="seat_request_email_override"
                   value={formData.seat_request_email_override}
                   onChange={handleChange}
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                  aria-invalid={fieldErrors.seat_request_email_override ? 'true' : 'false'}
+                  aria-describedby={fieldErrors.seat_request_email_override ? 'seat-request-email-error' : undefined}
+                  className={`w-full px-4 py-2 rounded border text-white ${
+                    fieldErrors.seat_request_email_override
+                      ? 'border-red-500 bg-red-900/25 focus:ring-2 focus:ring-red-500 focus:border-red-500'
+                      : 'border-gray-600 bg-gray-700 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
+                  }`}
                   placeholder="Leave blank for default routing"
                 />
                 <p className="text-xs text-gray-400 mt-1">
@@ -2692,6 +2868,11 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                     ? `Currently routed to ${editingSeatRouting.email} (${editingSeatRouting.label}).`
                     : 'Leave blank to use the Beach Bands inbox for beach shows or the main staff inbox for everything else.'}
                 </p>
+                {fieldErrors.seat_request_email_override && (
+                  <p id="seat-request-email-error" className="text-xs text-red-300 mt-1">
+                    {fieldErrors.seat_request_email_override}
+                  </p>
+                )}
               </div>
 
               {paymentSettingsAvailable ? (
@@ -2884,13 +3065,26 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                   <div>
                     <label className="block text-sm text-gray-300 mb-1">Contact Email</label>
                     <input
-                      type="email"
+                      type="text"
+                      inputMode="email"
+                      autoComplete="email"
                       name="contact_email"
                       value={formData.contact_email}
                       onChange={handleChange}
-                      className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                      aria-invalid={fieldErrors.contact_email ? 'true' : 'false'}
+                      aria-describedby={fieldErrors.contact_email ? 'contact-email-error' : undefined}
+                      className={`w-full px-4 py-2 rounded border text-white ${
+                        fieldErrors.contact_email
+                          ? 'border-red-500 bg-red-900/25 focus:ring-2 focus:ring-red-500 focus:border-red-500'
+                          : 'border-gray-600 bg-gray-700 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
+                      }`}
                       placeholder="events@midwaymusichall.net"
                     />
+                    {fieldErrors.contact_email && (
+                      <p id="contact-email-error" className="text-xs text-red-300 mt-1">
+                        {fieldErrors.contact_email}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -2995,6 +3189,16 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                 <label className="block text-sm text-gray-300 mb-1">Description</label>
                 <textarea name="description" value={formData.description} onChange={handleChange} rows="4" className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
               </div>
+
+              {error && (
+                <div
+                  className="md:col-span-2 p-3 bg-red-600/10 border border-red-600 text-red-400 rounded"
+                  role="alert"
+                  aria-live="assertive"
+                >
+                  {error}
+                </div>
+              )}
 
               <div className="md:col-span-2 flex justify-end gap-2 mt-2">
                 <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded">Cancel</button>
