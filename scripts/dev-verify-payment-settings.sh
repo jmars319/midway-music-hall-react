@@ -7,6 +7,10 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 API_BASE="$(backend_url)/api"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mmh-pay-verify.XXXXXX")"
+ADMIN_COOKIE_JAR="${TMP_DIR}/admin-cookies.txt"
+ADMIN_ORIGIN="$(frontend_url)"
+ADMIN_LOGIN_ID="${MMH_VERIFY_LOGIN_EMAIL:-${MMH_VERIFY_ADMIN_EMAIL:-admin}}"
+ADMIN_LOGIN_PASSWORD="${MMH_VERIFY_LOGIN_PASSWORD:-${MMH_VERIFY_ADMIN_PASSWORD:-admin123}}"
 
 created_layout_id=""
 created_event_ids=()
@@ -20,18 +24,25 @@ restore_global_needed=0
 cleanup_resources() {
   if [ "${#created_event_ids[@]}" -gt 0 ]; then
     for event_id in "${created_event_ids[@]}"; do
-      curl -fsS -X DELETE -H 'Accept: application/json' "${API_BASE}/events/${event_id}" >/dev/null 2>&1 || true
+      curl -fsS -X DELETE \
+        -b "$ADMIN_COOKIE_JAR" \
+        -H "Origin: ${ADMIN_ORIGIN}" \
+        -H 'Accept: application/json' \
+        "${API_BASE}/events/${event_id}" >/dev/null 2>&1 || true
     done
   fi
   if [ -n "$created_layout_id" ]; then
-    curl -fsS -X DELETE -H 'Accept: application/json' "${API_BASE}/seating-layouts/${created_layout_id}" >/dev/null 2>&1 || true
+    curl -fsS -X DELETE \
+      -b "$ADMIN_COOKIE_JAR" \
+      -H "Origin: ${ADMIN_ORIGIN}" \
+      -H 'Accept: application/json' \
+      "${API_BASE}/seating-layouts/${created_layout_id}" >/dev/null 2>&1 || true
   fi
   if [ "$restore_config_needed" -eq 1 ] && [ -n "$target_category_id" ]; then
-    python3 - "$original_payment_config_b64" "$target_category_id" "$API_BASE" <<'PY'
-import base64, json, sys, urllib.request
+    restore_payload=$(python3 - "$original_payment_config_b64" "$target_category_id" <<'PY'
+import base64, json, sys
 raw = sys.argv[1]
 category_id = int(sys.argv[2])
-api_base = sys.argv[3]
 payload = {
     'scope': 'category',
     'category_id': category_id,
@@ -66,19 +77,15 @@ if raw:
         'fine_print': data.get('fine_print') or '',
         'provider_label': data.get('provider_label') or '',
     })
-body = json.dumps(payload).encode()
-req = urllib.request.Request(f"{api_base}/admin/payment-settings", data=body, headers={'Content-Type': 'application/json'}, method='PUT')
-try:
-    urllib.request.urlopen(req).read()
-except Exception as exc:  # pragma: no cover
-    sys.stderr.write(f"[cleanup] Failed to restore payment config: {exc}\n")
+print(json.dumps(payload))
 PY
+)
+    admin_post_json "PUT" "/admin/payment-settings" "$restore_payload" >/dev/null 2>&1 || true
   fi
   if [ "$restore_global_needed" -eq 1 ]; then
-    python3 - "$original_global_config_b64" "$API_BASE" <<'PY'
-import base64, json, sys, urllib.request
+    restore_global_payload=$(python3 - "$original_global_config_b64" <<'PY'
+import base64, json, sys
 raw = sys.argv[1]
-api_base = sys.argv[2]
 payload = {
     'scope': 'global',
     'enabled': False,
@@ -112,13 +119,10 @@ if raw:
         'fine_print': data.get('fine_print') or '',
         'provider_label': data.get('provider_label') or '',
     })
-body = json.dumps(payload).encode()
-req = urllib.request.Request(f"{api_base}/admin/payment-settings", data=body, headers={'Content-Type': 'application/json'}, method='PUT')
-try:
-    urllib.request.urlopen(req).read()
-except Exception as exc:  # pragma: no cover
-    sys.stderr.write(f"[cleanup] Failed to restore global payment config: {exc}\n")
+print(json.dumps(payload))
 PY
+)
+    admin_post_json "PUT" "/admin/payment-settings" "$restore_global_payload" >/dev/null 2>&1 || true
   fi
   rm -rf "$TMP_DIR"
 }
@@ -128,7 +132,6 @@ require_backend_health_once || {
   log_error "backend is not running; start dev stack via scripts/dev-start.sh"
   exit 1
 }
-
 json_field() {
   local json="$1"
   local field="$2"
@@ -155,34 +158,61 @@ post_json() {
     "${API_BASE}${path}"
 }
 
-log_step "[payment-verify] locating a category for testing"
-category_response=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/event-categories")
-target_category_id=$(CATEGORY_JSON="$category_response" python3 - <<'PY'
-import json, os
-data = json.loads(os.environ.get('CATEGORY_JSON', '{}'))
-for item in data.get('categories', []):
-    if item.get('is_active', 1):
-        print(item['id'])
-        break
-PY
-)
-if [ -z "$target_category_id" ]; then
-  log_error "no event categories available for testing"
-  exit 1
-fi
-target_category_name=$(CATEGORY_JSON="$category_response" python3 - "$target_category_id" <<'PY'
-import json, os, sys
-target = sys.argv[1]
-data = json.loads(os.environ.get('CATEGORY_JSON', '{}'))
-for item in data.get('categories', []):
-    if str(item.get('id')) == str(target):
-        print(item.get('name', f'Category {target}'))
-        break
-PY
-)
+admin_get_json() {
+  local path="$1"
+  curl -fsS \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Accept: application/json' \
+    "${API_BASE}${path}"
+}
 
-log_step "[payment-verify] capturing original payment config for category ${target_category_name}"
-payment_response=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/admin/payment-settings")
+admin_post_json() {
+  local method="$1"
+  local path="$2"
+  local body="$3"
+  curl -fsS -X "$method" \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$body" \
+    "${API_BASE}${path}"
+}
+
+admin_login() {
+  local login_payload
+  login_payload=$(python3 - "$ADMIN_LOGIN_ID" "$ADMIN_LOGIN_PASSWORD" <<'PY'
+import json
+import sys
+print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))
+PY
+)
+  local login_response
+  login_response=$(curl -fsS \
+    -c "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$login_payload" \
+    "${API_BASE}/login")
+  local login_ok
+  login_ok=$(LOGIN_JSON="$login_response" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ.get('LOGIN_JSON', '{}'))
+print('1' if payload.get('success') else '0')
+PY
+)
+  if [ "$login_ok" != "1" ]; then
+    log_error "admin login failed in payment verify script"
+    exit 1
+  fi
+}
+
+admin_login
+
+payment_response=$(admin_get_json "/admin/payment-settings")
 has_payment_table=$(PAYMENT_JSON="$payment_response" python3 - <<'PY'
 import json, os
 data = json.loads(os.environ.get('PAYMENT_JSON', '{}'))
@@ -193,6 +223,35 @@ if [ "$has_payment_table" != "1" ]; then
   log_error "payment_settings table not detected. Run database/20250326_payment_settings.sql + database/20251212_schema_upgrade.sql before this script."
   exit 1
 fi
+target_category_id=$(PAYMENT_JSON="$payment_response" python3 - <<'PY'
+import json
+import os
+
+data = json.loads(os.environ.get('PAYMENT_JSON', '{}'))
+for item in data.get('categories', []):
+    if item.get('is_active', 1):
+        print(item.get('id'))
+        break
+PY
+)
+if [ -z "$target_category_id" ]; then
+  log_error "no active categories available for payment verification"
+  exit 1
+fi
+target_category_name=$(PAYMENT_JSON="$payment_response" python3 - "$target_category_id" <<'PY'
+import json
+import os
+import sys
+
+target = str(sys.argv[1])
+data = json.loads(os.environ.get('PAYMENT_JSON', '{}'))
+for item in data.get('categories', []):
+    if str(item.get('id')) == target:
+        print(item.get('name') or f'Category {target}')
+        break
+PY
+)
+log_step "[payment-verify] capturing original payment config for category ${target_category_name}"
 original_payment_config_b64=$(PAYMENT_JSON="$payment_response" python3 - "$target_category_id" <<'PY'
 import base64, json, os, sys
 data = json.loads(os.environ.get('PAYMENT_JSON', '{}'))
@@ -240,7 +299,7 @@ put_payment_config() {
 }
 JSON
 )
-  post_json "PUT" "/admin/payment-settings" "$payload" >/dev/null
+  admin_post_json "PUT" "/admin/payment-settings" "$payload" >/dev/null
   restore_config_needed=1
 }
 
@@ -275,7 +334,7 @@ else:
 print(json.dumps(payload))
 PY
 )
-  post_json "PUT" "/admin/payment-settings" "$payload" >/dev/null
+  admin_post_json "PUT" "/admin/payment-settings" "$payload" >/dev/null
   restore_global_needed=1
 }
 
@@ -308,7 +367,7 @@ create_layout() {
 }
 JSON
 )
-  response=$(post_json "POST" "/seating-layouts" "$payload")
+  response=$(admin_post_json "POST" "/seating-layouts" "$payload")
   created_layout_id=$(json_field "$response" id)
   log_success "[payment-verify] created seating layout ${created_layout_id}"
 }
@@ -337,7 +396,7 @@ create_event() {
 }
 JSON
 )
-  response=$(post_json "POST" "/events" "$payload")
+  response=$(admin_post_json "POST" "/events" "$payload")
   event_id=$(json_field "$response" id)
   created_event_ids+=("$event_id")
   log_info "[payment-verify] created event ${event_id} (${label})" >&2

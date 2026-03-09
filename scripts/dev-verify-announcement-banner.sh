@@ -7,27 +7,35 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 API_BASE="$(backend_url)/api"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mmh-banner-verify.XXXXXX")"
+ADMIN_COOKIE_JAR="${TMP_DIR}/admin-cookies.txt"
+ADMIN_ORIGIN="$(frontend_url)"
+ADMIN_LOGIN_ID="${MMH_VERIFY_LOGIN_EMAIL:-${MMH_VERIFY_ADMIN_EMAIL:-admin}}"
+ADMIN_LOGIN_PASSWORD="${MMH_VERIFY_LOGIN_PASSWORD:-${MMH_VERIFY_ADMIN_PASSWORD:-admin123}}"
 
 original_banner_b64=""
 restore_needed=0
 
 cleanup_resources() {
   if [ "$restore_needed" -eq 1 ]; then
-    python3 - "$API_BASE" "$original_banner_b64" <<'PY'
-import base64, json, sys, urllib.request
-api_base = sys.argv[1]
-raw_b64 = sys.argv[2]
+    restore_payload=$(python3 - "$original_banner_b64" <<'PY'
+import base64
+import json
+import sys
+
+raw_b64 = sys.argv[1]
 raw_value = ''
 if raw_b64:
-  raw_value = base64.b64decode(raw_b64.encode()).decode()
-payload = {'announcement_banner': raw_value}
-body = json.dumps(payload).encode()
-req = urllib.request.Request(f"{api_base}/settings", data=body, headers={'Content-Type': 'application/json'}, method='PUT')
-try:
-  urllib.request.urlopen(req).read()
-except Exception as exc:  # pragma: no cover
-  sys.stderr.write(f"[cleanup] Failed to restore announcement banner: {exc}\n")
+    raw_value = base64.b64decode(raw_b64.encode()).decode()
+print(json.dumps({'announcement_banner': raw_value}))
 PY
+)
+    curl -fsS -X PUT \
+      -b "$ADMIN_COOKIE_JAR" \
+      -H "Origin: ${ADMIN_ORIGIN}" \
+      -H 'Content-Type: application/json' \
+      -H 'Accept: application/json' \
+      -d "$restore_payload" \
+      "${API_BASE}/settings" >/dev/null 2>&1 || true
   fi
   rm -rf "$TMP_DIR"
 }
@@ -38,7 +46,60 @@ require_backend_health_once || {
   exit 1
 }
 
-settings_response=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/settings")
+admin_get_json() {
+  local path="$1"
+  curl -fsS \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Accept: application/json' \
+    "${API_BASE}${path}"
+}
+
+admin_put_json() {
+  local path="$1"
+  local body="$2"
+  curl -fsS -X PUT \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$body" \
+    "${API_BASE}${path}"
+}
+
+admin_login() {
+  local login_payload
+  login_payload=$(python3 - "$ADMIN_LOGIN_ID" "$ADMIN_LOGIN_PASSWORD" <<'PY'
+import json
+import sys
+print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))
+PY
+)
+  local login_response
+  login_response=$(curl -fsS \
+    -c "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$login_payload" \
+    "${API_BASE}/login")
+  local ok
+  ok=$(LOGIN_JSON="$login_response" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ.get('LOGIN_JSON', '{}'))
+print('1' if payload.get('success') else '0')
+PY
+)
+  if [ "$ok" != "1" ]; then
+    log_error "admin login failed in announcement-banner verify script"
+    exit 1
+  fi
+}
+
+admin_login
+
+settings_response=$(admin_get_json "/settings")
 settings_ok=$(printf '%s' "$settings_response" | python3 -c 'import json, sys
 try:
     data = json.load(sys.stdin)
@@ -83,9 +144,7 @@ PY
 )
 
 log_step "[banner] enabling announcement banner"
-curl -fsS -X PUT -H 'Content-Type: application/json' -H 'Accept: application/json' \
-  -d "$banner_body" \
-  "${API_BASE}/settings" >/dev/null
+admin_put_json "/settings" "$banner_body" >/dev/null
 restore_needed=1
 
 log_step "[banner] verifying banner present in site content"
@@ -120,9 +179,7 @@ value = sys.argv[1]
 print(json.dumps({"announcement_banner": value}))
 PY
 )
-curl -fsS -X PUT -H 'Content-Type: application/json' -H 'Accept: application/json' \
-  -d "$disabled_body" \
-  "${API_BASE}/settings" >/dev/null
+admin_put_json "/settings" "$disabled_body" >/dev/null
 
 log_step "[banner] verifying banner disabled in site content"
 site_response=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/site-content")

@@ -48,10 +48,20 @@ const customLabelRequest = {
 const tableMarkers = mod.buildMarkersForRequest(sampleRequest, { mode: 'table' });
 const seatMarkers = mod.buildMarkersForRequest(sampleRequest, { mode: 'seat' });
 const customMarkers = mod.buildMarkersForRequest(customLabelRequest, { mode: 'seat' });
-const html = mod.buildSeatMarkerPrintHtml([...tableMarkers, ...seatMarkers, ...customMarkers], { title: 'Print Seat Markers' });
+const additionalMarkers = mod.buildMarkersForRequest({
+  ...sampleRequest,
+  selected_seats: JSON.stringify(['Orch-19-3', 'Orch-19-4']),
+}, { mode: 'seat' });
+const allMarkers = [...tableMarkers, ...seatMarkers, ...customMarkers, ...additionalMarkers];
+const html = mod.buildSeatMarkerPrintHtml(allMarkers, { title: 'Print Seat Markers' });
 
 const requiredTokens = [
   'Print Seat Markers',
+  '@page { margin: 0.25in; }',
+  'grid-template-columns: 1fr 1fr;',
+  'grid-template-rows: 1fr 1fr;',
+  'height: 100%;',
+  'class="sheet"',
   'markers-grid',
   'marker-card',
   'Seat 19-A',
@@ -66,6 +76,32 @@ const requiredTokens = [
 const missing = requiredTokens.filter((token) => !html.includes(token));
 if (missing.length) {
   throw new Error(`Missing expected marker print tokens: ${missing.join(', ')}`);
+}
+
+if (html.includes('50vh')) {
+  throw new Error('Marker print HTML still uses viewport-based row sizing (50vh).');
+}
+
+const sheets = [...html.matchAll(/<section class="sheet">([\s\S]*?)<\/section>/g)];
+const expectedSheets = Math.ceil(allMarkers.length / 4);
+if (sheets.length !== expectedSheets) {
+  throw new Error(`Expected ${expectedSheets} print sheets, got ${sheets.length}.`);
+}
+const markerCountsPerSheet = sheets.map((match) => (match[1].match(/class="marker-card\b/g) || []).length);
+if (markerCountsPerSheet.some((count) => count > 4)) {
+  throw new Error(`Found a print sheet with more than 4 markers: ${markerCountsPerSheet.join(', ')}`);
+}
+if (markerCountsPerSheet[0] !== 4) {
+  throw new Error(`Expected first print sheet to contain 4 markers, got ${markerCountsPerSheet[0]}.`);
+}
+
+const seatEIndex = html.indexOf('Seat 19-E');
+const seatFIndex = html.indexOf('Seat 19-F');
+if (seatEIndex < 0 || seatFIndex < 0) {
+  throw new Error('Expected custom seat labels Seat 19-E and Seat 19-F were not found.');
+}
+if (seatEIndex > seatFIndex) {
+  throw new Error('Custom seat labels are not sorted alphabetically in print output (expected 19-E before 19-F).');
 }
 NODE
 

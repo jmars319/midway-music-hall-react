@@ -7,17 +7,29 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 API_BASE="$(backend_url)/api"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mmh-event-images.XXXXXX")"
+ADMIN_COOKIE_JAR="${TMP_DIR}/admin-cookies.txt"
+ADMIN_ORIGIN="$(frontend_url)"
+ADMIN_LOGIN_ID="${MMH_VERIFY_LOGIN_EMAIL:-${MMH_VERIFY_ADMIN_EMAIL:-admin}}"
+ADMIN_LOGIN_PASSWORD="${MMH_VERIFY_LOGIN_PASSWORD:-${MMH_VERIFY_ADMIN_PASSWORD:-admin123}}"
 created_event_id=""
 created_media_id=""
 tmp_image="${TMP_DIR}/event-image.png"
 
 cleanup() {
   if [ -n "$created_event_id" ]; then
-    curl -fsS -X DELETE -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}" >/dev/null 2>&1 || true
+    curl -fsS -X DELETE \
+      -b "$ADMIN_COOKIE_JAR" \
+      -H "Origin: ${ADMIN_ORIGIN}" \
+      -H 'Accept: application/json' \
+      "${API_BASE}/events/${created_event_id}" >/dev/null 2>&1 || true
     created_event_id=""
   fi
   if [ -n "$created_media_id" ]; then
-    curl -fsS -X DELETE -H 'Accept: application/json' "${API_BASE}/media/${created_media_id}" >/dev/null 2>&1 || true
+    curl -fsS -X DELETE \
+      -b "$ADMIN_COOKIE_JAR" \
+      -H "Origin: ${ADMIN_ORIGIN}" \
+      -H 'Accept: application/json' \
+      "${API_BASE}/media/${created_media_id}" >/dev/null 2>&1 || true
     created_media_id=""
   fi
   rm -rf "$TMP_DIR"
@@ -39,11 +51,45 @@ post_json() {
   local path="$2"
   local body="$3"
   curl -fsS -X "$method" \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json' \
     -d "$body" \
     "${API_BASE}${path}"
 }
+
+admin_login() {
+  local login_payload
+  login_payload=$(python3 - "$ADMIN_LOGIN_ID" "$ADMIN_LOGIN_PASSWORD" <<'PY'
+import json
+import sys
+print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))
+PY
+)
+  local login_response
+  login_response=$(curl -fsS \
+    -c "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$login_payload" \
+    "${API_BASE}/login")
+  local ok
+  ok=$(LOGIN_JSON="$login_response" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ.get('LOGIN_JSON', '{}'))
+print('1' if payload.get('success') else '0')
+PY
+)
+  if [ "$ok" != "1" ]; then
+    log_error "admin login failed in event-images verify script"
+    exit 1
+  fi
+}
+
+admin_login
 
 json_field() {
   local json="$1"
@@ -61,7 +107,13 @@ else:
 }
 
 log_step "[event-images] uploading test media"
-upload_response=$(curl -fsS -H 'Accept: application/json' -F "file=@${tmp_image}" -F 'category=gallery' "${API_BASE}/media")
+upload_response=$(curl -fsS \
+  -b "$ADMIN_COOKIE_JAR" \
+  -H "Origin: ${ADMIN_ORIGIN}" \
+  -H 'Accept: application/json' \
+  -F "file=@${tmp_image}" \
+  -F 'category=gallery' \
+  "${API_BASE}/media")
 created_media_id=$(python3 -c 'import json,sys
 payload=json.load(sys.stdin)
 media=payload.get("media") or {}
@@ -121,14 +173,22 @@ else:
 PY
 }
 
-event_json=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}")
+event_json=$(curl -fsS \
+  -b "$ADMIN_COOKIE_JAR" \
+  -H "Origin: ${ADMIN_ORIGIN}" \
+  -H 'Accept: application/json' \
+  "${API_BASE}/events/${created_event_id}")
 assert_effective_source "$event_json" "poster_media"
 
 log_step "[event-images] clearing poster reference"
 clear_payload='{"poster_image_id": null, "hero_image_id": null, "image_url": ""}'
 post_json "PUT" "/events/${created_event_id}" "$clear_payload" >/dev/null
 
-event_json_cleared=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}")
+event_json_cleared=$(curl -fsS \
+  -b "$ADMIN_COOKIE_JAR" \
+  -H "Origin: ${ADMIN_ORIGIN}" \
+  -H 'Accept: application/json' \
+  "${API_BASE}/events/${created_event_id}")
 assert_effective_source "$event_json_cleared" "fallback"
 
 log_success "[event-images] verification succeeded"

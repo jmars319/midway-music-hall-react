@@ -6,6 +6,11 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT_DIR/scripts/dev-common.sh"
 
 API_BASE="$(backend_url)/api"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mmh-seating-guardrails.XXXXXX")"
+ADMIN_COOKIE_JAR="${TMP_DIR}/admin-cookies.txt"
+ADMIN_ORIGIN="$(frontend_url)"
+ADMIN_LOGIN_ID="${MMH_VERIFY_LOGIN_EMAIL:-${MMH_VERIFY_ADMIN_EMAIL:-admin}}"
+ADMIN_LOGIN_PASSWORD="${MMH_VERIFY_LOGIN_PASSWORD:-${MMH_VERIFY_ADMIN_PASSWORD:-admin123}}"
 
 require_backend_health_once || {
   log_error "backend is not running; start the dev stack before running this script."
@@ -46,11 +51,45 @@ post_json() {
   local path="$2"
   local body="$3"
   curl -fsS -X "$method" \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json' \
     -d "$body" \
     "${API_BASE}${path}"
 }
+
+admin_login() {
+  local login_payload
+  login_payload=$(python3 - "$ADMIN_LOGIN_ID" "$ADMIN_LOGIN_PASSWORD" <<'PY'
+import json
+import sys
+print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))
+PY
+)
+  local login_response
+  login_response=$(curl -fsS \
+    -c "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$login_payload" \
+    "${API_BASE}/login")
+  local ok
+  ok=$(LOGIN_JSON="$login_response" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ.get('LOGIN_JSON', '{}'))
+print('1' if payload.get('success') else '0')
+PY
+)
+  if [ "$ok" != "1" ]; then
+    log_error "admin login failed in seating-guardrails verify script"
+    exit 1
+  fi
+}
+
+admin_login
 
 layout_pair="$(php -r "
 if (!isset(\$_SERVER['REQUEST_METHOD'])) { \$_SERVER['REQUEST_METHOD'] = 'CLI'; }
@@ -110,9 +149,14 @@ JSON
 event_id=""
 cleanup() {
   if [ -n "$event_id" ]; then
-    curl -fsS -X DELETE -H 'Accept: application/json' "${API_BASE}/events/${event_id}" >/dev/null 2>&1 || true
+    curl -fsS -X DELETE \
+      -b "$ADMIN_COOKIE_JAR" \
+      -H "Origin: ${ADMIN_ORIGIN}" \
+      -H 'Accept: application/json' \
+      "${API_BASE}/events/${event_id}" >/dev/null 2>&1 || true
     event_id=""
   fi
+  rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
@@ -164,7 +208,11 @@ initial_seating_count="$(count_metric 'seating' "$event_id")"
 post_json "PUT" "/events/${event_id}" '{"seating_enabled": false}' >/dev/null
 post_json "PUT" "/events/${event_id}" '{"seating_enabled": true}' >/dev/null
 
-event_payload=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/events/${event_id}")
+event_payload=$(curl -fsS \
+  -b "$ADMIN_COOKIE_JAR" \
+  -H "Origin: ${ADMIN_ORIGIN}" \
+  -H 'Accept: application/json' \
+  "${API_BASE}/events/${event_id}")
 layout_after_toggle="$(json_field "$event_payload" 'event.layout_id')"
 version_after_toggle="$(json_field "$event_payload" 'event.layout_version_id')"
 

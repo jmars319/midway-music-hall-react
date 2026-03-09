@@ -6,12 +6,22 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT_DIR/scripts/dev-common.sh"
 
 API_BASE="$(backend_url)/api"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mmh-confirm-email-once.XXXXXX")"
+ADMIN_COOKIE_JAR="${TMP_DIR}/admin-cookies.txt"
+ADMIN_ORIGIN="$(frontend_url)"
+ADMIN_LOGIN_ID="${MMH_VERIFY_LOGIN_EMAIL:-${MMH_VERIFY_ADMIN_EMAIL:-admin}}"
+ADMIN_LOGIN_PASSWORD="${MMH_VERIFY_LOGIN_PASSWORD:-${MMH_VERIFY_ADMIN_PASSWORD:-admin123}}"
 created_event_id=""
 
 cleanup() {
   if [ -n "$created_event_id" ]; then
-    curl -fsS -X DELETE -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}" >/dev/null 2>&1 || true
+    curl -fsS -X DELETE \
+      -b "$ADMIN_COOKIE_JAR" \
+      -H "Origin: ${ADMIN_ORIGIN}" \
+      -H 'Accept: application/json' \
+      "${API_BASE}/events/${created_event_id}" >/dev/null 2>&1 || true
   fi
+  rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
@@ -54,6 +64,51 @@ post_json() {
     "${API_BASE}${path}"
 }
 
+admin_post_json() {
+  local method="$1"
+  local path="$2"
+  local body="$3"
+  curl -fsS -X "$method" \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$body" \
+    "${API_BASE}${path}"
+}
+
+admin_login() {
+  local login_payload
+  login_payload=$(python3 - "$ADMIN_LOGIN_ID" "$ADMIN_LOGIN_PASSWORD" <<'PY'
+import json
+import sys
+print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))
+PY
+)
+  local login_response
+  login_response=$(curl -fsS \
+    -c "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$login_payload" \
+    "${API_BASE}/login")
+  local ok
+  ok=$(LOGIN_JSON="$login_response" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ.get('LOGIN_JSON', '{}'))
+print('1' if payload.get('success') else '0')
+PY
+)
+  if [ "$ok" != "1" ]; then
+    log_error "admin login failed in confirm-email-once verify script"
+    exit 1
+  fi
+}
+
+admin_login
+
 log_step "[confirm-email-once] checking seat_requests confirmation email columns"
 column_check="$(php -r "
 if (!isset(\$_SERVER['REQUEST_METHOD'])) { \$_SERVER['REQUEST_METHOD'] = 'CLI'; }
@@ -80,26 +135,24 @@ if [ -z "$layout_id" ] || [ "$layout_id" = "0" ]; then
   exit 1
 fi
 
+future_event_date="$(date -u -v+1d +%F 2>/dev/null || date -u -d '+1 day' +%F)"
+
 create_event_payload="$(cat <<JSON
 {
   "artist_name": "Confirm Email Verify $(date -u +%s)",
-  "event_date": "$(date -u +%F)",
+  "event_date": "${future_event_date}",
   "event_time": "20:00:00",
-  "door_time": "$(date -u +%F) 18:00:00",
+  "door_time": "${future_event_date} 18:00:00",
   "timezone": "America/New_York",
-  "status": "draft",
-  "visibility": "private",
+  "status": "published",
+  "visibility": "public",
   "ticket_type": "reserved_seating",
   "layout_id": ${layout_id},
   "seating_enabled": true
 }
 JSON
 )"
-create_event_response="$(curl -sS -X POST \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json' \
-  -d "$create_event_payload" \
-  "${API_BASE}/events")"
+create_event_response="$(admin_post_json "POST" "/events" "$create_event_payload")"
 create_event_success="$(json_field "$create_event_response" success)"
 if [ "$create_event_success" != "true" ]; then
   log_error "failed to create test event: $create_event_response"
@@ -132,7 +185,7 @@ fi
 request_id="$(json_field "$request_response" seat_request.id)"
 
 log_step "[confirm-email-once] approving seat request first time"
-first_approve_response="$(post_json "POST" "/seat-requests/${request_id}/approve" "{}")"
+first_approve_response="$(admin_post_json "POST" "/seat-requests/${request_id}/approve" "{}")"
 first_success="$(json_field "$first_approve_response" success)"
 if [ "$first_success" != "true" ]; then
   log_error "first approve failed: $first_approve_response"
@@ -154,7 +207,7 @@ if [ -z "$first_sent_at" ]; then
 fi
 
 log_step "[confirm-email-once] approving seat request second time"
-second_approve_response="$(post_json "POST" "/seat-requests/${request_id}/approve" "{}")"
+second_approve_response="$(admin_post_json "POST" "/seat-requests/${request_id}/approve" "{}")"
 second_success="$(json_field "$second_approve_response" success)"
 if [ "$second_success" != "true" ]; then
   log_error "second approve failed: $second_approve_response"

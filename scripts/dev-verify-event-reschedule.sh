@@ -7,12 +7,20 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 API_BASE="$(backend_url)/api"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mmh-reschedule-verify.XXXXXX")"
+ADMIN_COOKIE_JAR="${TMP_DIR}/admin-cookies.txt"
+ADMIN_ORIGIN="$(frontend_url)"
+ADMIN_LOGIN_ID="${MMH_VERIFY_LOGIN_EMAIL:-${MMH_VERIFY_ADMIN_EMAIL:-admin}}"
+ADMIN_LOGIN_PASSWORD="${MMH_VERIFY_LOGIN_PASSWORD:-${MMH_VERIFY_ADMIN_PASSWORD:-admin123}}"
 
 created_event_id=""
 
 cleanup_resources() {
   if [ -n "$created_event_id" ]; then
-    curl -fsS -X DELETE -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}" >/dev/null 2>&1 || true
+    curl -fsS -X DELETE \
+      -b "$ADMIN_COOKIE_JAR" \
+      -H "Origin: ${ADMIN_ORIGIN}" \
+      -H 'Accept: application/json' \
+      "${API_BASE}/events/${created_event_id}" >/dev/null 2>&1 || true
   fi
   rm -rf "$TMP_DIR"
 }
@@ -23,7 +31,61 @@ require_backend_health_once || {
   exit 1
 }
 
-schema_payload=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/debug/schema-check" 2>/dev/null || true)
+admin_get_json() {
+  local path="$1"
+  curl -fsS \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Accept: application/json' \
+    "${API_BASE}${path}"
+}
+
+admin_post_json() {
+  local method="$1"
+  local path="$2"
+  local body="$3"
+  curl -fsS -X "$method" \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$body" \
+    "${API_BASE}${path}"
+}
+
+admin_login() {
+  local login_payload
+  login_payload=$(python3 - "$ADMIN_LOGIN_ID" "$ADMIN_LOGIN_PASSWORD" <<'PY'
+import json
+import sys
+print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))
+PY
+)
+  local login_response
+  login_response=$(curl -fsS \
+    -c "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$login_payload" \
+    "${API_BASE}/login")
+  local ok
+  ok=$(LOGIN_JSON="$login_response" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ.get('LOGIN_JSON', '{}'))
+print('1' if payload.get('success') else '0')
+PY
+)
+  if [ "$ok" != "1" ]; then
+    log_error "admin login failed in event-reschedule verify script"
+    exit 1
+  fi
+}
+
+admin_login
+
+schema_payload=$(admin_get_json "/debug/schema-check" 2>/dev/null || true)
 if [ -n "$schema_payload" ]; then
   schema_ok=$(printf '%s' "$schema_payload" | python3 -c 'import json, sys
 try:
@@ -51,11 +113,7 @@ post_json() {
   local method="$1"
   local path="$2"
   local body="$3"
-  curl -fsS -X "$method" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json' \
-    -d "$body" \
-    "${API_BASE}${path}"
+  admin_post_json "$method" "$path" "$body"
 }
 
 json_field() {
@@ -118,10 +176,10 @@ created_event_id="$(json_field "$create_response" id)"
 log_success "[reschedule] created event ${created_event_id}"
 
 log_step "[reschedule] running auto-archive routine"
-curl -fsS -X POST -H 'Accept: application/json' "${API_BASE}/events/archive-past" >/dev/null
+admin_post_json "POST" "/events/archive-past" '{}' >/dev/null
 
 log_step "[reschedule] confirming event archived"
-event_response=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}")
+event_response=$(admin_get_json "/events/${created_event_id}")
 archived_flag=$(printf '%s' "$event_response" | python3 -c 'import json, sys
 data = json.load(sys.stdin)
 event = data.get("event", {})
@@ -136,7 +194,7 @@ fi
 
 log_step "[reschedule] restoring archived event to draft"
 post_json "POST" "/events/${created_event_id}/restore" '{"status":"draft","visibility":"private"}' >/dev/null
-event_response=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}")
+event_response=$(admin_get_json "/events/${created_event_id}")
 status_value=$(printf '%s' "$event_response" | python3 -c 'import json, sys
 data = json.load(sys.stdin)
 event = data.get("event", {})
@@ -163,10 +221,10 @@ JSON
 post_json "PUT" "/events/${created_event_id}" "$update_payload" >/dev/null
 
 log_step "[reschedule] running auto-archive routine again"
-curl -fsS -X POST -H 'Accept: application/json' "${API_BASE}/events/archive-past" >/dev/null
+admin_post_json "POST" "/events/archive-past" '{}' >/dev/null
 
 log_step "[reschedule] confirming event stays unarchived"
-event_response=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}")
+event_response=$(admin_get_json "/events/${created_event_id}")
 archived_flag=$(printf '%s' "$event_response" | python3 -c 'import json, sys
 data = json.load(sys.stdin)
 event = data.get("event", {})

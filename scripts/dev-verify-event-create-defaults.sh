@@ -6,12 +6,22 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT_DIR/scripts/dev-common.sh"
 
 API_BASE="$(backend_url)/api"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mmh-event-create-defaults.XXXXXX")"
+ADMIN_COOKIE_JAR="${TMP_DIR}/admin-cookies.txt"
+ADMIN_ORIGIN="$(frontend_url)"
+ADMIN_LOGIN_ID="${MMH_VERIFY_LOGIN_EMAIL:-${MMH_VERIFY_ADMIN_EMAIL:-admin}}"
+ADMIN_LOGIN_PASSWORD="${MMH_VERIFY_LOGIN_PASSWORD:-${MMH_VERIFY_ADMIN_PASSWORD:-admin123}}"
 created_event_id=""
 
 cleanup() {
   if [ -n "$created_event_id" ]; then
-    curl -fsS -X DELETE -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}" >/dev/null 2>&1 || true
+    curl -fsS -X DELETE \
+      -b "$ADMIN_COOKIE_JAR" \
+      -H "Origin: ${ADMIN_ORIGIN}" \
+      -H 'Accept: application/json' \
+      "${API_BASE}/events/${created_event_id}" >/dev/null 2>&1 || true
   fi
+  rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
@@ -48,11 +58,54 @@ post_json() {
   local path="$2"
   local body="$3"
   curl -fsS -X "$method" \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json' \
     -d "$body" \
     "${API_BASE}${path}"
 }
+
+admin_get_json() {
+  local path="$1"
+  curl -fsS \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Accept: application/json' \
+    "${API_BASE}${path}"
+}
+
+admin_login() {
+  local login_payload
+  login_payload=$(python3 - "$ADMIN_LOGIN_ID" "$ADMIN_LOGIN_PASSWORD" <<'PY'
+import json
+import sys
+print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))
+PY
+)
+  local login_response
+  login_response=$(curl -fsS \
+    -c "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$login_payload" \
+    "${API_BASE}/login")
+  local ok
+  ok=$(LOGIN_JSON="$login_response" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ.get('LOGIN_JSON', '{}'))
+print('1' if payload.get('success') else '0')
+PY
+)
+  if [ "$ok" != "1" ]; then
+    log_error "admin login failed in event-create-defaults verify script"
+    exit 1
+  fi
+}
+
+admin_login
 
 layout_id="$(php -r "
 if (!isset(\$_SERVER['REQUEST_METHOD'])) { \$_SERVER['REQUEST_METHOD'] = 'CLI'; }
@@ -89,7 +142,7 @@ fi
 created_event_id="$(json_field "$create_response" id)"
 
 log_step "[event-create-defaults] asserting non-null defaults on event fetch"
-event_response="$(curl -fsS -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}")"
+event_response="$(admin_get_json "/events/${created_event_id}")"
 event_status="$(json_field "$event_response" event.status)"
 event_visibility="$(json_field "$event_response" event.visibility)"
 if [ "$event_status" != "draft" ]; then
@@ -102,7 +155,7 @@ if [ "$event_visibility" != "private" ]; then
 fi
 
 log_step "[event-create-defaults] asserting event appears in admin draft list"
-draft_list="$(curl -fsS -H 'Accept: application/json' "${API_BASE}/events?scope=admin&status=draft&limit=500")"
+draft_list="$(admin_get_json "/events?scope=admin&status=draft&limit=500")"
 found="$(DRAFT_JSON="$draft_list" TARGET_ID="$created_event_id" python3 - <<'PY'
 import json
 import os

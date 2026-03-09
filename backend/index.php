@@ -1646,6 +1646,12 @@ function current_admin_session(): ?array
     ];
 }
 
+function is_admin_session_authenticated(): bool
+{
+    $session = current_admin_session();
+    return $session && !empty($session['user']);
+}
+
 function refresh_admin_session(): ?array
 {
     if (session_status() !== PHP_SESSION_ACTIVE || empty($_SESSION['admin_user'])) {
@@ -1666,6 +1672,245 @@ function destroy_admin_session(): void
         setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'] ?? '', $params['secure'] ?? false, $params['httponly'] ?? true);
     }
     session_destroy();
+}
+
+function request_header_value(Request $request, string $headerName): ?string
+{
+    foreach ($request->headers as $name => $value) {
+        if (strcasecmp((string) $name, $headerName) !== 0) {
+            continue;
+        }
+        if (is_array($value)) {
+            $value = implode(', ', array_map('strval', $value));
+        }
+        $trimmed = trim((string) $value);
+        if ($trimmed !== '') {
+            return $trimmed;
+        }
+    }
+    $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $headerName));
+    $serverValue = trim((string) ($_SERVER[$serverKey] ?? ''));
+    return $serverValue !== '' ? $serverValue : null;
+}
+
+function normalize_origin_url(?string $value): ?string
+{
+    if (!is_string($value)) {
+        return null;
+    }
+    $trimmed = trim($value);
+    if ($trimmed === '') {
+        return null;
+    }
+    $parts = parse_url($trimmed);
+    if (!is_array($parts)) {
+        return null;
+    }
+    $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+    $host = strtolower((string) ($parts['host'] ?? ''));
+    if ($scheme === '' || $host === '' || !in_array($scheme, ['http', 'https'], true)) {
+        return null;
+    }
+    $port = isset($parts['port']) ? (int) $parts['port'] : null;
+    $hasNonDefaultPort = $port !== null
+        && !(($scheme === 'http' && $port === 80) || ($scheme === 'https' && $port === 443));
+    return $scheme . '://' . $host . ($hasNonDefaultPort ? ':' . $port : '');
+}
+
+function resolve_request_origin(Request $request): ?string
+{
+    $origin = normalize_origin_url(request_header_value($request, 'Origin'));
+    if ($origin !== null) {
+        return $origin;
+    }
+    $referer = request_header_value($request, 'Referer');
+    return normalize_origin_url($referer);
+}
+
+function trusted_admin_origins(): array
+{
+    static $cached = null;
+    if (is_array($cached)) {
+        return $cached;
+    }
+
+    $origins = [];
+    $configuredOrigins = Env::get(
+        'CORS_ALLOW_ORIGINS',
+        Env::get('CORS_ALLOW_ORIGIN', 'https://midwaymusichall.net,http://localhost:3000')
+    );
+    foreach (explode(',', (string) $configuredOrigins) as $candidate) {
+        $normalized = normalize_origin_url($candidate);
+        if ($normalized !== null) {
+            $origins[$normalized] = true;
+        }
+    }
+
+    $forwardedProtoRaw = trim((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+    $forwardedProto = strtolower(trim(explode(',', $forwardedProtoRaw)[0] ?? ''));
+    $requestScheme = in_array($forwardedProto, ['http', 'https'], true)
+        ? $forwardedProto
+        : ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
+    $requestHost = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    if ($requestHost !== '') {
+        $normalized = normalize_origin_url($requestScheme . '://' . $requestHost);
+        if ($normalized !== null) {
+            $origins[$normalized] = true;
+        }
+    }
+
+    $cached = array_keys($origins);
+    return $cached;
+}
+
+function admin_csrf_origin_is_valid(Request $request): bool
+{
+    if (PHP_SAPI === 'cli') {
+        return true;
+    }
+
+    $requestOrigin = resolve_request_origin($request);
+    if ($requestOrigin === null) {
+        if (APP_DEBUG) {
+            error_log('CSRF check failed: missing Origin/Referer header.');
+        }
+        return false;
+    }
+
+    foreach (trusted_admin_origins() as $trustedOrigin) {
+        if (strcasecmp($requestOrigin, $trustedOrigin) === 0) {
+            return true;
+        }
+    }
+
+    if (APP_DEBUG) {
+        error_log('CSRF check failed: untrusted origin ' . $requestOrigin);
+    }
+    return false;
+}
+
+function request_method_is_read_only(Request $request): bool
+{
+    $method = strtoupper((string) ($request->method ?? 'GET'));
+    return in_array($method, ['GET', 'HEAD', 'OPTIONS'], true);
+}
+
+function normalized_request_path(Request $request): string
+{
+    $path = '/' . trim((string) ($request->path ?? '/'), '/');
+    return $path === '' ? '/' : $path;
+}
+
+function route_requires_admin_session(Request $request): bool
+{
+    $method = strtoupper((string) ($request->method ?? 'GET'));
+    $path = normalized_request_path($request);
+
+    if (!str_starts_with($path, '/api/')) {
+        return false;
+    }
+
+    if (in_array($path, ['/api/health', '/api/login', '/api/logout', '/api/session', '/api/session/refresh', '/api/public/events', '/api/site-content'], true)) {
+        return false;
+    }
+
+    if ($path === '/api/settings') {
+        return $method !== 'GET';
+    }
+
+    if ($path === '/api/events' && $method === 'GET') {
+        $scope = strtolower(trim((string) ($request->query['scope'] ?? 'public')));
+        return $scope !== '' && $scope !== 'public';
+    }
+
+    if (preg_match('#^/api/events/[^/]+\.ics$#', $path)) {
+        return false;
+    }
+    if ($path === '/api/events' || str_starts_with($path, '/api/events/')) {
+        return true;
+    }
+
+    if ($path === '/api/debug/schema-check') {
+        return true;
+    }
+
+    if (str_starts_with($path, '/api/admin/')) {
+        return true;
+    }
+
+    if ($path === '/api/audit-log' || $path === '/api/dashboard-stats') {
+        return true;
+    }
+
+    if ($path === '/api/upload-image') {
+        return true;
+    }
+
+    if (preg_match('#^/api/event-categories(?:/|$)#', $path)) {
+        return true;
+    }
+
+    if (preg_match('#^/api/media(?:/|$)#', $path)) {
+        return true;
+    }
+
+    if (preg_match('#^/api/suggestions(?:/|$)#', $path)) {
+        return $method !== 'POST';
+    }
+
+    if (preg_match('#^/api/seating/event/[^/]+$#', $path)) {
+        return false;
+    }
+    if ($path === '/api/seating-layouts/default') {
+        return false;
+    }
+    if (preg_match('#^/api/seating(?:/|$)#', $path)) {
+        return true;
+    }
+    if (preg_match('#^/api/seating-layouts(?:/|$)#', $path)) {
+        return true;
+    }
+    if (preg_match('#^/api/layout-history(?:/|$)#', $path)) {
+        return true;
+    }
+    if (preg_match('#^/api/stage-settings(?:/|$)#', $path)) {
+        return true;
+    }
+
+    if (preg_match('#^/api/recurrence-exceptions(?:/|$)#', $path)) {
+        return true;
+    }
+
+    if (preg_match('#^/api/seat-requests(?:/|$)#', $path)) {
+        if ($path === '/api/seat-requests' && $method === 'POST') {
+            return false;
+        }
+        if ($method === 'POST' && preg_match('#^/api/seat-requests/[^/]+/payment/(create-order|capture)$#', $path)) {
+            return false;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+function enforce_admin_route_guard(Request $request): bool
+{
+    if (!route_requires_admin_session($request)) {
+        return true;
+    }
+
+    if (!is_admin_session_authenticated()) {
+        Response::error('Unauthorized', 401);
+        return false;
+    }
+
+    if (!request_method_is_read_only($request) && !admin_csrf_origin_is_valid($request)) {
+        Response::error('Forbidden', 403);
+        return false;
+    }
+
+    return true;
 }
 
 function now_eastern(): DateTimeImmutable
@@ -2771,10 +3016,10 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
 
         $hasCategoryTable = event_categories_table_exists($pdo);
         if ($hasCategoryTable) {
-            $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, e.seat_request_email_override, e.ticket_price, e.door_price, e.min_ticket_price, e.max_ticket_price, ec.slug AS category_slug, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
+            $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, e.status, e.visibility, e.seat_request_email_override, e.ticket_price, e.door_price, e.min_ticket_price, e.max_ticket_price, ec.slug AS category_slug, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
             $eventStmt->execute([$eventId]);
         } else {
-            $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone, seat_request_email_override, ticket_price, door_price, min_ticket_price, max_ticket_price FROM events WHERE id = ? LIMIT 1');
+            $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone, status, visibility, seat_request_email_override, ticket_price, door_price, min_ticket_price, max_ticket_price FROM events WHERE id = ? LIMIT 1');
             $eventStmt->execute([$eventId]);
         }
         $event = $eventStmt->fetch();
@@ -2783,6 +3028,13 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
         }
         $exceptionContext['layout_id'] = $event['layout_id'] ?? null;
         $exceptionContext['layout_version_id'] = $event['layout_version_id'] ?? null;
+        if ($createdBy === 'public') {
+            $eventStatus = strtolower(trim((string) ($event['status'] ?? 'draft')));
+            $eventVisibility = strtolower(trim((string) ($event['visibility'] ?? 'private')));
+            if ($eventStatus !== 'published' || $eventVisibility !== 'public') {
+                throw new SeatRequestException('Seat requests are not available for this event', 403, [], 'event_not_public', $exceptionContext);
+            }
+        }
         $hasLayout = !empty($event['layout_id']) || !empty($event['layout_version_id']);
         if ((int)($event['seating_enabled'] ?? 0) !== 1 || !$hasLayout) {
             throw new SeatRequestException('Seating requests are not available for this event', 400, [], 'event_not_seating_enabled', $exceptionContext);
@@ -2885,7 +3137,10 @@ function list_events(Request $request, ?string $scopeOverride = null): array
     $params = [];
     $conditions = [];
     $includeDeleted = !empty($request->query['include_deleted']);
-    $scope = $scopeOverride ? strtolower($scopeOverride) : strtolower((string)($request->query['scope'] ?? 'admin'));
+    $scope = $scopeOverride ? strtolower($scopeOverride) : strtolower((string)($request->query['scope'] ?? 'public'));
+    if (!in_array($scope, ['public', 'admin'], true)) {
+        $scope = 'public';
+    }
     $includeSeriesMasters = $scope !== 'public' && !empty($request->query['include_series_masters']);
     $venue = strtoupper(trim((string)($request->query['venue'] ?? '')));
     $status = strtolower(trim((string)($request->query['status'] ?? '')));
@@ -3226,22 +3481,6 @@ $router->add('POST', '/api/login', function (Request $request) {
         ]);
     }
 
-    if (!$row && $email === 'admin' && $password === 'admin123') {
-        $user = sanitize_admin_user([
-            'username' => 'admin',
-            'email' => 'admin@midwaymusichall.net',
-            'display_name' => 'Admin',
-        ]);
-        $session = start_admin_session($user);
-        return Response::success([
-            'user' => $session['user'],
-            'session' => [
-                'expires_at' => $session['expires_at'],
-                'idle_timeout_seconds' => $session['idle_timeout_seconds'],
-            ],
-        ]);
-    }
-
     destroy_admin_session();
     Response::error('Invalid credentials', 401);
 });
@@ -3251,6 +3490,9 @@ $router->add('POST', '/api/admin/change-password', function (Request $request) {
         $session = current_admin_session();
         if (!$session || empty($session['user'])) {
             return Response::error('Unauthorized', 401);
+        }
+        if (!admin_csrf_origin_is_valid($request)) {
+            return Response::error('Forbidden', 403);
         }
         $payload = read_json_body($request);
         $currentPassword = (string) ($payload['current_password'] ?? $payload['currentPassword'] ?? '');
@@ -3282,8 +3524,6 @@ $router->add('POST', '/api/admin/change-password', function (Request $request) {
         }
 
         $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
-        $sanitizedEmail = $email !== '' ? $email : 'admin@midwaymusichall.net';
-        $sanitizedUsername = $username !== '' ? $username : 'admin';
 
         if ($row) {
             if (!password_verify($currentPassword, $row['password_hash'] ?? '')) {
@@ -3298,22 +3538,6 @@ $router->add('POST', '/api/admin/change-password', function (Request $request) {
             $updatedStmt = Database::run('SELECT * FROM admins WHERE id = ? LIMIT 1', [$row['id']]);
             $updatedRow = $updatedStmt->fetch() ?: $row;
             $sessionData = sanitize_admin_user($updatedRow);
-            start_admin_session($sessionData);
-            return Response::success(['message' => 'Password updated successfully.']);
-        }
-
-        if (strcasecmp($sanitizedUsername, 'admin') === 0) {
-            if ($currentPassword !== 'admin123') {
-                return Response::error('Invalid credentials', 401);
-            }
-            $upsertSql = 'INSERT INTO admins (username, email, password_hash) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), email = COALESCE(NULLIF(email, \'\'), VALUES(email))';
-            if (admin_table_has_column('updated_at')) {
-                $upsertSql .= ', updated_at = CURRENT_TIMESTAMP';
-            }
-            Database::run($upsertSql, [$sanitizedUsername, $sanitizedEmail, $newHash]);
-            $stmt = Database::run('SELECT * FROM admins WHERE username = ? LIMIT 1', [$sanitizedUsername]);
-            $createdRow = $stmt->fetch();
-            $sessionData = sanitize_admin_user($createdRow ?: ['username' => $sanitizedUsername, 'email' => $sanitizedEmail]);
             start_admin_session($sessionData);
             return Response::success(['message' => 'Password updated successfully.']);
         }
@@ -3373,6 +3597,9 @@ $router->add('POST', '/api/admin/users', function (Request $request) {
         $session = current_admin_session();
         if (!$session || empty($session['user'])) {
             return Response::error('Unauthorized', 401);
+        }
+        if (!admin_csrf_origin_is_valid($request)) {
+            return Response::error('Forbidden', 403);
         }
         $payload = read_json_body($request);
         $username = trim((string) ($payload['username'] ?? ''));
@@ -3589,10 +3816,18 @@ $router->add('GET', '/api/session', function () {
     ]);
 });
 
-$router->add('POST', '/api/session/refresh', function () {
-    $session = refresh_admin_session();
+$router->add('POST', '/api/session/refresh', function (Request $request) {
+    $session = current_admin_session();
     if (!$session) {
         log_admin_session_state('POST /api/session/refresh failed');
+        return Response::error('Session expired', 401);
+    }
+    if (!admin_csrf_origin_is_valid($request)) {
+        return Response::error('Forbidden', 403);
+    }
+    $session = refresh_admin_session();
+    if (!$session) {
+        log_admin_session_state('POST /api/session/refresh failed after refresh');
         return Response::error('Session expired', 401);
     }
     Response::success([
@@ -3604,7 +3839,11 @@ $router->add('POST', '/api/session/refresh', function () {
     ]);
 });
 
-$router->add('POST', '/api/logout', function () {
+$router->add('POST', '/api/logout', function (Request $request) {
+    $session = current_admin_session();
+    if ($session && !admin_csrf_origin_is_valid($request)) {
+        return Response::error('Forbidden', 403);
+    }
     destroy_admin_session();
     Response::success(['status' => 'logged_out']);
 });
@@ -3684,6 +3923,10 @@ $router->add('GET', '/api/event-categories', function () {
 });
 
 $router->add('GET', '/api/admin/payment-settings', function () {
+    $session = current_admin_session();
+    if (!$session || empty($session['user'])) {
+        return Response::error('Unauthorized', 401);
+    }
     try {
         $pdo = Database::connection();
         if (!payment_settings_table_exists($pdo)) {
@@ -3727,6 +3970,13 @@ $router->add('GET', '/api/admin/payment-settings', function () {
 });
 
 $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
+    $session = current_admin_session();
+    if (!$session || empty($session['user'])) {
+        return Response::error('Unauthorized', 401);
+    }
+    if (!admin_csrf_origin_is_valid($request)) {
+        return Response::error('Forbidden', 403);
+    }
     try {
         $pdo = Database::connection();
         if (!payment_settings_table_exists($pdo)) {
@@ -4150,7 +4400,10 @@ $router->add('POST', '/api/events', function (Request $request) {
         }
         $ticketPrice = $payload['ticket_price'] ?? null;
         $doorPrice = $payload['door_price'] ?? null;
-        $ticketType = in_array($payload['ticket_type'] ?? 'general_admission', ['general_admission','reserved_seating','hybrid'], true) ? $payload['ticket_type'] : 'general_admission';
+        $ticketTypeInput = $payload['ticket_type'] ?? 'general_admission';
+        $ticketType = in_array($ticketTypeInput, ['general_admission', 'reserved_seating', 'hybrid'], true)
+            ? $ticketTypeInput
+            : 'general_admission';
         $statusInput = array_key_exists('status', $payload) ? trim((string) $payload['status']) : '';
         $visibilityInput = array_key_exists('visibility', $payload) ? trim((string) $payload['visibility']) : '';
         $status = in_array($statusInput, ['draft','published','archived'], true) ? $statusInput : 'draft';
@@ -4936,11 +5189,18 @@ $router->add('GET', '/api/seating/event/:eventId', function ($request, $params) 
     $pdo = Database::connection();
     expire_stale_holds($pdo);
     $eventId = (int) $params['eventId'];
-    $eventMetaStmt = $pdo->prepare('SELECT seating_enabled FROM events WHERE id = ? LIMIT 1');
+    $eventMetaStmt = $pdo->prepare("SELECT seating_enabled, COALESCE(NULLIF(TRIM(status), ''), 'draft') AS status, COALESCE(NULLIF(TRIM(visibility), ''), 'private') AS visibility FROM events WHERE id = ? LIMIT 1");
     $eventMetaStmt->execute([$eventId]);
     $eventMeta = $eventMetaStmt->fetch();
     if (!$eventMeta) {
         return Response::error('Event not found', 404);
+    }
+    if (!is_admin_session_authenticated()) {
+        $eventStatus = strtolower((string) ($eventMeta['status'] ?? 'draft'));
+        $eventVisibility = strtolower((string) ($eventMeta['visibility'] ?? 'private'));
+        if ($eventStatus !== 'published' || $eventVisibility !== 'public') {
+            return Response::error('Event not found', 404);
+        }
     }
     [$layoutData, $stagePosition, $stageSize, $canvasSettings] = fetch_layout_for_event($eventId);
     $stmt = $pdo->prepare('SELECT selected_seats, status, hold_expires_at FROM seat_requests WHERE event_id = ?');
@@ -5220,6 +5480,10 @@ $router->add('DELETE', '/api/seating/:id', function ($request, $params) {
 });
 
 $router->add('GET', '/api/seat-requests', function (Request $request) {
+    $session = current_admin_session();
+    if (!$session || empty($session['user'])) {
+        return Response::error('Unauthorized', 401);
+    }
     try {
         $pdo = Database::connection();
         expire_stale_holds($pdo);
@@ -5312,6 +5576,9 @@ $router->add('POST', '/api/admin/seat-requests', function (Request $request) {
     if (!$session) {
         return Response::error('Unauthorized', 401);
     }
+    if (!admin_csrf_origin_is_valid($request)) {
+        return Response::error('Forbidden', 403);
+    }
     try {
         $payload = read_json_body($request);
         $pdo = Database::connection();
@@ -5379,7 +5646,14 @@ $router->add('POST', '/api/admin/seat-requests', function (Request $request) {
     }
 });
 
-$router->add('POST', '/api/seat-requests/:id/approve', function ($request, $params) {
+$router->add('POST', '/api/seat-requests/:id/approve', function (Request $request, $params) {
+    $session = current_admin_session();
+    if (!$session || empty($session['user'])) {
+        return Response::error('Unauthorized', 401);
+    }
+    if (!admin_csrf_origin_is_valid($request)) {
+        return Response::error('Forbidden', 403);
+    }
     $pdo = Database::connection();
     expire_stale_holds($pdo);
     $rid = (int) $params['id'];
@@ -5469,7 +5743,14 @@ $router->add('POST', '/api/seat-requests/:id/approve', function ($request, $para
     }
 });
 
-$router->add('POST', '/api/seat-requests/:id/deny', function ($request, $params) {
+$router->add('POST', '/api/seat-requests/:id/deny', function (Request $request, $params) {
+    $session = current_admin_session();
+    if (!$session || empty($session['user'])) {
+        return Response::error('Unauthorized', 401);
+    }
+    if (!admin_csrf_origin_is_valid($request)) {
+        return Response::error('Forbidden', 403);
+    }
     $pdo = Database::connection();
     expire_stale_holds($pdo);
     $actor = seat_request_admin_actor();
@@ -5564,13 +5845,13 @@ $router->add('POST', '/api/seat-requests/:id/payment/create-order', function (Re
         if ($seatRequestId <= 0) {
             return Response::error('Invalid seat request id', 422);
         }
-        $stmt = $pdo->prepare("SELECT sr.id, sr.event_id, sr.total_amount, sr.currency, COALESCE(NULLIF(TRIM(e.status), ''), 'draft') AS event_status FROM seat_requests sr INNER JOIN events e ON e.id = sr.event_id WHERE sr.id = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT sr.id, sr.event_id, sr.total_amount, sr.currency, COALESCE(NULLIF(TRIM(e.status), ''), 'draft') AS event_status, COALESCE(NULLIF(TRIM(e.visibility), ''), 'private') AS event_visibility FROM seat_requests sr INNER JOIN events e ON e.id = sr.event_id WHERE sr.id = ? LIMIT 1");
         $stmt->execute([$seatRequestId]);
         $seatRequest = $stmt->fetch();
         if (!$seatRequest) {
             return Response::error('Seat request not found', 404);
         }
-        if (strtolower((string) ($seatRequest['event_status'] ?? 'draft')) !== 'published') {
+        if (strtolower((string) ($seatRequest['event_status'] ?? 'draft')) !== 'published' || strtolower((string) ($seatRequest['event_visibility'] ?? 'private')) !== 'public') {
             return Response::error('Payment order creation is only available for published events', 409);
         }
         $amountRaw = $seatRequest['total_amount'] ?? null;
@@ -5599,13 +5880,13 @@ $router->add('POST', '/api/seat-requests/:id/payment/capture', function (Request
         if ($seatRequestId <= 0) {
             return Response::error('Invalid seat request id', 422);
         }
-        $stmt = $pdo->prepare("SELECT sr.id, sr.event_id, sr.total_amount, sr.currency, COALESCE(NULLIF(TRIM(e.status), ''), 'draft') AS event_status FROM seat_requests sr INNER JOIN events e ON e.id = sr.event_id WHERE sr.id = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT sr.id, sr.event_id, sr.total_amount, sr.currency, COALESCE(NULLIF(TRIM(e.status), ''), 'draft') AS event_status, COALESCE(NULLIF(TRIM(e.visibility), ''), 'private') AS event_visibility FROM seat_requests sr INNER JOIN events e ON e.id = sr.event_id WHERE sr.id = ? LIMIT 1");
         $stmt->execute([$seatRequestId]);
         $seatRequest = $stmt->fetch();
         if (!$seatRequest) {
             return Response::error('Seat request not found', 404);
         }
-        if (strtolower((string) ($seatRequest['event_status'] ?? 'draft')) !== 'published') {
+        if (strtolower((string) ($seatRequest['event_status'] ?? 'draft')) !== 'published' || strtolower((string) ($seatRequest['event_visibility'] ?? 'private')) !== 'public') {
             return Response::error('Payment capture is only available for published events', 409);
         }
         $amountRaw = $seatRequest['total_amount'] ?? null;
@@ -5628,6 +5909,13 @@ $router->add('POST', '/api/seat-requests/:id/payment/capture', function (Request
 });
 
 $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $params) {
+    $session = current_admin_session();
+    if (!$session || empty($session['user'])) {
+        return Response::error('Unauthorized', 401);
+    }
+    if (!admin_csrf_origin_is_valid($request)) {
+        return Response::error('Forbidden', 403);
+    }
     try {
         $pdo = Database::connection();
         expire_stale_holds($pdo);
@@ -5736,7 +6024,14 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
     }
 });
 
-$router->add('DELETE', '/api/seat-requests/:id', function ($request, $params) {
+$router->add('DELETE', '/api/seat-requests/:id', function (Request $request, $params) {
+    $session = current_admin_session();
+    if (!$session || empty($session['user'])) {
+        return Response::error('Unauthorized', 401);
+    }
+    if (!admin_csrf_origin_is_valid($request)) {
+        return Response::error('Forbidden', 403);
+    }
     $stmt = Database::run('DELETE FROM seat_requests WHERE id = ?', [$params['id']]);
     if ($stmt->rowCount() === 0) {
         return Response::error('Seat request not found', 404);
@@ -6375,6 +6670,9 @@ if (APP_DEBUG) {
 }
 
 try {
+    if (!enforce_admin_route_guard($request)) {
+        exit;
+    }
     $handled = $router->dispatch($request);
 } catch (Throwable $error) {
     error_log('[router] Unhandled exception: ' . $error->getMessage());

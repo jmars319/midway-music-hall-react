@@ -26,8 +26,8 @@ if ! rg -n "useLayoutEffect" "$POPUP_FILE" >/dev/null; then
   log_error "useLayoutEffect modal suppression check is missing"
   exit 1
 fi
-if ! rg -n "hasAnyModalOpen\(\)" "$POPUP_FILE" >/dev/null; then
-  log_error "popup does not synchronously check for open modal state"
+if ! rg -n "hasAnyModalOpen\(\)|shouldBlockForOpenDialogs\(" "$POPUP_FILE" >/dev/null; then
+  log_error "popup does not synchronously check for open dialog state"
   exit 1
 fi
 if rg -n "setInterval|250" "$POPUP_FILE" >/dev/null; then
@@ -39,4 +39,21 @@ if ! rg -n "new MutationObserver" "$POPUP_FILE" >/dev/null; then
   exit 1
 fi
 
-log_success "[popup-versioning] versioned cooldown + synchronous modal suppression verified"
+log_step "[popup-versioning] verifying anti-thrash guards"
+if ! rg -n "isOpenLatched|setIsOpenLatched" "$POPUP_FILE" >/dev/null; then
+  log_error "open latch anti-thrash guard is missing"
+  exit 1
+fi
+if ! rg -n "data-announcement-popup-dialog|POPUP_DIALOG_DATA_ATTR" "$POPUP_FILE" >/dev/null; then
+  log_error "popup self-dialog exclusion marker is missing"
+  exit 1
+fi
+if ! rg -n "data-announcement-popup-backdrop" "$POPUP_FILE" >/dev/null; then
+  log_error "popup backdrop marker is missing"
+  exit 1
+fi
+
+log_step "[popup-versioning] running popup stability harness"
+( cd "$ROOT_DIR/frontend" && CI=true npm test -- --watch=false --runInBand src/components/__tests__/AnnouncementPopup.stability.test.js )
+
+log_success "[popup-versioning] versioned cooldown + stable modal suppression verified"

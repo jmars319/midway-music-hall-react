@@ -6,6 +6,11 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT_DIR/scripts/dev-common.sh"
 
 API_BASE="$(backend_url)/api"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mmh-seat-requests-hide-past.XXXXXX")"
+ADMIN_COOKIE_JAR="${TMP_DIR}/admin-cookies.txt"
+ADMIN_ORIGIN="$(frontend_url)"
+ADMIN_LOGIN_ID="${MMH_VERIFY_LOGIN_EMAIL:-${MMH_VERIFY_ADMIN_EMAIL:-admin}}"
+ADMIN_LOGIN_PASSWORD="${MMH_VERIFY_LOGIN_PASSWORD:-${MMH_VERIFY_ADMIN_PASSWORD:-admin123}}"
 created_layout_id=""
 created_event_ids=()
 created_request_ids=()
@@ -13,17 +18,26 @@ created_request_ids=()
 cleanup() {
   if [ "${#created_request_ids[@]}" -gt 0 ]; then
     for request_id in "${created_request_ids[@]}"; do
-      curl -fsS -X DELETE -H 'Accept: application/json' "${API_BASE}/seat-requests/${request_id}" >/dev/null 2>&1 || true
+      admin_delete_request "$request_id" >/dev/null 2>&1 || true
     done
   fi
   if [ "${#created_event_ids[@]}" -gt 0 ]; then
     for event_id in "${created_event_ids[@]}"; do
-      curl -fsS -X DELETE -H 'Accept: application/json' "${API_BASE}/events/${event_id}" >/dev/null 2>&1 || true
+      curl -fsS -X DELETE \
+        -b "$ADMIN_COOKIE_JAR" \
+        -H "Origin: ${ADMIN_ORIGIN}" \
+        -H 'Accept: application/json' \
+        "${API_BASE}/events/${event_id}" >/dev/null 2>&1 || true
     done
   fi
   if [ -n "$created_layout_id" ]; then
-    curl -fsS -X DELETE -H 'Accept: application/json' "${API_BASE}/seating-layouts/${created_layout_id}" >/dev/null 2>&1 || true
+    curl -fsS -X DELETE \
+      -b "$ADMIN_COOKIE_JAR" \
+      -H "Origin: ${ADMIN_ORIGIN}" \
+      -H 'Accept: application/json' \
+      "${API_BASE}/seating-layouts/${created_layout_id}" >/dev/null 2>&1 || true
   fi
+  rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
@@ -65,6 +79,69 @@ post_json_raw() {
     "${API_BASE}${path}"
 }
 
+admin_post_json() {
+  local method="$1"
+  local path="$2"
+  local body="$3"
+  curl -fsS -X "$method" \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$body" \
+    "${API_BASE}${path}"
+}
+
+admin_get_json() {
+  local path="$1"
+  curl -fsS \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Accept: application/json' \
+    "${API_BASE}${path}"
+}
+
+admin_delete_request() {
+  local request_id="$1"
+  curl -fsS -X DELETE \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Accept: application/json' \
+    "${API_BASE}/seat-requests/${request_id}"
+}
+
+admin_login() {
+  local login_payload
+  login_payload=$(python3 - "$ADMIN_LOGIN_ID" "$ADMIN_LOGIN_PASSWORD" <<'PY'
+import json
+import sys
+print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))
+PY
+)
+  local login_response
+  login_response=$(curl -fsS \
+    -c "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$login_payload" \
+    "${API_BASE}/login")
+  local ok
+  ok=$(LOGIN_JSON="$login_response" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ.get('LOGIN_JSON', '{}'))
+print('1' if payload.get('success') else '0')
+PY
+)
+  if [ "$ok" != "1" ]; then
+    log_error "admin login failed in hide-past verify script"
+    exit 1
+  fi
+}
+
+admin_login
+
 log_step "[seat-requests-hide-past] creating test seating layout"
 layout_payload="$(cat <<JSON
 {
@@ -92,7 +169,7 @@ layout_payload="$(cat <<JSON
 }
 JSON
 )"
-layout_response="$(post_json_raw "/seating-layouts" "$layout_payload")"
+layout_response="$(admin_post_json "POST" "/seating-layouts" "$layout_payload")"
 layout_success="$(json_field "$layout_response" success)"
 if [ "$layout_success" != "true" ]; then
   log_error "failed to create layout: $layout_response"
@@ -146,7 +223,7 @@ create_event() {
 JSON
 )"
   local response
-  response="$(post_json_raw "/events" "$payload")"
+  response="$(admin_post_json "POST" "/events" "$payload")"
   local success
   success="$(json_field "$response" success)"
   if [ "$success" != "true" ]; then
@@ -219,7 +296,7 @@ PY
 }
 
 log_step "[seat-requests-hide-past] verifying default list excludes past events"
-default_list="$(curl -fsS -H 'Accept: application/json' "${API_BASE}/seat-requests?status=all")"
+default_list="$(admin_get_json "/seat-requests?status=all")"
 future_in_default="$(contains_id "$default_list" "$future_request_id")"
 past_in_default="$(contains_id "$default_list" "$past_request_id")"
 if [ "$future_in_default" != "1" ]; then
@@ -232,7 +309,7 @@ if [ "$past_in_default" != "0" ]; then
 fi
 
 log_step "[seat-requests-hide-past] verifying include_past=1 returns past events"
-include_past_list="$(curl -fsS -H 'Accept: application/json' "${API_BASE}/seat-requests?status=all&include_past=1")"
+include_past_list="$(admin_get_json "/seat-requests?status=all&include_past=1")"
 past_in_include="$(contains_id "$include_past_list" "$past_request_id")"
 if [ "$past_in_include" != "1" ]; then
   log_error "past request ${past_request_id} not found when include_past=1"

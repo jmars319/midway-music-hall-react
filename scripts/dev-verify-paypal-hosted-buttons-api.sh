@@ -7,6 +7,10 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 API_BASE="$(backend_url)/api"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mmh-paypal-verify.XXXXXX")"
+ADMIN_COOKIE_JAR="${TMP_DIR}/admin-cookies.txt"
+ADMIN_ORIGIN="$(frontend_url)"
+ADMIN_LOGIN_ID="${MMH_VERIFY_LOGIN_EMAIL:-${MMH_VERIFY_ADMIN_EMAIL:-admin}}"
+ADMIN_LOGIN_PASSWORD="${MMH_VERIFY_LOGIN_PASSWORD:-${MMH_VERIFY_ADMIN_PASSWORD:-admin123}}"
 
 target_category_id=""
 original_category_config_b64=""
@@ -15,19 +19,21 @@ created_event_id=""
 
 cleanup_resources() {
   if [ -n "$created_event_id" ]; then
-    curl -fsS -X DELETE -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}" >/dev/null 2>&1 || true
+    curl -fsS -X DELETE \
+      -b "$ADMIN_COOKIE_JAR" \
+      -H "Origin: ${ADMIN_ORIGIN}" \
+      -H 'Accept: application/json' \
+      "${API_BASE}/events/${created_event_id}" >/dev/null 2>&1 || true
   fi
 
   if [ "$restore_needed" -eq 1 ] && [ -n "$target_category_id" ]; then
-    python3 - "$original_category_config_b64" "$target_category_id" "$API_BASE" <<'PY'
+    restore_payload=$(python3 - "$original_category_config_b64" "$target_category_id" <<'PY'
 import base64
 import json
 import sys
-import urllib.request
 
 raw = sys.argv[1]
 category_id = int(sys.argv[2])
-api_base = sys.argv[3]
 
 payload = {
     'scope': 'category',
@@ -60,18 +66,10 @@ if raw:
         'over_limit_message': data.get('over_limit_message') or '',
         'fine_print': data.get('fine_print') or '',
     })
-
-req = urllib.request.Request(
-    f"{api_base}/admin/payment-settings",
-    data=json.dumps(payload).encode(),
-    headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
-    method='PUT'
-)
-try:
-    urllib.request.urlopen(req).read()
-except Exception as exc:
-    sys.stderr.write(f"[cleanup] Failed to restore category payment config: {exc}\n")
+print(json.dumps(payload))
 PY
+)
+    admin_put_json "$restore_payload" >/dev/null 2>&1 || true
   fi
 
   rm -rf "$TMP_DIR"
@@ -83,8 +81,73 @@ require_backend_health_once || {
   exit 1
 }
 
+admin_get_json() {
+  local path="$1"
+  curl -fsS \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Accept: application/json' \
+    "${API_BASE}${path}"
+}
+
+admin_put_json() {
+  local body="$1"
+  curl -fsS -X PUT \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$body" \
+    "${API_BASE}/admin/payment-settings"
+}
+
+admin_post_json() {
+  local method="$1"
+  local path="$2"
+  local body="$3"
+  curl -fsS -X "$method" \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$body" \
+    "${API_BASE}${path}"
+}
+
+admin_login() {
+  local login_payload
+  login_payload=$(python3 - "$ADMIN_LOGIN_ID" "$ADMIN_LOGIN_PASSWORD" <<'PY'
+import json
+import sys
+print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))
+PY
+)
+  local login_response
+  login_response=$(curl -fsS \
+    -c "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$login_payload" \
+    "${API_BASE}/login")
+  local ok
+  ok=$(LOGIN_JSON="$login_response" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ.get('LOGIN_JSON', '{}'))
+print('1' if payload.get('success') else '0')
+PY
+)
+  if [ "$ok" != "1" ]; then
+    log_error "admin login failed in paypal hosted button verify script"
+    exit 1
+  fi
+}
+
+admin_login
+
 log_step "[paypal-api] checking payment settings schema capabilities"
-payment_settings_payload=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/admin/payment-settings")
+payment_settings_payload=$(admin_get_json "/admin/payment-settings")
 PAYMENT_SETTINGS_JSON="$payment_settings_payload" python3 - <<'PY'
 import json
 import os
@@ -107,7 +170,7 @@ if missing:
     raise SystemExit(1)
 PY
 
-category_payload=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/event-categories")
+category_payload=$(admin_get_json "/event-categories")
 target_category_id=$(CATEGORY_JSON="$category_payload" python3 - <<'PY'
 import json
 import os
@@ -161,7 +224,7 @@ paypal_payload=$(cat <<JSON
 }
 JSON
 )
-curl -fsS -X PUT -H 'Content-Type: application/json' -H 'Accept: application/json' -d "$paypal_payload" "${API_BASE}/admin/payment-settings" >/dev/null
+admin_put_json "$paypal_payload" >/dev/null
 restore_needed=1
 
 future_date=$(python3 - <<'PY'
@@ -186,7 +249,7 @@ event_payload=$(cat <<JSON
 JSON
 )
 
-create_event_response=$(curl -fsS -X POST -H 'Content-Type: application/json' -H 'Accept: application/json' -d "$event_payload" "${API_BASE}/events")
+create_event_response=$(admin_post_json "POST" "/events" "$event_payload")
 created_event_id=$(CREATE_EVENT_JSON="$create_event_response" python3 - <<'PY'
 import json
 import os
@@ -202,7 +265,7 @@ if [ -z "$created_event_id" ]; then
 fi
 
 log_step "[paypal-api] verifying payment_option payload on public event"
-public_event_payload=$(curl -fsS -H 'Accept: application/json' "${API_BASE}/events/${created_event_id}")
+public_event_payload=$(admin_get_json "/events/${created_event_id}")
 PUBLIC_EVENT_JSON="$public_event_payload" python3 - <<'PY'
 import json
 import os
