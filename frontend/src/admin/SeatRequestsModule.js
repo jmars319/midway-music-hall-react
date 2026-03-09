@@ -76,6 +76,7 @@ const eventDisplayNameForRequest = (request = {}) =>
   request.event_artist_name ||
   request.event_title ||
   (request.event_id ? `Event ${request.event_id}` : 'Unassigned requests');
+const printNameSortCollator = new Intl.Collator('en-US', { sensitivity: 'base', numeric: true });
 
 const toLocalInputValue = (value) => {
   if (!value) return '';
@@ -300,6 +301,8 @@ export default function SeatRequestsModule() {
   const [editForm, setEditForm] = useState(null);
   const [savingDetail, setSavingDetail] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
+  const [showPrintOptions, setShowPrintOptions] = useState(false);
+  const printMenuRef = useRef(null);
   const displaySeatsForSelected = useMemo(
     () => (selectedRequest ? buildDisplaySeatList(selectedRequest).map((seat) => normalizeDisplaySeat(seat)) : []),
     [selectedRequest]
@@ -317,6 +320,31 @@ export default function SeatRequestsModule() {
   useEffect(() => {
     setCollapsedGroups({});
   }, [filters.groupByEvent]);
+
+  useEffect(() => {
+    if (!showPrintOptions) return undefined;
+
+    const handleOutsidePress = (event) => {
+      if (!printMenuRef.current) return;
+      if (!printMenuRef.current.contains(event.target)) {
+        setShowPrintOptions(false);
+      }
+    };
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setShowPrintOptions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsidePress);
+    document.addEventListener('touchstart', handleOutsidePress);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsidePress);
+      document.removeEventListener('touchstart', handleOutsidePress);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showPrintOptions]);
 
   const fetchEvents = async () => {
     try {
@@ -424,11 +452,22 @@ export default function SeatRequestsModule() {
     return Array.from(map.values());
   }, [events, requests]);
 
-  const openPrintView = useCallback(() => {
+  const openPrintView = useCallback((sortMode = 'current') => {
     const eventId = filters.eventId && filters.eventId !== 'all' ? Number(filters.eventId) : null;
     const selectedEvent = eventId ? events.find((ev) => Number(ev.id) === eventId) : null;
     const showEventColumn = !selectedEvent;
-    const printableRequests = visibleRequests;
+    const printableRequests = sortMode === 'alphabetical'
+      ? [...visibleRequests].sort((left, right) => {
+        const nameCmp = printNameSortCollator.compare(left.customer_name || '', right.customer_name || '');
+        if (nameCmp !== 0) return nameCmp;
+        const eventCmp = printNameSortCollator.compare(eventDisplayNameForRequest(left), eventDisplayNameForRequest(right));
+        if (eventCmp !== 0) return eventCmp;
+        return Number(left.id || 0) - Number(right.id || 0);
+      })
+      : visibleRequests;
+    const printOrderLabel = sortMode === 'alphabetical'
+      ? 'Alphabetical (A-Z by customer)'
+      : 'Current filtered order';
     const eventTitle = selectedEvent ? (selectedEvent.artist_name || selectedEvent.title || `Event ${selectedEvent.id}`) : 'All Events';
     const eventDateValue = selectedEvent
       ? (selectedEvent.start_datetime
@@ -558,6 +597,7 @@ export default function SeatRequestsModule() {
     <h1>Seat Requests - ${escapeHtml(eventTitle)}</h1>
     <div class="meta">
       ${selectedEvent ? `Event date: ${escapeHtml(eventDateLabel)}<br />` : ''}
+      Order: ${escapeHtml(printOrderLabel)}<br />
       Printed: ${escapeHtml(timestamp)}
     </div>
     <table>
@@ -1054,12 +1094,40 @@ export default function SeatRequestsModule() {
           >
             <Plus className="h-4 w-4" /> New Manual Reservation
           </button>
-          <button
-            onClick={openPrintView}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-700 text-white rounded text-sm hover:bg-gray-600"
-          >
-            <Info className="h-4 w-4" /> Print Seat Requests
-          </button>
+          <div className="relative" ref={printMenuRef}>
+            <button
+              onClick={() => setShowPrintOptions((prev) => !prev)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gray-700 text-white rounded text-sm hover:bg-gray-600"
+              aria-haspopup="menu"
+              aria-expanded={showPrintOptions}
+            >
+              <Info className="h-4 w-4" /> Print Seat Requests <ChevronDown className="h-4 w-4" />
+            </button>
+            {showPrintOptions && (
+              <div className="absolute right-0 z-30 mt-2 w-64 overflow-hidden rounded-md border border-gray-700 bg-gray-900 shadow-xl">
+                <button
+                  type="button"
+                  className="w-full px-3 py-2 text-left text-sm text-gray-100 hover:bg-gray-800"
+                  onClick={() => {
+                    setShowPrintOptions(false);
+                    openPrintView('current');
+                  }}
+                >
+                  Print Requests (Current Order)
+                </button>
+                <button
+                  type="button"
+                  className="w-full border-t border-gray-800 px-3 py-2 text-left text-sm text-gray-100 hover:bg-gray-800"
+                  onClick={() => {
+                    setShowPrintOptions(false);
+                    openPrintView('alphabetical');
+                  }}
+                >
+                  Print Requests (A-Z)
+                </button>
+              </div>
+            )}
+          </div>
           <button
             onClick={printSeatMarkers}
             disabled={confirmedVisibleRequests.length === 0}
