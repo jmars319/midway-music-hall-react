@@ -77,6 +77,7 @@ SELECT COUNT(*) FROM events;
 SELECT COUNT(*) FROM event_categories;
 SELECT COUNT(*) FROM admins;
 SELECT slug, COUNT(*) FROM events GROUP BY slug HAVING COUNT(*) > 1;
+SHOW COLUMNS FROM events LIKE 'pricing_config';
 ```
 
 ## Cloudflare settings
@@ -92,15 +93,17 @@ Keep `SEND_EMAILS=false` until all checks pass.
 1. Public site: `/`, `/thegatheringplace`, `/lessons`, `/recurring`, `/archive`.
 2. Recurring cards render and do not show seat-request buttons.
 3. Seating modal works for a seating-enabled event (submit a test request).
-4. `/api/health` responds without errors.
-5. Admin login works; Events, Seat Requests, Media, and Settings load.
-6. Update Site Content or a category, refresh public site, then revert.
-7. Upload and delete a test image in Media Manager.
-8. `/robots.txt`, `/sitemap.xml`, `/manifest.json` load over HTTPS.
+4. If a special event uses tiered pricing, confirm the public schedule shows the tier summary and the seating modal shows the pricing legend/list.
+5. `/api/health` responds without errors.
+6. Admin login works; Events, Seat Requests, Media, and Settings load.
+7. Update Site Content or a category, refresh public site, then revert.
+8. Upload and delete a test image in Media Manager.
+9. `/robots.txt`, `/sitemap.xml`, `/manifest.json` load over HTTPS.
 
 ## Regression checklist (when time allows)
 - Verify event publish/unpublish/archiving on admin list and public site.
 - Verify seat request lifecycle (pending -> approved/denied) and conflict handling.
+- Verify a tiered-pricing event can be created, edited, switched back to flat pricing, and still produces correct seat-request totals.
 - Verify recurrence exceptions (skip date) remove instances from public.
 - Verify time-based filtering hides past events.
 

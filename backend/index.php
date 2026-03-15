@@ -65,10 +65,288 @@ function normalize_nullable_decimal($value): ?string
     return number_format((float) $value, 2, '.', '');
 }
 
-function resolve_seat_request_total_amount(array $event, int $seatCount): ?string
+function event_pricing_palette(): array
 {
+    return [
+        '#f59e0b',
+        '#06b6d4',
+        '#10b981',
+        '#8b5cf6',
+        '#ef4444',
+        '#3b82f6',
+        '#f97316',
+        '#22c55e',
+    ];
+}
+
+function normalize_event_pricing_tier_identifier($value, string $fallback): string
+{
+    $candidate = strtolower(trim((string) $value));
+    $candidate = preg_replace('/[^a-z0-9]+/', '-', $candidate);
+    $candidate = trim((string) $candidate, '-');
+    if ($candidate === '') {
+        $candidate = strtolower(trim($fallback));
+        $candidate = preg_replace('/[^a-z0-9]+/', '-', $candidate);
+        $candidate = trim((string) $candidate, '-');
+    }
+    return $candidate !== '' ? $candidate : 'tier';
+}
+
+function normalize_event_pricing_tier_color($value, int $index): string
+{
+    $candidate = strtoupper(trim((string) ($value ?? '')));
+    if (preg_match('/^#[0-9A-F]{6}$/', $candidate)) {
+        return $candidate;
+    }
+    $palette = event_pricing_palette();
+    return $palette[$index % count($palette)];
+}
+
+function decode_event_pricing_config($value): ?array
+{
+    if ($value === null || $value === '' || $value === false) {
+        return null;
+    }
+    if (is_string($value)) {
+        $decoded = json_decode($value, true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+        $value = $decoded;
+    }
+    if (!is_array($value)) {
+        return null;
+    }
+    $mode = strtolower(trim((string) ($value['mode'] ?? 'tiered')));
+    if ($mode === '' || $mode === 'flat' || $mode === 'disabled') {
+        return null;
+    }
+
+    $tiers = [];
+    $seenTierIds = [];
+    $rawTiers = is_array($value['tiers'] ?? null) ? $value['tiers'] : [];
+    foreach ($rawTiers as $index => $tier) {
+        if (!is_array($tier)) {
+            continue;
+        }
+        $label = normalize_nullable_text($tier['label'] ?? null);
+        $price = normalize_nullable_decimal($tier['price'] ?? null);
+        if ($label === null || $price === null || (float) $price < 0) {
+            continue;
+        }
+        $tierId = normalize_event_pricing_tier_identifier($tier['id'] ?? $label, 'tier-' . ($index + 1));
+        if (isset($seenTierIds[$tierId])) {
+            continue;
+        }
+        $tiers[] = [
+            'id' => $tierId,
+            'label' => $label,
+            'price' => $price,
+            'note' => normalize_nullable_text($tier['note'] ?? $tier['description'] ?? null),
+            'color' => normalize_event_pricing_tier_color($tier['color'] ?? null, count($tiers)),
+        ];
+        $seenTierIds[$tierId] = true;
+    }
+    if (!$tiers) {
+        return null;
+    }
+
+    $assignments = [];
+    $rawAssignments = $value['assignments'] ?? [];
+    if (is_array($rawAssignments)) {
+        foreach ($rawAssignments as $rowKey => $tierId) {
+            $normalizedRowKey = trim((string) $rowKey);
+            $normalizedTierId = trim((string) $tierId);
+            if ($normalizedRowKey === '' || $normalizedTierId === '') {
+                continue;
+            }
+            $assignments[$normalizedRowKey] = $normalizedTierId;
+        }
+    }
+
+    return [
+        'mode' => 'tiered',
+        'tiers' => $tiers,
+        'assignments' => $assignments,
+    ];
+}
+
+function get_event_pricing_config_range(array $config): array
+{
+    $prices = [];
+    foreach (($config['tiers'] ?? []) as $tier) {
+        $price = normalize_nullable_decimal($tier['price'] ?? null);
+        if ($price === null) {
+            continue;
+        }
+        $prices[] = (float) $price;
+    }
+    if (!$prices) {
+        return [null, null];
+    }
+    return [
+        number_format(min($prices), 2, '.', ''),
+        number_format(max($prices), 2, '.', ''),
+    ];
+}
+
+function build_pricing_row_key(array $row): ?string
+{
+    $rowId = trim((string) ($row['id'] ?? ''));
+    if ($rowId !== '') {
+        return 'id:' . $rowId;
+    }
+    $section = trim((string) ($row['section_name'] ?? $row['section'] ?? ''));
+    $rowLabel = trim((string) ($row['row_label'] ?? $row['row'] ?? ''));
+    if ($section === '' && $rowLabel === '') {
+        return null;
+    }
+    return 'seatrow:' . $section . '::' . $rowLabel;
+}
+
+function build_pricing_row_key_map(array $layoutRows): array
+{
+    $map = [];
+    foreach ($layoutRows as $row) {
+        if (!is_array($row) || !seat_row_is_interactive($row)) {
+            continue;
+        }
+        $totalSeats = (int) ($row['total_seats'] ?? 0);
+        if ($totalSeats <= 0) {
+            continue;
+        }
+        $rowKey = build_pricing_row_key($row);
+        if ($rowKey === null) {
+            continue;
+        }
+        $map[$rowKey] = $row;
+    }
+    return $map;
+}
+
+function build_seat_pricing_row_map(array $layoutRows): array
+{
+    $map = [];
+    foreach (build_pricing_row_key_map($layoutRows) as $rowKey => $row) {
+        $totalSeats = (int) ($row['total_seats'] ?? 0);
+        for ($seatNumber = 1; $seatNumber <= $totalSeats; $seatNumber++) {
+            $seatId = build_seat_id_for_row($row, $seatNumber);
+            $map[$seatId] = $rowKey;
+        }
+    }
+    return $map;
+}
+
+function normalize_event_pricing_config_input($value, array $layoutRows = [], ?string &$error = null): ?array
+{
+    $error = null;
+    if ($value === null || $value === '' || $value === false) {
+        return null;
+    }
+    if (is_string($value)) {
+        $decoded = json_decode($value, true);
+        if (!is_array($decoded)) {
+            $error = 'pricing_config must be valid JSON.';
+            return null;
+        }
+        $value = $decoded;
+    }
+    if (!is_array($value)) {
+        $error = 'pricing_config must be an object.';
+        return null;
+    }
+    $mode = strtolower(trim((string) ($value['mode'] ?? 'tiered')));
+    if ($mode === '' || $mode === 'flat' || $mode === 'disabled') {
+        return null;
+    }
+    if ($mode !== 'tiered') {
+        $error = 'pricing_config.mode must be either "flat" or "tiered".';
+        return null;
+    }
+
+    $config = decode_event_pricing_config($value);
+    if ($config === null) {
+        $error = 'Tiered pricing requires valid tier labels and prices.';
+        return null;
+    }
+    if (count($config['tiers']) < 3) {
+        $error = 'Tiered pricing requires at least 3 price tiers.';
+        return null;
+    }
+
+    $tierIdMap = array_fill_keys(array_map(function ($tier) {
+        return $tier['id'];
+    }, $config['tiers']), true);
+    $layoutRowMap = build_pricing_row_key_map($layoutRows);
+    $normalizedAssignments = [];
+    foreach ($config['assignments'] as $rowKey => $tierId) {
+        if (!isset($tierIdMap[$tierId])) {
+            $error = 'Tier assignments must reference an existing price tier.';
+            return null;
+        }
+        if ($layoutRowMap && !isset($layoutRowMap[$rowKey])) {
+            continue;
+        }
+        $normalizedAssignments[$rowKey] = $tierId;
+    }
+    if ($layoutRowMap) {
+        foreach (array_keys($layoutRowMap) as $rowKey) {
+            if (!isset($normalizedAssignments[$rowKey])) {
+                $error = 'Assign every seat/table group to a pricing tier before saving tiered pricing.';
+                return null;
+            }
+        }
+    }
+    $config['assignments'] = $normalizedAssignments;
+    return $config;
+}
+
+function event_uses_tiered_pricing(array $event): bool
+{
+    return decode_event_pricing_config($event['pricing_config'] ?? null) !== null;
+}
+
+function resolve_tiered_seat_request_total_amount(array $event, array $selectedSeats, array $layoutRows = [], ?string &$failureReason = null): ?string
+{
+    $failureReason = null;
+    if (!$selectedSeats) {
+        return null;
+    }
+    $pricingConfig = decode_event_pricing_config($event['pricing_config'] ?? null);
+    if ($pricingConfig === null) {
+        return null;
+    }
+    $tierAmounts = [];
+    foreach ($pricingConfig['tiers'] as $tier) {
+        $tierAmounts[$tier['id']] = (float) $tier['price'];
+    }
+    $assignments = $pricingConfig['assignments'] ?? [];
+    if (!$assignments || !$layoutRows) {
+        $failureReason = 'missing_pricing_assignment';
+        return null;
+    }
+    $seatRowMap = build_seat_pricing_row_map($layoutRows);
+    $total = 0.0;
+    foreach ($selectedSeats as $seatId) {
+        $rowKey = $seatRowMap[$seatId] ?? null;
+        $tierId = $rowKey !== null ? ($assignments[$rowKey] ?? null) : null;
+        if ($rowKey === null || $tierId === null || !isset($tierAmounts[$tierId])) {
+            $failureReason = 'missing_pricing_assignment';
+            return null;
+        }
+        $total += $tierAmounts[$tierId];
+    }
+    return number_format($total, 2, '.', '');
+}
+
+function resolve_seat_request_total_amount(array $event, array $selectedSeats = [], array $layoutRows = [], ?string &$failureReason = null): ?string
+{
+    $seatCount = count($selectedSeats);
     if ($seatCount <= 0) {
         return null;
+    }
+    if (event_uses_tiered_pricing($event)) {
+        return resolve_tiered_seat_request_total_amount($event, $selectedSeats, $layoutRows, $failureReason);
     }
     $priceCandidates = [
         $event['ticket_price'] ?? null,
@@ -378,6 +656,37 @@ function fetch_layout_for_event(?int $eventId): array
     }
 
     return [$layoutData ?? [], $stagePosition, $stageSize, $canvasSettings];
+}
+
+function fetch_layout_rows_for_assignment(PDO $pdo, ?int $layoutId, ?int $layoutVersionId): array
+{
+    $layoutId = $layoutId ? (int) $layoutId : null;
+    $layoutVersionId = $layoutVersionId ? (int) $layoutVersionId : null;
+    if ($layoutVersionId) {
+        $stmt = $pdo->prepare('SELECT layout_data FROM seating_layout_versions WHERE id = ? LIMIT 1');
+        $stmt->execute([$layoutVersionId]);
+        $row = $stmt->fetch();
+        if ($row) {
+            return decode_layout_json_value($row['layout_data'] ?? null) ?? [];
+        }
+    }
+    if ($layoutId) {
+        $stmt = $pdo->prepare('SELECT layout_data FROM seating_layouts WHERE id = ? LIMIT 1');
+        $stmt->execute([$layoutId]);
+        $row = $stmt->fetch();
+        if ($row) {
+            return decode_layout_json_value($row['layout_data'] ?? null) ?? [];
+        }
+    }
+    return [];
+}
+
+function prepare_event_pricing_config_for_response(array &$row): void
+{
+    if (!array_key_exists('pricing_config', $row)) {
+        return;
+    }
+    $row['pricing_config'] = decode_event_pricing_config($row['pricing_config'] ?? null);
 }
 
 function slugify_string(?string $value, string $fallback = 'event'): string
@@ -3015,11 +3324,13 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
         $customerPhoneNormalized = normalize_phone_number($contactPhone) ?: null;
 
         $hasCategoryTable = event_categories_table_exists($pdo);
+        $hasPricingConfigColumn = events_table_has_column($pdo, 'pricing_config');
+        $pricingSelect = $hasPricingConfigColumn ? ', e.pricing_config' : '';
         if ($hasCategoryTable) {
-            $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, e.status, e.visibility, e.seat_request_email_override, e.ticket_price, e.door_price, e.min_ticket_price, e.max_ticket_price, ec.slug AS category_slug, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
+            $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, e.status, e.visibility, e.seat_request_email_override, e.ticket_price, e.door_price, e.min_ticket_price, e.max_ticket_price' . $pricingSelect . ', ec.slug AS category_slug, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
             $eventStmt->execute([$eventId]);
         } else {
-            $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone, status, visibility, seat_request_email_override, ticket_price, door_price, min_ticket_price, max_ticket_price FROM events WHERE id = ? LIMIT 1');
+            $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone, status, visibility, seat_request_email_override, ticket_price, door_price, min_ticket_price, max_ticket_price' . ($hasPricingConfigColumn ? ', pricing_config' : '') . ' FROM events WHERE id = ? LIMIT 1');
             $eventStmt->execute([$eventId]);
         }
         $event = $eventStmt->fetch();
@@ -3052,7 +3363,12 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
         $holdExpiry = $holdDate ? $holdDate->format('Y-m-d H:i:s') : null;
         $finalizedAt = $status === 'confirmed' ? $now->format('Y-m-d H:i:s') : null;
         $totalSeats = count($selectedSeats);
-        $totalAmount = resolve_seat_request_total_amount($event, $totalSeats);
+        [$layoutRowsForPricing] = fetch_layout_for_event($eventId);
+        $pricingFailure = null;
+        $totalAmount = resolve_seat_request_total_amount($event, $selectedSeats, $layoutRowsForPricing, $pricingFailure);
+        if ($pricingFailure === 'missing_pricing_assignment') {
+            throw new SeatRequestException('Selected seats are missing pricing configuration. Please contact staff to finish this reservation.', 422, [], 'missing_pricing_assignment', $exceptionContext);
+        }
         $currency = 'USD';
 
         $layoutVersionId = $event['layout_version_id'];
@@ -3294,6 +3610,7 @@ function list_events(Request $request, ?string $scopeOverride = null): array
         }
         $rows = enrich_event_rows_with_images($rows);
         foreach ($rows as &$row) {
+            prepare_event_pricing_config_for_response($row);
             $row['payment_option'] = resolve_event_payment_option($row, $paymentLookup);
         }
         unset($row);
@@ -3896,6 +4213,7 @@ $router->add('GET', '/api/events/:id', function ($request, $params) {
         [$targetEmail, $targetSource] = determine_seat_request_recipient($event);
         $event['seat_request_target_email'] = $targetEmail;
         $event['seat_request_target_source'] = $targetSource;
+        prepare_event_pricing_config_for_response($event);
         $event['payment_option'] = resolve_event_payment_option($event, $paymentLookup);
         $enriched = enrich_event_rows_with_images([$event]);
         if (!empty($enriched[0])) {
@@ -4426,6 +4744,23 @@ $router->add('POST', '/api/events', function (Request $request) {
             $seatingEnabled = 0;
         }
         $layoutVersionId = $layoutId ? ensure_event_layout_version($pdo, $layoutId, $requestedVersion) : null;
+        $hasPricingConfigColumn = events_table_has_column($pdo, 'pricing_config');
+        $pricingConfigPayloadProvided = array_key_exists('pricing_config', $payload)
+            && $payload['pricing_config'] !== null
+            && $payload['pricing_config'] !== ''
+            && $payload['pricing_config'] !== false;
+        $pricingConfig = null;
+        if ($hasPricingConfigColumn) {
+            $pricingConfigError = null;
+            $layoutRowsForPricing = fetch_layout_rows_for_assignment($pdo, $layoutId, $layoutVersionId);
+            $pricingConfig = normalize_event_pricing_config_input($payload['pricing_config'] ?? null, $layoutRowsForPricing, $pricingConfigError);
+            if ($pricingConfigError !== null) {
+                return Response::error($pricingConfigError, 422);
+            }
+        } elseif ($pricingConfigPayloadProvided) {
+            return Response::error('Run database/20251212_schema_upgrade.sql to enable tiered pricing.', 422);
+        }
+        [$pricingMin, $pricingMax] = $pricingConfig ? get_event_pricing_config_range($pricingConfig) : [null, null];
 
         $categoryTags = $payload['category_tags'] ?? null;
         if (is_array($categoryTags)) {
@@ -4487,8 +4822,8 @@ $router->add('POST', '/api/events', function (Request $request) {
             'poster_image_id' => $payload['poster_image_id'] ?? null,
             'ticket_price' => $ticketPrice,
             'door_price' => $doorPrice,
-            'min_ticket_price' => $payload['min_ticket_price'] ?? $ticketPrice,
-            'max_ticket_price' => $payload['max_ticket_price'] ?? $doorPrice ?? $ticketPrice,
+            'min_ticket_price' => $payload['min_ticket_price'] ?? $ticketPrice ?? $pricingMin,
+            'max_ticket_price' => $payload['max_ticket_price'] ?? $doorPrice ?? $ticketPrice ?? $pricingMax,
             'ticket_type' => $ticketType,
             'seating_enabled' => $seatingEnabled,
             'venue_code' => $venueCode,
@@ -4516,6 +4851,9 @@ $router->add('POST', '/api/events', function (Request $request) {
         }
         if ($hasPaymentEnabledColumn) {
             $insertColumns['payment_enabled'] = $paymentEnabled;
+        }
+        if ($hasPricingConfigColumn) {
+            $insertColumns['pricing_config'] = $pricingConfig ? json_encode($pricingConfig) : null;
         }
         if ($hasArchivedColumn) {
             $insertColumns['archived_at'] = $archivedAt;
@@ -4554,6 +4892,7 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $hasCategoryTable = event_categories_table_exists($pdo);
         $hasContactNotesColumn = events_table_has_column($pdo, 'contact_notes');
         $hasPaymentEnabledColumn = events_table_has_column($pdo, 'payment_enabled');
+        $hasPricingConfigColumn = events_table_has_column($pdo, 'pricing_config');
         $eventId = (int)$params['id'];
         $existingStmt = $pdo->prepare('SELECT * FROM events WHERE id = ? LIMIT 1');
         $existingStmt->execute([$eventId]);
@@ -4705,6 +5044,26 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         } elseif (!$layoutId) {
             $layoutVersionId = null;
         }
+        $pricingConfigPayloadProvided = array_key_exists('pricing_config', $payload)
+            && $payload['pricing_config'] !== null
+            && $payload['pricing_config'] !== ''
+            && $payload['pricing_config'] !== false;
+        $pricingConfig = $hasPricingConfigColumn
+            ? decode_event_pricing_config($existing['pricing_config'] ?? null)
+            : null;
+        if ($hasPricingConfigColumn) {
+            if (array_key_exists('pricing_config', $payload)) {
+                $pricingConfigError = null;
+                $layoutRowsForPricing = fetch_layout_rows_for_assignment($pdo, $layoutId, $layoutVersionId);
+                $pricingConfig = normalize_event_pricing_config_input($payload['pricing_config'], $layoutRowsForPricing, $pricingConfigError);
+                if ($pricingConfigError !== null) {
+                    return Response::error($pricingConfigError, 422);
+                }
+            }
+        } elseif ($pricingConfigPayloadProvided) {
+            return Response::error('Run database/20251212_schema_upgrade.sql to enable tiered pricing.', 422);
+        }
+        [$pricingMin, $pricingMax] = $pricingConfig ? get_event_pricing_config_range($pricingConfig) : [null, null];
 
         $categoryTags = $payload['category_tags'] ?? $existing['category_tags'];
         if (is_array($categoryTags)) {
@@ -4799,6 +5158,15 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             }
         }
 
+        $resolvedTicketPrice = $valueOrExisting('ticket_price', 'normalize_nullable_decimal');
+        $resolvedDoorPrice = $valueOrExisting('door_price', 'normalize_nullable_decimal');
+        $resolvedMinTicketPrice = array_key_exists('min_ticket_price', $payload)
+            ? normalize_nullable_decimal($payload['min_ticket_price'])
+            : ($pricingMin ?? $valueOrExisting('min_ticket_price', 'normalize_nullable_decimal') ?? $resolvedTicketPrice);
+        $resolvedMaxTicketPrice = array_key_exists('max_ticket_price', $payload)
+            ? normalize_nullable_decimal($payload['max_ticket_price'])
+            : ($pricingMax ?? $valueOrExisting('max_ticket_price', 'normalize_nullable_decimal') ?? $resolvedDoorPrice ?? $resolvedTicketPrice);
+
         $updateColumns = [
             'artist_name' => $artist,
             'title' => $title,
@@ -4811,10 +5179,10 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             'image_url' => $valueOrExisting('image_url', 'normalize_nullable_text'),
             'hero_image_id' => $valueOrExisting('hero_image_id', 'normalize_nullable_int'),
             'poster_image_id' => $valueOrExisting('poster_image_id', 'normalize_nullable_int'),
-            'ticket_price' => $valueOrExisting('ticket_price', 'normalize_nullable_decimal'),
-            'door_price' => $valueOrExisting('door_price', 'normalize_nullable_decimal'),
-            'min_ticket_price' => $valueOrExisting('min_ticket_price', 'normalize_nullable_decimal'),
-            'max_ticket_price' => $valueOrExisting('max_ticket_price', 'normalize_nullable_decimal'),
+            'ticket_price' => $resolvedTicketPrice,
+            'door_price' => $resolvedDoorPrice,
+            'min_ticket_price' => $resolvedMinTicketPrice,
+            'max_ticket_price' => $resolvedMaxTicketPrice,
             'ticket_type' => $ticketType,
             'seating_enabled' => $seatingEnabled,
             'venue_code' => $venueCode,
@@ -4845,6 +5213,9 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         }
         if ($hasPaymentEnabledColumn && $paymentEnabled !== null) {
             $updateColumns['payment_enabled'] = $paymentEnabled;
+        }
+        if ($hasPricingConfigColumn) {
+            $updateColumns['pricing_config'] = $pricingConfig ? json_encode($pricingConfig) : null;
         }
         $updateColumns['seat_request_email_override'] = $seatRequestOverride;
         $updateColumns['change_note'] = $changeNote;

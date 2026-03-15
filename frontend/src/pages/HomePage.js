@@ -16,6 +16,7 @@ import Footer from '../components/Footer';
 import BackToTopButton from '../components/BackToTopButton';
 import { API_BASE } from '../apiConfig';
 import { getEventStartDate, getEventEndDate } from '../utils/eventFormat';
+import { getEventMinimumPrice } from '../utils/eventPricing';
 import { resolveEventImageUrl } from '../utils/imageVariants';
 
 const SITE_BASE_URL = 'https://midwaymusichall.net';
@@ -141,13 +142,14 @@ const coerceDecimal = (value) => {
 };
 
 const resolveEventOffer = (event, baseUrl, startDate) => {
-  const prices = [
+  const minimumPrice = getEventMinimumPrice(event);
+  const fallbackPrices = [
     coerceDecimal(event.ticket_price),
     coerceDecimal(event.door_price),
     coerceDecimal(event.min_ticket_price),
     coerceDecimal(event.max_ticket_price),
   ].filter((price) => price !== null && price >= 0);
-  const minPrice = prices.length ? Math.min(...prices) : null;
+  const minPrice = minimumPrice !== null ? minimumPrice : (fallbackPrices.length ? Math.min(...fallbackPrices) : null);
   return {
     '@type': 'Offer',
     priceCurrency: 'USD',

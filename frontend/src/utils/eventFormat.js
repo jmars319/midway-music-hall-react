@@ -1,3 +1,5 @@
+import { getTieredPriceSummary } from './eventPricing';
+
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   weekday: 'short',
   month: 'short',
@@ -114,6 +116,10 @@ export const formatEventStartTime = (event = {}) => {
 };
 
 export const formatEventPriceDisplay = (event = {}) => {
+  const tieredSummary = getTieredPriceSummary(event);
+  if (tieredSummary) {
+    return tieredSummary;
+  }
   const hasValue = (value) => value !== null && value !== undefined && value !== '';
   const formatTicket = hasValue(event.ticket_price) ? formatPriceValue(event.ticket_price) : null;
   const formatDoor = hasValue(event.door_price) ? formatPriceValue(event.door_price) : null;

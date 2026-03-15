@@ -4,7 +4,8 @@ import { Plus, Edit, Copy, CheckCircle, XCircle, Archive as ArchiveIcon } from '
 import { API_BASE, getImageUrlSync } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
 import { getEventEditorFlags } from './eventEditorFlags';
-import { formatSeatLabel } from '../utils/seatLabelUtils';
+import { formatSeatLabel, isSeatRow, resolveRowHeaderLabels } from '../utils/seatLabelUtils';
+import { buildPricingRowKey, getEventPricingConfig, getTieredPriceSummary } from '../utils/eventPricing';
 import {
   formatEventDateForInput,
   formatEventTimeForInput,
@@ -25,6 +26,16 @@ const TICKET_TYPE_LABELS = {
 };
 
 const DEFAULT_STAFF_INBOX = 'midwayeventcenter@gmail.com';
+const DEFAULT_PRICING_TIER_COLORS = [
+  '#F59E0B',
+  '#06B6D4',
+  '#10B981',
+  '#8B5CF6',
+  '#EF4444',
+  '#3B82F6',
+  '#F97316',
+  '#22C55E',
+];
 const SEAT_ROUTING_SOURCE_LABELS = {
   event: 'Event override for this show',
   category: 'Category-specific inbox',
@@ -129,6 +140,10 @@ const formatPrice = (value) => {
 };
 
 const formatPriceDisplay = (event) => {
+  const tieredSummary = getTieredPriceSummary(event);
+  if (tieredSummary) {
+    return tieredSummary;
+  }
   if (event.min_ticket_price && event.max_ticket_price && Number(event.min_ticket_price) !== Number(event.max_ticket_price)) {
     const min = formatPrice(event.min_ticket_price);
     const max = formatPrice(event.max_ticket_price);
@@ -192,6 +207,104 @@ const normalizePriceInput = (value) => {
   return Number(num.toFixed(2));
 };
 
+const normalizePricingColorInput = (value, index = 0) => (
+  /^#[0-9A-F]{6}$/i.test(String(value || '').trim())
+    ? String(value).trim().toUpperCase()
+    : DEFAULT_PRICING_TIER_COLORS[index % DEFAULT_PRICING_TIER_COLORS.length]
+);
+
+const buildDefaultPricingTier = (existingTiers = []) => {
+  let counter = existingTiers.length + 1;
+  let candidateId = `tier-${counter}`;
+  const existingIds = new Set(existingTiers.map((tier) => String(tier.id || '').trim()));
+  while (existingIds.has(candidateId)) {
+    counter += 1;
+    candidateId = `tier-${counter}`;
+  }
+  return {
+    id: candidateId,
+    label: `Tier ${counter}`,
+    price: '',
+    note: '',
+    color: DEFAULT_PRICING_TIER_COLORS[(counter - 1) % DEFAULT_PRICING_TIER_COLORS.length],
+  };
+};
+
+const buildDefaultPricingTiers = (count = 3) => {
+  const tiers = [];
+  while (tiers.length < count) {
+    tiers.push(buildDefaultPricingTier(tiers));
+  }
+  return tiers;
+};
+
+const clonePricingTier = (tier = {}, index = 0) => ({
+  id: String(tier.id || `tier-${index + 1}`).trim() || `tier-${index + 1}`,
+  label: String(tier.label || '').trim(),
+  price: tier.price ?? '',
+  note: String(tier.note || '').trim(),
+  color: normalizePricingColorInput(tier.color, index),
+});
+
+const normalizePricingFormState = (event = {}) => {
+  const config = getEventPricingConfig(event);
+  if (!config) {
+    return {
+      pricing_mode: 'flat',
+      pricing_tiers: buildDefaultPricingTiers(),
+      pricing_assignments: {},
+    };
+  }
+  return {
+    pricing_mode: 'tiered',
+    pricing_tiers: config.tiers.map((tier, index) => clonePricingTier(tier, index)),
+    pricing_assignments: { ...(config.assignments || {}) },
+  };
+};
+
+const getPricingRowSeatCount = (row = {}) => {
+  const parsed = Number(row.total_seats ?? row.totalSeats ?? row.capacity ?? 0);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const extractPricingAssignmentRows = (layoutData = []) => (
+  Array.isArray(layoutData)
+    ? layoutData.filter((row) => row && row.is_active !== false && isSeatRow(row) && getPricingRowSeatCount(row) > 0)
+    : []
+);
+
+const describePricingAssignmentRow = (row = {}) => {
+  const { sectionLabel, rowLabel } = resolveRowHeaderLabels(row);
+  const parts = [sectionLabel, rowLabel].filter(Boolean);
+  if (parts.length) {
+    return parts.join(' - ');
+  }
+  return String(row.label || row.section_name || row.row_label || row.id || 'Seat group').trim();
+};
+
+const pricingAssignmentsMatch = (left = {}, right = {}) => {
+  const leftEntries = Object.entries(left || {}).sort(([a], [b]) => a.localeCompare(b));
+  const rightEntries = Object.entries(right || {}).sort(([a], [b]) => a.localeCompare(b));
+  if (leftEntries.length !== rightEntries.length) return false;
+  return leftEntries.every(([key, value], index) => key === rightEntries[index][0] && value === rightEntries[index][1]);
+};
+
+const alignPricingAssignments = (assignments = {}, rows = [], tiers = []) => {
+  const normalizedRows = extractPricingAssignmentRows(rows);
+  if (!normalizedRows.length || !tiers.length) {
+    return {};
+  }
+  const validTierIds = new Set(tiers.map((tier) => String(tier.id || '').trim()).filter(Boolean));
+  const nextAssignments = {};
+  normalizedRows.forEach((row) => {
+    const rowKey = buildPricingRowKey(row);
+    if (!rowKey) return;
+    const currentTierId = String(assignments[rowKey] || '').trim();
+    nextAssignments[rowKey] = validTierIds.has(currentTierId) ? currentTierId : '';
+  });
+  return nextAssignments;
+};
+
 const isLikelyValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
 const isRecurringEvent = (event) => Boolean(event.is_series_master || event.series_master_id);
@@ -214,6 +327,9 @@ const initialForm = {
   image_url: '',
   hero_image_id: null,
   poster_image_id: null,
+  pricing_mode: 'flat',
+  pricing_tiers: buildDefaultPricingTiers(),
+  pricing_assignments: {},
   ticket_price: '',
   door_price: '',
   age_restriction: 'All Ages',
@@ -272,6 +388,8 @@ export default function EventsModule(){
   const [layoutConfirmState, setLayoutConfirmState] = useState({ open: false, pendingValue: '' });
   const [layoutChangeToast, setLayoutChangeToast] = useState('');
   const [saveToast, setSaveToast] = useState('');
+  const [eventPricingRows, setEventPricingRows] = useState([]);
+  const [eventPricingRowsLoading, setEventPricingRowsLoading] = useState(false);
   const [seatingSnapshotsState, setSeatingSnapshotsState] = useState({ loading: false, items: [], error: '', eventId: null });
   const [snapshotCopyMessage, setSnapshotCopyMessage] = useState('');
   const [snapshotRestoreState, setSnapshotRestoreState] = useState({
@@ -299,6 +417,115 @@ export default function EventsModule(){
     const timer = setTimeout(() => setSaveToast(''), 4500);
     return () => clearTimeout(timer);
   }, [saveToast]);
+
+  const selectedLayoutTemplateRows = useMemo(() => {
+    const selectedLayoutId = String(formData.layout_id || '').trim();
+    if (!selectedLayoutId) return [];
+    const match = layouts.find((layout) => String(layout.id) === selectedLayoutId);
+    return extractPricingAssignmentRows(match?.layout_data || []);
+  }, [formData.layout_id, layouts]);
+
+  const pricingAssignmentRows = useMemo(() => {
+    const selectedLayoutId = String(formData.layout_id || '').trim();
+    const originalLayoutId = String(editing?.layout_id || '').trim();
+    if (
+      editing?.id &&
+      selectedLayoutId &&
+      originalLayoutId &&
+      selectedLayoutId === originalLayoutId &&
+      eventPricingRows.length
+    ) {
+      return eventPricingRows;
+    }
+    return selectedLayoutTemplateRows;
+  }, [editing?.id, editing?.layout_id, eventPricingRows, formData.layout_id, selectedLayoutTemplateRows]);
+
+  const pricingAssignmentOptions = useMemo(
+    () => pricingAssignmentRows
+      .map((row) => ({
+        row,
+        rowKey: buildPricingRowKey(row),
+        label: describePricingAssignmentRow(row),
+        seatCount: getPricingRowSeatCount(row),
+      }))
+      .filter((item) => item.rowKey),
+    [pricingAssignmentRows]
+  );
+
+  const tieredPricingPreview = useMemo(() => {
+    if (formData.pricing_mode !== 'tiered') return '';
+    const tiers = (formData.pricing_tiers || []).map((tier, index) => ({
+      id: String(tier.id || `tier-${index + 1}`).trim() || `tier-${index + 1}`,
+      label: String(tier.label || '').trim(),
+      price: normalizePriceInput(tier.price),
+      note: String(tier.note || '').trim(),
+      color: normalizePricingColorInput(tier.color, index),
+    })).filter((tier) => tier.label && tier.price !== null);
+    if (!tiers.length) return '';
+    return getTieredPriceSummary({
+      pricing_config: {
+        mode: 'tiered',
+        tiers,
+      },
+    }) || '';
+  }, [formData.pricing_mode, formData.pricing_tiers]);
+
+  useEffect(() => {
+    if (!showForm || !editing?.id) {
+      setEventPricingRows([]);
+      setEventPricingRowsLoading(false);
+      return undefined;
+    }
+    const selectedLayoutId = String(formData.layout_id || '').trim();
+    const originalLayoutId = String(editing.layout_id || '').trim();
+    if (!selectedLayoutId || !originalLayoutId || selectedLayoutId !== originalLayoutId) {
+      setEventPricingRows([]);
+      setEventPricingRowsLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setEventPricingRowsLoading(true);
+    fetch(`${API_BASE}/seating/event/${editing.id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.success) {
+          setEventPricingRows(extractPricingAssignmentRows(data.seating || []));
+        } else {
+          setEventPricingRows([]);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Failed to fetch event pricing rows', err);
+          setEventPricingRows([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setEventPricingRowsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editing?.id, editing?.layout_id, editing?.layout_version_id, formData.layout_id, showForm]);
+
+  useEffect(() => {
+    if (!showForm || formData.pricing_mode !== 'tiered') {
+      return;
+    }
+    setFormData((prev) => {
+      const nextAssignments = alignPricingAssignments(prev.pricing_assignments, pricingAssignmentRows, prev.pricing_tiers);
+      if (pricingAssignmentsMatch(prev.pricing_assignments, nextAssignments)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        pricing_assignments: nextAssignments,
+      };
+    });
+  }, [formData.pricing_mode, pricingAssignmentRows, showForm]);
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -1379,6 +1606,8 @@ export default function EventsModule(){
   const openAdd = () => {
     setEditing(null);
     setFormData(initialForm);
+    setEventPricingRows([]);
+    setEventPricingRowsLoading(false);
     setImageFile(null);
     setImagePreview(null);
     setError('');
@@ -1391,6 +1620,7 @@ export default function EventsModule(){
   };
 
   const openEdit = (event) => {
+    const pricingState = normalizePricingFormState(event);
     setEditing(event);
     setError('');
     setFieldErrors({});
@@ -1408,6 +1638,9 @@ export default function EventsModule(){
       series_summary: event.series_summary || '',
       series_footer_note: event.series_footer_note || '',
       image_url: event.image_url || '',
+      pricing_mode: pricingState.pricing_mode,
+      pricing_tiers: pricingState.pricing_tiers,
+      pricing_assignments: pricingState.pricing_assignments,
       ticket_price: event.ticket_price || '',
       door_price: event.door_price || '',
       age_restriction: event.age_restriction || 'All Ages',
@@ -1424,6 +1657,8 @@ export default function EventsModule(){
       payment_enabled: Boolean(event.payment_enabled),
     });
     setImageFile(null);
+    setEventPricingRows([]);
+    setEventPricingRowsLoading(false);
     const previewSource = event.effective_image?.src
       || event.effective_image?.file_url
       || event.image_url
@@ -1612,6 +1847,71 @@ export default function EventsModule(){
       }
     }
     setFormData((prev) => ({ ...prev, [name]: nextValue }));
+  };
+
+  const handlePricingModeChange = (value) => {
+    const nextMode = value === 'tiered' ? 'tiered' : 'flat';
+    setFormData((prev) => ({
+      ...prev,
+      pricing_mode: nextMode,
+      pricing_tiers: nextMode === 'tiered'
+        ? (prev.pricing_tiers?.length ? prev.pricing_tiers : buildDefaultPricingTiers())
+        : prev.pricing_tiers,
+      pricing_assignments: nextMode === 'tiered'
+        ? alignPricingAssignments(prev.pricing_assignments, pricingAssignmentRows, prev.pricing_tiers?.length ? prev.pricing_tiers : buildDefaultPricingTiers())
+        : prev.pricing_assignments,
+    }));
+  };
+
+  const handlePricingTierChange = (tierId, field, value) => {
+    setFormData((prev) => ({
+      ...prev,
+      pricing_tiers: (prev.pricing_tiers || []).map((tier) => (
+        tier.id === tierId
+          ? {
+              ...tier,
+              [field]: value,
+            }
+          : tier
+      )),
+    }));
+  };
+
+  const handleAddPricingTier = () => {
+    setFormData((prev) => {
+      const nextTier = buildDefaultPricingTier(prev.pricing_tiers || []);
+      const nextTiers = [...(prev.pricing_tiers || []), nextTier];
+      return {
+        ...prev,
+        pricing_tiers: nextTiers,
+        pricing_assignments: alignPricingAssignments(prev.pricing_assignments, pricingAssignmentRows, nextTiers),
+      };
+    });
+  };
+
+  const handleRemovePricingTier = (tierId) => {
+    setFormData((prev) => {
+      const currentTiers = prev.pricing_tiers || [];
+      if (currentTiers.length <= 3) {
+        return prev;
+      }
+      const nextTiers = currentTiers.filter((tier) => tier.id !== tierId);
+      return {
+        ...prev,
+        pricing_tiers: nextTiers,
+        pricing_assignments: alignPricingAssignments(prev.pricing_assignments, pricingAssignmentRows, nextTiers),
+      };
+    });
+  };
+
+  const handlePricingAssignmentChange = (rowKey, tierId) => {
+    setFormData((prev) => ({
+      ...prev,
+      pricing_assignments: {
+        ...(prev.pricing_assignments || {}),
+        [rowKey]: tierId,
+      },
+    }));
   };
 
   const handleScheduleBlur = (e) => {
@@ -1870,23 +2170,82 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       const method = editing ? 'PUT' : 'POST';
       const url = editing ? `${API_BASE}/events/${editing.id}` : `${API_BASE}/events`;
       const payload = { ...formData, image_url: finalImageUrl, poster_image_id: posterImageId, hero_image_id: heroImageId };
-      payload.ticket_price = normalizePriceInput(payload.ticket_price);
-      payload.door_price = normalizePriceInput(payload.door_price);
-      if (typeof payload.ticket_price === 'number') {
-        payload.min_ticket_price = payload.ticket_price;
-      } else if (payload.ticket_price === null) {
-        payload.min_ticket_price = null;
-      }
-      if (typeof payload.door_price === 'number') {
-        payload.max_ticket_price = payload.door_price;
-      } else if (payload.door_price === null) {
-        payload.max_ticket_price = payload.ticket_price ?? null;
-      }
       const parsedLayoutId = formData.layout_id === '' ? null : Number(formData.layout_id);
       const normalizedLayoutId = Number.isFinite(parsedLayoutId) && parsedLayoutId > 0 ? parsedLayoutId : null;
       payload.layout_id = normalizedLayoutId;
       const parsedCategoryId = payload.category_id && payload.category_id !== '' ? Number(payload.category_id) : null;
       payload.category_id = Number.isFinite(parsedCategoryId) && parsedCategoryId > 0 ? parsedCategoryId : null;
+      if (formData.pricing_mode === 'tiered') {
+        if (!normalizedLayoutId) {
+          setError('Tiered pricing requires a seating layout.');
+          setSubmitting(false);
+          return;
+        }
+        if (!pricingAssignmentRows.length) {
+          setError('Tiered pricing requires seat/table groups in the selected layout.');
+          setSubmitting(false);
+          return;
+        }
+        const tierDrafts = (formData.pricing_tiers || []).map((tier, index) => ({
+          id: String(tier.id || `tier-${index + 1}`).trim() || `tier-${index + 1}`,
+          label: String(tier.label || '').trim(),
+          price: normalizePriceInput(tier.price),
+          note: String(tier.note || '').trim(),
+          color: normalizePricingColorInput(tier.color, index),
+          rawPrice: String(tier.price ?? '').trim(),
+        }));
+        const incompleteTier = tierDrafts.find((tier) => {
+          const hasAnyContent = Boolean(tier.label || tier.rawPrice || tier.note);
+          return hasAnyContent && (!tier.label || tier.price === null);
+        });
+        if (incompleteTier) {
+          setError('Each pricing tier needs a label and price before saving.');
+          setSubmitting(false);
+          return;
+        }
+        const normalizedTiers = tierDrafts
+          .filter((tier) => tier.label && tier.price !== null)
+          .map(({ rawPrice, ...tier }) => tier);
+        if (normalizedTiers.length < 3) {
+          setError('Tiered pricing requires at least 3 complete tiers.');
+          setSubmitting(false);
+          return;
+        }
+        const nextAssignments = alignPricingAssignments(formData.pricing_assignments, pricingAssignmentRows, normalizedTiers);
+        const allRowsAssigned = pricingAssignmentRows.every((row) => {
+          const rowKey = buildPricingRowKey(row);
+          if (!rowKey) return false;
+          return normalizedTiers.some((tier) => tier.id === nextAssignments[rowKey]);
+        });
+        if (!allRowsAssigned) {
+          setError('Assign every seat/table group to a pricing tier before saving.');
+          setSubmitting(false);
+          return;
+        }
+        payload.pricing_config = {
+          mode: 'tiered',
+          tiers: normalizedTiers,
+          assignments: nextAssignments,
+        };
+        payload.ticket_price = null;
+        payload.door_price = null;
+        delete payload.min_ticket_price;
+        delete payload.max_ticket_price;
+      } else {
+        payload.pricing_config = null;
+        payload.ticket_price = normalizePriceInput(payload.ticket_price);
+        payload.door_price = normalizePriceInput(payload.door_price);
+        if (typeof payload.ticket_price === 'number') {
+          payload.min_ticket_price = payload.ticket_price;
+        } else if (payload.ticket_price === null) {
+          payload.min_ticket_price = null;
+        }
+        if (typeof payload.door_price === 'number') {
+          payload.max_ticket_price = payload.door_price;
+        } else if (payload.door_price === null) {
+          payload.max_ticket_price = payload.ticket_price ?? null;
+        }
+      }
       payload.seat_request_email_override = (payload.seat_request_email_override || '').trim() || null;
       payload.seating_enabled = formData.seating_enabled ? 1 : 0;
       payload.payment_enabled = formData.payment_enabled ? 1 : 0;
@@ -2153,6 +2512,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       door_price: event.door_price || '',
       min_ticket_price: event.min_ticket_price || '',
       max_ticket_price: event.max_ticket_price || '',
+      pricing_config: event.pricing_config || null,
       ticket_type: event.ticket_type || 'general_admission',
       seating_enabled: Boolean(event.seating_enabled),
       venue_code: event.venue_code || 'MMH',
@@ -2635,32 +2995,195 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                 )}
               </div>
 
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Ticket Price</label>
-                <input
-                  name="ticket_price"
-                  value={formData.ticket_price}
-                  onChange={handleChange}
-                  type="number"
-                  step="0.01"
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                  placeholder="Leave blank for free shows"
-                />
-                <p className="text-xs text-gray-400 mt-1">Leave blank if this event is free or donation-based.</p>
-              </div>
+              <div className="md:col-span-2 rounded-xl border border-purple-500/30 bg-gray-900/50 p-4 space-y-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <label className="block text-sm text-gray-200 mb-1">Pricing</label>
+                    <p className="text-xs text-gray-400">
+                      Choose flat pricing for standard shows or tiered pricing for special seating-based events.
+                    </p>
+                  </div>
+                  <div className="w-full md:w-56">
+                    <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">Pricing Mode</label>
+                    <select
+                      value={formData.pricing_mode}
+                      onChange={(e) => handlePricingModeChange(e.target.value)}
+                      className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                    >
+                      <option value="flat">Flat pricing</option>
+                      <option value="tiered">Tiered seating pricing</option>
+                    </select>
+                  </div>
+                </div>
 
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Door Price</label>
-                <input
-                  name="door_price"
-                  value={formData.door_price}
-                  onChange={handleChange}
-                  type="number"
-                  step="0.01"
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                  placeholder="Leave blank if no door cover"
-                />
-                <p className="text-xs text-gray-400 mt-1">If there is no separate door price, leave blank.</p>
+                {formData.pricing_mode === 'tiered' ? (
+                  <div className="space-y-5">
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+                      <p className="text-sm font-semibold text-amber-100">
+                        Tiered pricing replaces the normal price display for this event.
+                      </p>
+                      <p className="mt-1 text-xs text-amber-50/90">
+                        Assign each seat/table group to a tier. Seat colors stay reserved for availability states, so customers see pricing as a legend/list in the seating flow.
+                      </p>
+                      {tieredPricingPreview && (
+                        <p className="mt-2 text-sm text-amber-100">Preview: {tieredPricingPreview}</p>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-semibold text-white">Price tiers</h3>
+                          <p className="text-xs text-gray-400">Minimum 3 tiers. Add more if this event needs them.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddPricingTier}
+                          className="inline-flex items-center justify-center rounded bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500"
+                        >
+                          Add tier
+                        </button>
+                      </div>
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        {(formData.pricing_tiers || []).map((tier, index) => (
+                          <div key={tier.id} className="rounded-xl border border-gray-700 bg-gray-950/60 p-4 space-y-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="text-sm font-semibold text-white">Tier {index + 1}</p>
+                              <button
+                                type="button"
+                                onClick={() => handleRemovePricingTier(tier.id)}
+                                disabled={(formData.pricing_tiers || []).length <= 3}
+                                className="text-xs font-semibold text-red-200 disabled:text-gray-500 disabled:cursor-not-allowed hover:text-white"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_9rem_5rem]">
+                              <div>
+                                <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">Label</label>
+                                <input
+                                  type="text"
+                                  value={tier.label}
+                                  onChange={(e) => handlePricingTierChange(tier.id, 'label', e.target.value)}
+                                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                                  placeholder="VIP"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">Price</label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={tier.price}
+                                  onChange={(e) => handlePricingTierChange(tier.id, 'price', e.target.value)}
+                                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                                  placeholder="25.00"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">Color</label>
+                                <input
+                                  type="color"
+                                  value={tier.color || DEFAULT_PRICING_TIER_COLORS[index % DEFAULT_PRICING_TIER_COLORS.length]}
+                                  onChange={(e) => handlePricingTierChange(tier.id, 'color', e.target.value)}
+                                  className="h-11 w-full rounded bg-gray-700 p-1"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">Optional note</label>
+                              <input
+                                type="text"
+                                value={tier.note}
+                                onChange={(e) => handlePricingTierChange(tier.id, 'note', e.target.value)}
+                                className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                                placeholder="Closest to the stage"
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-white">Seat/table assignments</h3>
+                        <p className="text-xs text-gray-400">
+                          Each interactive row or table group in the selected layout needs a tier assignment.
+                        </p>
+                      </div>
+                      {!formData.layout_id ? (
+                        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                          Choose a seating layout before enabling tiered pricing.
+                        </div>
+                      ) : eventPricingRowsLoading ? (
+                        <div className="rounded-lg border border-gray-700 bg-gray-950/60 px-4 py-3 text-sm text-gray-300">
+                          Loading this event&apos;s current seat groups…
+                        </div>
+                      ) : pricingAssignmentOptions.length === 0 ? (
+                        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                          The selected layout has no active seat/table groups to assign.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {pricingAssignmentOptions.map(({ rowKey, label, seatCount }) => (
+                            <div key={rowKey} className="grid gap-3 rounded-lg border border-gray-700 bg-gray-950/60 p-3 md:grid-cols-[minmax(0,1fr)_16rem] md:items-center">
+                              <div>
+                                <p className="font-medium text-white">{label}</p>
+                                <p className="text-xs text-gray-400">
+                                  {seatCount} {seatCount === 1 ? 'seat' : 'seats'}
+                                </p>
+                              </div>
+                              <select
+                                value={formData.pricing_assignments?.[rowKey] || ''}
+                                onChange={(e) => handlePricingAssignmentChange(rowKey, e.target.value)}
+                                className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                              >
+                                <option value="">Choose tier…</option>
+                                {(formData.pricing_tiers || []).map((tier) => (
+                                  <option key={tier.id} value={tier.id}>
+                                    {tier.label || 'Untitled tier'}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Ticket Price</label>
+                      <input
+                        name="ticket_price"
+                        value={formData.ticket_price}
+                        onChange={handleChange}
+                        type="number"
+                        step="0.01"
+                        className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                        placeholder="Leave blank for free shows"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">Leave blank if this event is free or donation-based.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Door Price</label>
+                      <input
+                        name="door_price"
+                        value={formData.door_price}
+                        onChange={handleChange}
+                        type="number"
+                        step="0.01"
+                        className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                        placeholder="Leave blank if no door cover"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">If there is no separate door price, leave blank.</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>

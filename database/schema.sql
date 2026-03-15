@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS events (
   door_price DECIMAL(10,2) DEFAULT NULL,
   min_ticket_price DECIMAL(10,2) DEFAULT NULL,
   max_ticket_price DECIMAL(10,2) DEFAULT NULL,
+  pricing_config JSON DEFAULT NULL,
   ticket_type ENUM('general_admission','reserved_seating','hybrid') DEFAULT 'general_admission',
   seating_enabled TINYINT(1) DEFAULT 0,
   venue_code ENUM('MMH','TGP') DEFAULT 'MMH',
