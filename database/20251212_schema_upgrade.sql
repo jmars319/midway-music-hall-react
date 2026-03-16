@@ -229,6 +229,37 @@ CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_series_master', 
 CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_hero_media', 'hero_image_id', 'media', 'id', 'ADD CONSTRAINT fk_events_hero_media FOREIGN KEY (hero_image_id) REFERENCES media(id) ON DELETE SET NULL');
 CALL add_constraint_if_missing(@TARGET_DB, 'events', 'fk_events_poster_media', 'poster_image_id', 'media', 'id', 'ADD CONSTRAINT fk_events_poster_media FOREIGN KEY (poster_image_id) REFERENCES media(id) ON DELETE SET NULL');
 
+-- MULTI-DAY EVENT OCCURRENCES
+CREATE TABLE IF NOT EXISTS event_occurrences (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  event_id INT NOT NULL,
+  occurrence_date DATE NOT NULL,
+  start_time TIME NOT NULL,
+  start_datetime DATETIME NOT NULL,
+  end_datetime DATETIME DEFAULT NULL,
+  door_datetime DATETIME DEFAULT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_event_occurrence_start (event_id, start_datetime),
+  KEY idx_event_occurrences_event_start (event_id, start_datetime),
+  KEY idx_event_occurrences_start (start_datetime)
+);
+
+CALL add_column_if_missing(@TARGET_DB, 'event_occurrences', 'occurrence_date', 'occurrence_date DATE NOT NULL AFTER event_id');
+CALL add_column_if_missing(@TARGET_DB, 'event_occurrences', 'start_time', 'start_time TIME NOT NULL AFTER occurrence_date');
+CALL add_column_if_missing(@TARGET_DB, 'event_occurrences', 'start_datetime', 'start_datetime DATETIME NOT NULL AFTER start_time');
+CALL add_column_if_missing(@TARGET_DB, 'event_occurrences', 'end_datetime', 'end_datetime DATETIME DEFAULT NULL AFTER start_datetime');
+CALL add_column_if_missing(@TARGET_DB, 'event_occurrences', 'door_datetime', 'door_datetime DATETIME DEFAULT NULL AFTER end_datetime');
+CALL add_column_if_missing(@TARGET_DB, 'event_occurrences', 'sort_order', 'sort_order INT NOT NULL DEFAULT 0 AFTER door_datetime');
+CALL add_column_if_missing(@TARGET_DB, 'event_occurrences', 'created_at', 'created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER sort_order');
+CALL add_column_if_missing(@TARGET_DB, 'event_occurrences', 'updated_at', 'updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at');
+
+CALL add_index_if_missing(@TARGET_DB, 'event_occurrences', 'uniq_event_occurrence_start', 'ADD UNIQUE INDEX uniq_event_occurrence_start (event_id, start_datetime)');
+CALL add_index_if_missing(@TARGET_DB, 'event_occurrences', 'idx_event_occurrences_event_start', 'ADD INDEX idx_event_occurrences_event_start (event_id, start_datetime)');
+CALL add_index_if_missing(@TARGET_DB, 'event_occurrences', 'idx_event_occurrences_start', 'ADD INDEX idx_event_occurrences_start (start_datetime)');
+CALL add_constraint_if_missing(@TARGET_DB, 'event_occurrences', 'fk_event_occurrences_event', 'event_id', 'events', 'id', 'ADD CONSTRAINT fk_event_occurrences_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE');
+
 CREATE TABLE IF NOT EXISTS event_series_meta (
   event_id INT PRIMARY KEY,
   schedule_label VARCHAR(255) DEFAULT NULL,

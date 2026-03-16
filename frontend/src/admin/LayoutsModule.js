@@ -109,6 +109,7 @@ export default function LayoutsModule() {
   });
   const containerRef = useRef(null);
   const canvasInnerRef = useRef(null);
+  const editorShellRef = useRef(null);
   const [draggingRow, setDraggingRow] = useState(null);
   const [showGrid, setShowGrid] = useState(true);
   const [snapToGrid, setSnapToGrid] = useState(true);
@@ -172,6 +173,7 @@ export default function LayoutsModule() {
     if (!showEditor) return undefined;
     const handlePointerDown = (event) => {
       const mapNode = containerRef.current;
+      const editorShellNode = editorShellRef.current;
       if (!mapNode) return;
       if (mapNode.contains(event.target)) {
         setMapInteractionEnabled(true);
@@ -185,8 +187,10 @@ export default function LayoutsModule() {
       } else {
         setMapInteractionEnabled(false);
         setIsPanning(false);
-        setSelectedRowId(null);
-        setHoveredRowId(null);
+        if (!editorShellNode || !editorShellNode.contains(event.target)) {
+          setSelectedRowId(null);
+          setHoveredRowId(null);
+        }
       }
     };
     const handleEscape = (event) => {
@@ -962,7 +966,7 @@ export default function LayoutsModule() {
       {showEditor && editingLayout && (
         <div className="fixed inset-0 bg-black/70 z-50 p-4 overflow-y-auto">
           <div className="min-h-full flex items-start justify-center w-full">
-            <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-7xl max-h-[90vh] h-full flex flex-col overflow-hidden">
+            <div ref={editorShellRef} className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-7xl max-h-[90vh] h-full flex flex-col overflow-hidden">
             {/* Header */}
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 p-6 border-b border-gray-200 dark:border-gray-700">
               <div className="flex-1 flex flex-col gap-3">
@@ -1253,6 +1257,7 @@ export default function LayoutsModule() {
                           pendingSeats={[]}
                           onToggleSeat={() => {}}
                           interactive={false}
+                          textRotation={-(draggingRow.rotation || 0)}
                         />
                       </div>
                     </div>
@@ -1295,7 +1300,7 @@ export default function LayoutsModule() {
                               opacity: 0.9
                             }}
                           >
-                            <span>{row.label || row.section_name || 'Marker'}</span>
+                            <span style={rotation ? { transform: `rotate(${-rotation}deg)` } : undefined}>{row.label || row.section_name || 'Marker'}</span>
                             <div
                               onMouseDown={(e) => handleMarkerResizeStart(e, row.id)}
                               className="absolute -bottom-2 -right-2 w-4 h-4 bg-white dark:bg-gray-900 border border-gray-400 rounded-full cursor-se-resize"
@@ -1383,6 +1388,7 @@ export default function LayoutsModule() {
                               pendingSeats={[]}
                               onToggleSeat={() => {}}
                               interactive={false}
+                              textRotation={-(row.rotation || 0)}
                             />
                           </div>
                         </div>

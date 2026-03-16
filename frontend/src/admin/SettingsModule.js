@@ -1,9 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { API_BASE, SERVER_BASE, invalidateBrandingCache } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
 import { invalidateSiteContentCache } from '../hooks/useSiteContent';
+import AdminCollapsibleSection from './AdminCollapsibleSection';
+import AdminStickyActionBar from './AdminStickyActionBar';
+import useCollapsibleSections from './useCollapsibleSections';
 
 // SettingsModule: admin UI for business/stage settings
+
+const SETTINGS_SECTION_STORAGE_KEY = 'mmh_settings_editor_sections';
 
 export default function SettingsModule(){
   const [settings, setSettings] = useState({});
@@ -11,8 +16,30 @@ export default function SettingsModule(){
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [status, setStatus] = useState('');
   const [selectedHeroImages, setSelectedHeroImages] = useState([]);
   const [selectedTgpHeroImages, setSelectedTgpHeroImages] = useState([]);
+  const sectionIds = useMemo(() => ([
+    'tgp-hero',
+    'hero-copy',
+    'about-copy',
+    'hero-images',
+    'beach-pricing',
+    'site-images',
+  ]), []);
+  const sectionDefaults = useMemo(() => ({
+    'tgp-hero': false,
+    'hero-copy': true,
+    'about-copy': true,
+    'hero-images': true,
+    'beach-pricing': true,
+    'site-images': true,
+  }), []);
+  const {
+    collapsedSections,
+    toggleSection,
+    setSectionsState,
+  } = useCollapsibleSections(SETTINGS_SECTION_STORAGE_KEY, sectionDefaults);
 
   const fetchMedia = async () => {
     try {
@@ -74,6 +101,7 @@ export default function SettingsModule(){
     e.preventDefault();
     setSaving(true);
     setError('');
+    setStatus('');
     try {
       const settingsToSave = {
         ...settings,
@@ -89,6 +117,7 @@ export default function SettingsModule(){
       if (data && data.success) {
         invalidateSiteContentCache();
         invalidateBrandingCache();
+        setStatus('Settings saved successfully.');
         fetchSettings();
       } else {
         setError('Failed to save settings');
@@ -98,8 +127,28 @@ export default function SettingsModule(){
       setError('Failed to save settings');
     } finally {
       setSaving(false);
+      setTimeout(() => setStatus(''), 4000);
     }
   };
+
+  const sectionSummaries = useMemo(() => ({
+    'tgp-hero': [
+      settings.tgp_hero_title || 'TGP title missing',
+      `${selectedTgpHeroImages.length} image${selectedTgpHeroImages.length === 1 ? '' : 's'}`,
+    ].join(' • '),
+    'hero-copy': [
+      settings.hero_title || 'Main hero title missing',
+      settings.hero_subtitle ? 'Subtitle added' : 'No subtitle yet',
+    ].join(' • '),
+    'about-copy': settings.about_title || settings.about_description
+      ? `${settings.about_title || 'About copy'} • ${settings.about_description ? 'Description added' : 'Description missing'}`
+      : 'No About copy yet',
+    'hero-images': `${selectedHeroImages.length} main image${selectedHeroImages.length === 1 ? '' : 's'} • ${selectedTgpHeroImages.length} TGP image${selectedTgpHeroImages.length === 1 ? '' : 's'}`,
+    'beach-pricing': settings.beach_price_label || settings.beach_price_note
+      ? `${settings.beach_price_label || 'Beach pricing label set'}${settings.beach_price_note ? ' • Note added' : ''}`
+      : 'No override configured',
+    'site-images': 'Brand assets stay fixed here for consistency',
+  }), [selectedHeroImages.length, selectedTgpHeroImages.length, settings]);
 
   return (
     <div>
@@ -112,13 +161,37 @@ export default function SettingsModule(){
           <div className="animate-spin h-10 w-10 border-4 border-purple-500 border-t-transparent rounded-full" />
         </div>
       ) : (
-        <form onSubmit={handleSave} className="bg-gray-800 rounded-xl p-6 border border-purple-500/30 max-w-3xl">
+        <form onSubmit={handleSave} className="space-y-5 max-w-3xl pb-4">
           {error && <div className="mb-4 p-3 bg-red-600/10 border border-red-600 text-red-400 rounded">{error}</div>}
           <div className="mb-6 p-3 bg-blue-500/10 border border-blue-500/30 text-blue-100 rounded text-sm">
             Business contact info, social links, policies, and lessons are now managed under <strong>Site Content</strong>.
           </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setSectionsState(sectionIds, false)}
+              className="rounded bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600"
+            >
+              Expand All
+            </button>
+            <button
+              type="button"
+              onClick={() => setSectionsState(sectionIds, true)}
+              className="rounded bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600"
+            >
+              Collapse All
+            </button>
+          </div>
           
-          <div className="mt-10 pt-6 border-t border-gray-700">
+          <AdminCollapsibleSection
+            id="settings-tgp-hero"
+            title="The Gathering Place Hero"
+            description="Configure the hero shown on /thegatheringplace."
+            summary={sectionSummaries['tgp-hero']}
+            isCollapsed={Boolean(collapsedSections['tgp-hero'])}
+            onToggle={() => toggleSection('tgp-hero')}
+          >
+          <div className="mt-0 pt-0 border-t-0">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold">The Gathering Place Hero</h3>
               <span className="text-xs text-gray-400 uppercase tracking-wide">TGP Route</span>
@@ -237,8 +310,17 @@ export default function SettingsModule(){
               </div>
             </div>
           </div>
+          </AdminCollapsibleSection>
 
-          <div className="mt-6 pt-6 border-t border-gray-700">
+          <AdminCollapsibleSection
+            id="settings-hero-copy"
+            title="Hero Section"
+            description="Main homepage hero title and subtitle."
+            summary={sectionSummaries['hero-copy']}
+            isCollapsed={Boolean(collapsedSections['hero-copy'])}
+            onToggle={() => toggleSection('hero-copy')}
+          >
+          <div className="mt-0 pt-0 border-t-0">
             <h3 className="text-lg font-bold mb-4">Hero Section</h3>
             <div className="grid grid-cols-1 gap-4">
               <div>
@@ -251,8 +333,17 @@ export default function SettingsModule(){
               </div>
             </div>
           </div>
+          </AdminCollapsibleSection>
 
-          <div className="mt-6 pt-6 border-t border-gray-700">
+          <AdminCollapsibleSection
+            id="settings-about-copy"
+            title="About Section"
+            description="Public About page title and description."
+            summary={sectionSummaries['about-copy']}
+            isCollapsed={Boolean(collapsedSections['about-copy'])}
+            onToggle={() => toggleSection('about-copy')}
+          >
+          <div className="mt-0 pt-0 border-t-0">
             <h3 className="text-lg font-bold mb-4">About Section</h3>
             <div className="grid grid-cols-1 gap-4">
               <div>
@@ -266,8 +357,17 @@ export default function SettingsModule(){
               </div>
             </div>
           </div>
+          </AdminCollapsibleSection>
 
-          <div className="mt-6 pt-6 border-t border-gray-700">
+          <AdminCollapsibleSection
+            id="settings-hero-images"
+            title="Hero Background Images"
+            description="Choose the rotating hero image sets for the main site and TGP."
+            summary={sectionSummaries['hero-images']}
+            isCollapsed={Boolean(collapsedSections['hero-images'])}
+            onToggle={() => toggleSection('hero-images')}
+          >
+          <div className="mt-0 pt-0 border-t-0">
             <h3 className="text-lg font-bold mb-4">Hero Background Images</h3>
             <p className="text-sm text-gray-400 mb-4">Select images from the Hero category in Media Manager to use as hero backgrounds</p>
             
@@ -356,8 +456,17 @@ export default function SettingsModule(){
               </div>
             </div>
           </div>
+          </AdminCollapsibleSection>
 
-          <div className="mt-6 pt-6 border-t border-gray-700">
+          <AdminCollapsibleSection
+            id="settings-beach-pricing"
+            title="Beach Series Pricing"
+            description="Overrides the public price badge for Beach Bands shows."
+            summary={sectionSummaries['beach-pricing']}
+            isCollapsed={Boolean(collapsedSections['beach-pricing'])}
+            onToggle={() => toggleSection('beach-pricing')}
+          >
+          <div className="mt-0 pt-0 border-t-0">
             <h3 className="text-lg font-bold mb-3">Beach Series Pricing</h3>
             <p className="text-sm text-gray-400 mb-4">
               This overrides the Beach Bands pricing badge across the public site. Leave blank to fall back to each event&apos;s own price.
@@ -386,18 +495,32 @@ export default function SettingsModule(){
               </div>
             </div>
           </div>
+          </AdminCollapsibleSection>
 
-          <div className="mt-6 pt-6 border-t border-gray-700">
+          <AdminCollapsibleSection
+            id="settings-site-images"
+            title="Site Images"
+            description="Reference info for brand and default site artwork."
+            summary={sectionSummaries['site-images']}
+            isCollapsed={Boolean(collapsedSections['site-images'])}
+            onToggle={() => toggleSection('site-images')}
+          >
+          <div className="mt-0 pt-0 border-t-0">
             <h3 className="text-lg font-bold mb-4">Site Images</h3>
             <p className="text-sm text-gray-400">
               Brand logos and default icons are now hardcoded for performance consistency. Hero and gallery
               uploads continue to use the Media Manager above.
             </p>
           </div>
+          </AdminCollapsibleSection>
 
-          <div className="mt-6 flex justify-end">
-            <button type="submit" disabled={saving} className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded">{saving ? 'Saving...' : 'Save Settings'}</button>
-          </div>
+          <AdminStickyActionBar
+            primaryLabel="Save Settings"
+            isSaving={saving}
+            primaryDisabled={saving}
+            message={error || status || 'Save stays visible while you move between sections.'}
+            tone={error ? 'danger' : status ? 'success' : 'muted'}
+          />
         </form>
       )}
     </div>

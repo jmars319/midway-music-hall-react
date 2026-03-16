@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Waves, Calendar, Users, Phone, Mail } from 'lucide-react';
 import EventSeatingModal from './EventSeatingModal';
 import useSiteContent from '../hooks/useSiteContent';
-import { eventHasSeating, formatDoorsLabel, formatEventPriceDisplay, formatEventStartTime, isRecurringEvent } from '../utils/eventFormat';
+import { eventHasSeating, formatDoorsLabel, formatEventPriceDisplay, formatEventRunSummary, formatEventStartTime, getEventAnchorKey, isMultiDayEvent, isRecurringEvent } from '../utils/eventFormat';
 import { formatPhoneHref, CONTACT_LINK_CLASSES } from '../utils/contactLinks';
 
 const resolveDateValue = (event = {}) => event.start_datetime || event.event_date || event.date || null;
@@ -112,8 +112,9 @@ export default function BeachSeriesShowcase({ events = [] }) {
             const doorLabel = formatDoorsLabel(event);
             const priceLabel = priceLabelSetting || formatEventPriceDisplay(event);
             const startTimeLabel = formatEventStartTime(event);
+            const multiDaySummary = isMultiDayEvent(event) ? formatEventRunSummary(event, 2) : null;
             return (
-              <article key={event.id} className="bg-gray-950/80 rounded-2xl border border-cyan-500/30 p-5">
+              <article key={getEventAnchorKey(event) || event.id} className="bg-gray-950/80 rounded-2xl border border-cyan-500/30 p-5">
                 <p className="text-xs uppercase tracking-widest text-cyan-200 mb-2">Beach Music</p>
                 <h3 className="text-2xl font-semibold text-white">{event.artist_name || event.title}</h3>
                 <p className="text-gray-300 mt-1">{event.description || event.notes || 'Classic Carolina beach music vibes.'}</p>
@@ -121,6 +122,11 @@ export default function BeachSeriesShowcase({ events = [] }) {
                   <Calendar className="h-4 w-4 text-cyan-200" aria-hidden="true" />
                   <span>{formatDate(resolveDateValue(event))} · {event.venue_code || 'MMH'}</span>
                 </div>
+                {multiDaySummary && (
+                  <div className="mt-2 text-xs text-cyan-100">
+                    Multi-day run - {multiDaySummary}
+                  </div>
+                )}
                 {(priceLabel || doorLabel || startTimeLabel) && (
                   <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold text-cyan-100">
                     {priceLabel && (

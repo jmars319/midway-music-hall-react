@@ -54,6 +54,15 @@ const buildDateFromParts = (dateStr, timeToken) => {
   return Number.isNaN(fallback.getTime()) ? null : fallback;
 };
 
+const normalizeEventOccurrences = (event = {}) => {
+  const occurrences = Array.isArray(event?.occurrences) ? [...event.occurrences] : [];
+  return occurrences.sort((left, right) => {
+    const leftStart = left?.start_datetime || `${left?.occurrence_date || left?.event_date || ''}T${left?.start_time || left?.event_time || DEFAULT_EVENT_TIME}`;
+    const rightStart = right?.start_datetime || `${right?.occurrence_date || right?.event_date || ''}T${right?.start_time || right?.event_time || DEFAULT_EVENT_TIME}`;
+    return String(leftStart).localeCompare(String(rightStart));
+  });
+};
+
 export const getEventStartDate = (event = {}) => {
   if (!event) return null;
   if (event.start_datetime) {
@@ -95,6 +104,70 @@ export const getEventEndDate = (event = {}, fallbackHours = 4) => {
   if (!start) return null;
   const hours = Math.max(1, fallbackHours);
   return new Date(start.getTime() + hours * 60 * 60 * 1000);
+};
+
+export const getEventOccurrences = (event = {}) => normalizeEventOccurrences(event);
+
+export const isMultiDayEvent = (event = {}) => (
+  Number(event?.is_multi_day) === 1
+  || Number(event?.occurrence_count) > 1
+  || normalizeEventOccurrences(event).length > 1
+);
+
+export const getEventAnchorKey = (event = {}) => {
+  const raw = event?.occurrence_key || event?.id || event?.slug || '';
+  return String(raw).trim().replace(/[^a-zA-Z0-9_-]+/g, '-');
+};
+
+export const getEventAnchorId = (event = {}) => {
+  const key = getEventAnchorKey(event);
+  return key ? `event-${key}` : '';
+};
+
+export const formatEventOccurrenceLabel = (occurrence = {}, fallbackEvent = {}) => {
+  const start = getEventStartDate({
+    ...fallbackEvent,
+    ...occurrence,
+    start_datetime: occurrence?.start_datetime || fallbackEvent?.start_datetime,
+    event_date: occurrence?.event_date || occurrence?.occurrence_date || fallbackEvent?.event_date,
+    event_time: occurrence?.event_time || occurrence?.start_time || fallbackEvent?.event_time,
+  });
+  if (!start) return 'Date & time TBA';
+  return `${dateFormatter.format(start)} • ${timeFormatter.format(start)}`;
+};
+
+export const formatEventRunSummary = (event = {}, limit = 3) => {
+  const occurrences = normalizeEventOccurrences(event);
+  if (occurrences.length <= 1) return null;
+  const labels = occurrences
+    .slice(0, limit)
+    .map((occurrence) => formatEventOccurrenceLabel(occurrence, event))
+    .filter(Boolean);
+  if (!labels.length) return null;
+  const suffix = occurrences.length > labels.length ? ` +${occurrences.length - labels.length} more` : '';
+  return `${labels.join(' | ')}${suffix}`;
+};
+
+export const formatAdditionalOccurrencesSummary = (event = {}, limit = 2) => {
+  const occurrences = normalizeEventOccurrences(event);
+  if (occurrences.length <= 1) return null;
+  const filtered = occurrences.filter((occurrence) => {
+    if (event?.occurrence_id && occurrence?.id) {
+      return Number(occurrence.id) !== Number(event.occurrence_id);
+    }
+    if (event?.start_datetime && occurrence?.start_datetime) {
+      return occurrence.start_datetime !== event.start_datetime;
+    }
+    return true;
+  });
+  if (!filtered.length) return null;
+  const labels = filtered
+    .slice(0, limit)
+    .map((occurrence) => formatEventOccurrenceLabel(occurrence, event))
+    .filter(Boolean);
+  if (!labels.length) return null;
+  const suffix = filtered.length > labels.length ? ` +${filtered.length - labels.length} more` : '';
+  return `${labels.join(' | ')}${suffix}`;
 };
 
 export const formatEventDateTimeLabel = (event = {}) => {

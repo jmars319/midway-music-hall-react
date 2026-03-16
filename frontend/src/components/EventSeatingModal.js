@@ -9,7 +9,7 @@ import { CONTACT_LINK_CLASSES, formatPhoneHref } from '../utils/contactLinks';
 import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
 import { loadPayPalHostedButtonsSdk } from '../utils/paypalHostedButtons';
-import { formatEventPriceDisplay } from '../utils/eventFormat';
+import { formatEventDateTimeLabel, formatEventPriceDisplay, formatEventRunSummary, isMultiDayEvent } from '../utils/eventFormat';
 import { buildEventPricingLegend, resolveSeatPricingTier } from '../utils/eventPricing';
 import ReservationBanner from './ReservationBanner';
 
@@ -100,6 +100,9 @@ export default function EventSeatingModal({ event, onClose }) {
   );
   const legendItems = useMemo(() => buildSeatLegendItems(), []);
   const priceSummaryLabel = useMemo(() => formatEventPriceDisplay(event), [event]);
+  const eventDateLabel = useMemo(() => formatEventDateTimeLabel(event), [event]);
+  const multiDay = useMemo(() => isMultiDayEvent(event), [event]);
+  const multiDayRunSummary = useMemo(() => formatEventRunSummary(event, 6), [event]);
   const clearTransientErrorTimer = useCallback(() => {
     if (errorResetTimer.current) {
       clearTimeout(errorResetTimer.current);
@@ -918,6 +921,7 @@ export default function EventSeatingModal({ event, onClose }) {
                         }
                         interactive
                         labelFormatter={(rawLabel) => formatSeatLabel(rawLabel, { mode: 'seat' })}
+                        textRotation={-(row.rotation || 0)}
                       />
                     </div>
                   </div>
@@ -1113,13 +1117,18 @@ export default function EventSeatingModal({ event, onClose }) {
                   {event.artist_name || event.title}
                 </h2>
                 <p className="text-gray-400 mt-1">
-                  {new Date(event.start_datetime || event.event_date).toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  })}
+                  {eventDateLabel}
                 </p>
+                {multiDay && multiDayRunSummary && (
+                  <p className="text-sm text-amber-200 mt-2">
+                    Multi-day run: {multiDayRunSummary}
+                  </p>
+                )}
+                {multiDay && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    One seat selection covers the full run.
+                  </p>
+                )}
                 {priceSummaryLabel && (
                   <p className="text-sm text-amber-200 mt-2">
                     {priceSummaryLabel}

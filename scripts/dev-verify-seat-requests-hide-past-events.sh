@@ -192,6 +192,24 @@ print((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)
 PY
 )"
 
+date_from_start() {
+  python3 - "$1" <<'PY'
+import datetime
+import sys
+value = datetime.datetime.strptime(sys.argv[1], '%Y-%m-%d %H:%M:%S')
+print(value.strftime('%Y-%m-%d'))
+PY
+}
+
+time_from_start() {
+  python3 - "$1" <<'PY'
+import datetime
+import sys
+value = datetime.datetime.strptime(sys.argv[1], '%Y-%m-%d %H:%M:%S')
+print(value.strftime('%H:%M:%S'))
+PY
+}
+
 door_from_start() {
   python3 - "$1" <<'PY'
 import datetime
@@ -204,14 +222,19 @@ PY
 create_event() {
   local label="$1"
   local start_datetime="$2"
+  local event_date
+  local event_time
   local door_time
+  event_date="$(date_from_start "$start_datetime")"
+  event_time="$(time_from_start "$start_datetime")"
   door_time="$(door_from_start "$start_datetime")"
   local payload
   payload="$(cat <<JSON
 {
   "artist_name": "${label}",
   "title": "${label}",
-  "start_datetime": "${start_datetime}",
+  "event_date": "${event_date}",
+  "event_time": "${event_time}",
   "door_time": "${door_time}",
   "timezone": "America/New_York",
   "status": "published",
@@ -240,8 +263,63 @@ JSON
   printf '%s\n' "$event_id"
 }
 
+create_multi_day_event() {
+  local label="$1"
+  local first_start="$2"
+  local final_start="$3"
+  local first_date
+  local first_time
+  local final_date
+  local final_time
+  local door_time
+  first_date="$(date_from_start "$first_start")"
+  first_time="$(time_from_start "$first_start")"
+  final_date="$(date_from_start "$final_start")"
+  final_time="$(time_from_start "$final_start")"
+  door_time="$(door_from_start "$first_start")"
+  local payload
+  payload="$(cat <<JSON
+{
+  "artist_name": "${label}",
+  "title": "${label}",
+  "event_date": "${first_date}",
+  "event_time": "${first_time}",
+  "door_time": "${door_time}",
+  "timezone": "America/New_York",
+  "status": "published",
+  "visibility": "public",
+  "ticket_type": "reserved_seating",
+  "layout_id": ${created_layout_id},
+  "seating_enabled": true,
+  "multi_day_enabled": true,
+  "occurrences": [
+    { "event_date": "${first_date}", "event_time": "${first_time}" },
+    { "event_date": "${final_date}", "event_time": "${final_time}" }
+  ]
+}
+JSON
+)"
+  local response
+  response="$(admin_post_json "POST" "/events" "$payload")"
+  local success
+  success="$(json_field "$response" success)"
+  if [ "$success" != "true" ]; then
+    log_error "failed to create ${label} multi-day event: $response"
+    exit 1
+  fi
+  local event_id
+  event_id="$(json_field "$response" id)"
+  if [ "$event_id" = "null" ] || [ -z "$event_id" ]; then
+    log_error "${label} multi-day event missing id: $response"
+    exit 1
+  fi
+  created_event_ids+=("$event_id")
+  printf '%s\n' "$event_id"
+}
+
 past_event_id="$(create_event "Past Event Verify $(date -u +%s)" "$past_start")"
 future_event_id="$(create_event "Future Event Verify $(date -u +%s)" "$future_start")"
+active_multi_day_event_id="$(create_multi_day_event "Active Multi-Day Verify $(date -u +%s)" "$past_start" "$future_start")"
 
 create_request() {
   local event_id="$1"
@@ -280,6 +358,7 @@ JSON
 
 past_request_id="$(create_request "$past_event_id" "VerifyPast-A-1")"
 future_request_id="$(create_request "$future_event_id" "VerifyFuture-A-1")"
+active_multi_day_request_id="$(create_request "$active_multi_day_event_id" "VerifyRun-A-1")"
 
 contains_id() {
   local json="$1"
@@ -295,16 +374,65 @@ print('1' if target in ids else '0')
 PY
 }
 
-log_step "[seat-requests-hide-past] verifying default list excludes past events"
+request_field() {
+  local json="$1"
+  local target_id="$2"
+  local field="$3"
+  JSON_INPUT="$json" TARGET_ID="$target_id" python3 - "$field" <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ.get('JSON_INPUT', '{}'))
+target = int(os.environ.get('TARGET_ID', '0'))
+for row in payload.get('requests', []):
+    if int(row.get('id', 0) or 0) != target:
+        continue
+    value = row
+    for part in sys.argv[1].split('.'):
+        if isinstance(value, list):
+            value = value[int(part)]
+        elif isinstance(value, dict):
+            value = value.get(part)
+        else:
+            value = None
+            break
+    if value is None:
+        print('null')
+    elif isinstance(value, bool):
+        print('true' if value else 'false')
+    else:
+        print(value)
+    raise SystemExit(0)
+print('null')
+PY
+}
+
+log_step "[seat-requests-hide-past] verifying default list keeps active multi-day runs and excludes finished single-day events"
 default_list="$(admin_get_json "/seat-requests?status=all")"
 future_in_default="$(contains_id "$default_list" "$future_request_id")"
 past_in_default="$(contains_id "$default_list" "$past_request_id")"
+active_multi_day_in_default="$(contains_id "$default_list" "$active_multi_day_request_id")"
+active_multi_day_flag="$(request_field "$default_list" "$active_multi_day_request_id" "event_is_multi_day")"
+active_multi_day_summary="$(request_field "$default_list" "$active_multi_day_request_id" "event_run_summary")"
 if [ "$future_in_default" != "1" ]; then
   log_error "future request ${future_request_id} missing from default seat requests list"
   exit 1
 fi
 if [ "$past_in_default" != "0" ]; then
   log_error "past request ${past_request_id} unexpectedly present in default seat requests list"
+  exit 1
+fi
+if [ "$active_multi_day_in_default" != "1" ]; then
+  log_error "active multi-day request ${active_multi_day_request_id} missing from default seat requests list"
+  exit 1
+fi
+if [ "$active_multi_day_flag" != "1" ]; then
+  log_error "active multi-day request ${active_multi_day_request_id} did not return event_is_multi_day=1"
+  exit 1
+fi
+if [ "$active_multi_day_summary" = "null" ] || [ -z "$active_multi_day_summary" ]; then
+  log_error "active multi-day request ${active_multi_day_request_id} missing event_run_summary"
   exit 1
 fi
 
@@ -316,4 +444,4 @@ if [ "$past_in_include" != "1" ]; then
   exit 1
 fi
 
-log_success "[seat-requests-hide-past] default hide-past behavior verified"
+log_success "[seat-requests-hide-past] single-day past filtering and active multi-day run-end filtering verified"

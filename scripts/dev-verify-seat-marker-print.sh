@@ -45,14 +45,28 @@ const customLabelRequest = {
   ]),
 };
 
+const multiDayRequest = {
+  event_id: 779,
+  customer_name: 'Multi-Day Guest',
+  event_title: 'Festival Weekend',
+  event_is_multi_day: 1,
+  event_occurrence_count: 3,
+  event_run_summary: 'Fri, Apr 12 7:00 PM ET | Sat, Apr 13 8:00 PM ET +1 more',
+  selected_seats: JSON.stringify(['Orch-20-1']),
+  seat_map_snapshot: JSON.stringify([
+    { element_type: 'table', section_name: 'Orch', row_label: '20', total_seats: 1 }
+  ]),
+};
+
 const tableMarkers = mod.buildMarkersForRequest(sampleRequest, { mode: 'table' });
 const seatMarkers = mod.buildMarkersForRequest(sampleRequest, { mode: 'seat' });
 const customMarkers = mod.buildMarkersForRequest(customLabelRequest, { mode: 'seat' });
+const multiDayMarkers = mod.buildMarkersForRequest(multiDayRequest, { mode: 'seat' });
 const additionalMarkers = mod.buildMarkersForRequest({
   ...sampleRequest,
   selected_seats: JSON.stringify(['Orch-19-3', 'Orch-19-4']),
 }, { mode: 'seat' });
-const allMarkers = [...tableMarkers, ...seatMarkers, ...customMarkers, ...additionalMarkers];
+const allMarkers = [...tableMarkers, ...seatMarkers, ...customMarkers, ...multiDayMarkers, ...additionalMarkers];
 const html = mod.buildSeatMarkerPrintHtml(allMarkers, { title: 'Print Seat Markers' });
 
 const requiredTokens = [
@@ -70,6 +84,8 @@ const requiredTokens = [
   'Seat 19-E',
   'Test Guest',
   'Beach Band Night',
+  'Festival Weekend',
+  'Multi-day run - Fri, Apr 12 7:00 PM ET | Sat, Apr 13 8:00 PM ET +1 more',
   'dashed',
 ];
 
@@ -120,6 +136,14 @@ if ! rg -n "disabled=\\{confirmedVisibleRequests\\.length === 0\\}" "$ROOT_DIR/f
 fi
 if ! rg -n "No confirmed reservations to print yet\\." "$ROOT_DIR/frontend/src/admin/SeatRequestsModule.js" >/dev/null; then
   log_error "[seat-marker-print] missing user-facing explanation for disabled Print Seat Markers action"
+  exit 1
+fi
+if ! rg -n "eventRunLabelForRequest|eventRunTextForRequest|resolveEventRunStartValue" "$ROOT_DIR/frontend/src/admin/SeatRequestsModule.js" >/dev/null; then
+  log_error "[seat-marker-print] SeatRequestsModule is not using shared run-summary helpers for multi-day print output"
+  exit 1
+fi
+if ! rg -n "Event run" "$ROOT_DIR/frontend/src/admin/SeatRequestsModule.js" >/dev/null; then
+  log_error "[seat-marker-print] SeatRequestsModule is missing the multi-day Event run print label"
   exit 1
 fi
 

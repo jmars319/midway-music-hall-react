@@ -1,6 +1,6 @@
 import React from 'react';
 import { Sparkles } from 'lucide-react';
-import { formatEventDateTimeLabel, formatDoorsLabel } from '../utils/eventFormat';
+import { formatEventDateTimeLabel, formatDoorsLabel, formatEventRunSummary, getEventAnchorKey, isMultiDayEvent } from '../utils/eventFormat';
 import { getCategoryBadge } from '../utils/categoryLabels';
 import { hasRenderableImageVariant } from '../utils/imageVariants';
 import ResponsiveImage from './ResponsiveImage';
@@ -38,9 +38,10 @@ export default function FeaturedEvents({ events = [], loading = false }) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {events.map((event) => {
             const hasPoster = hasRenderableImageVariant(event.image_variants);
+            const multiDaySummary = isMultiDayEvent(event) ? formatEventRunSummary(event, 2) : null;
             return (
               <article
-                key={event.id}
+                key={getEventAnchorKey(event) || event.id}
                 className="bg-gray-900 rounded-2xl border border-purple-500/30 shadow-xl overflow-hidden flex flex-col"
               >
               <div className="bg-gray-800 overflow-hidden">
@@ -70,6 +71,11 @@ export default function FeaturedEvents({ events = [], loading = false }) {
                 <p className="text-sm text-purple-300 uppercase tracking-wide mb-2">
                   {formatEventDateTimeLabel(event)}
                 </p>
+                {multiDaySummary && (
+                  <p className="text-xs text-purple-200/90 mb-3">
+                    Multi-day run - {multiDaySummary}
+                  </p>
+                )}
                 {(() => {
                   const badge = getCategoryBadge(event);
                   if (!badge) return null;

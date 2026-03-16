@@ -191,6 +191,24 @@ CREATE TABLE IF NOT EXISTS events (
   CONSTRAINT fk_events_category FOREIGN KEY (category_id) REFERENCES event_categories(id) ON DELETE SET NULL
 );
 
+-- Event occurrences (multi-day schedule metadata attached to one parent event)
+CREATE TABLE IF NOT EXISTS event_occurrences (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  event_id INT NOT NULL,
+  occurrence_date DATE NOT NULL,
+  start_time TIME NOT NULL,
+  start_datetime DATETIME NOT NULL,
+  end_datetime DATETIME DEFAULT NULL,
+  door_datetime DATETIME DEFAULT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_event_occurrence_start (event_id, start_datetime),
+  INDEX idx_event_occurrences_event_start (event_id, start_datetime),
+  INDEX idx_event_occurrences_start (start_datetime),
+  CONSTRAINT fk_event_occurrences_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+);
+
 -- Recurring series metadata (optional public-facing copy for masters)
 CREATE TABLE IF NOT EXISTS event_series_meta (
   event_id INT PRIMARY KEY,

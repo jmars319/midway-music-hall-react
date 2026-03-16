@@ -71,6 +71,8 @@ ADMIN_SESSION_COOKIE_SECURE=true
    1. `database/20250326_payment_settings.sql`
    2. `database/20251212_schema_upgrade.sql`
 
+Important: the full seed dumps do not provision `event_occurrences`. Always run `database/20251212_schema_upgrade.sql` after any seed import before testing or using multi-day events.
+
 Verification queries:
 ```sql
 SELECT COUNT(*) FROM events;

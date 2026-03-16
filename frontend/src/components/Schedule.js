@@ -5,7 +5,18 @@ import EventSeatingModal from './EventSeatingModal';
 import ResponsiveImage from './ResponsiveImage';
 import BrandImage from './BrandImage';
 import { API_BASE } from '../apiConfig';
-import { formatEventDateTimeLabel, formatDoorsLabel, formatEventPriceDisplay, eventHasSeating, getEventStartDate, isRecurringEvent } from '../utils/eventFormat';
+import {
+  eventHasSeating,
+  formatAdditionalOccurrencesSummary,
+  formatDoorsLabel,
+  formatEventDateTimeLabel,
+  formatEventPriceDisplay,
+  getEventAnchorId,
+  getEventAnchorKey,
+  getEventStartDate,
+  isMultiDayEvent,
+  isRecurringEvent,
+} from '../utils/eventFormat';
 import { getCategoryBadge } from '../utils/categoryLabels';
 import { hasRenderableImageVariant } from '../utils/imageVariants';
 
@@ -173,10 +184,15 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                 {pagedEvents.map((event) => {
                   const readableTitle = event.artist_name || event.title || event.name || 'Untitled event';
                   const hasPoster = hasRenderableImageVariant(event.image_variants);
+                  const anchorId = getEventAnchorId(event);
+                  const anchorKey = getEventAnchorKey(event);
+                  const occurrenceCount = Number(event.occurrence_count || event.occurrences?.length || 0);
+                  const additionalOccurrences = formatAdditionalOccurrencesSummary(event);
+                  const multiDay = isMultiDayEvent(event);
                   return (
                   <div
-                    key={event.id || event.slug || event.title}
-                    id={event.id ? `event-${event.id}` : undefined}
+                    key={anchorKey || event.slug || event.title}
+                    id={anchorId || undefined}
                     className="bg-gray-800 rounded-xl border border-gray-700/70 hover:border-purple-400/60 transition p-4 flex flex-col gap-4 min-h-[320px]"
                 >
                   {(!event.start_datetime && !event.event_date) && (
@@ -231,6 +247,17 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                           <Calendar className="h-4 w-4 mr-2 text-purple-300" />
                           {formatEventDateTimeLabel(event)}
                         </div>
+                        {multiDay && (
+                          <div className="flex items-start">
+                            <Calendar className="h-4 w-4 mr-2 mt-0.5 text-amber-300" />
+                            <div>
+                              <div className="text-amber-100">Multi-day run{occurrenceCount > 1 ? ` • ${occurrenceCount} dates` : ''}</div>
+                              {additionalOccurrences && (
+                                <div className="text-xs text-gray-400">Also: {additionalOccurrences}</div>
+                              )}
+                            </div>
+                          </div>
+                        )}
                         {formatDoorsLabel(event) && (
                           <div className="flex items-center">
                             <DoorOpen className="h-4 w-4 mr-2 text-purple-300" />
@@ -261,7 +288,7 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                     {event.id && (
                       <>
                         <a
-                          href={`${API_BASE}/events/${event.id}.ics`}
+                          href={event.ics_url ? `${API_BASE}${event.ics_url}` : `${API_BASE}/events/${event.id}.ics`}
                           className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition"
                           aria-label={`Add ${readableTitle} to calendar`}
                         >
@@ -271,7 +298,7 @@ export default function Schedule({ events = [], loading = false, errorMessage = 
                           type="button"
                           onClick={() => {
                             if (typeof window === 'undefined') return;
-                            const shareUrl = `${window.location.origin}/#event-${event.id}`;
+                            const shareUrl = `${window.location.origin}/#${anchorId || `event-${event.id}`}`;
                             if (navigator.share) {
                               navigator.share({
                                 title: event.artist_name || event.title || 'Midway Music Hall Event',

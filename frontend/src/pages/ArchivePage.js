@@ -5,7 +5,13 @@ import BrandImage from '../components/BrandImage';
 import Footer from '../components/Footer';
 import ResponsiveImage from '../components/ResponsiveImage';
 import { API_BASE } from '../apiConfig';
-import { formatEventDateTimeLabel } from '../utils/eventFormat';
+import {
+  formatAdditionalOccurrencesSummary,
+  formatEventDateTimeLabel,
+  getEventAnchorId,
+  getEventAnchorKey,
+  isMultiDayEvent,
+} from '../utils/eventFormat';
 import { getCategoryBadge } from '../utils/categoryLabels';
 import { hasRenderableImageVariant } from '../utils/imageVariants';
 
@@ -76,7 +82,8 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
 
   const handleShare = (event) => {
     if (typeof window === 'undefined' || !event.id) return;
-    const url = `${window.location.origin}/#event-${event.id}`;
+    const anchorId = getEventAnchorId(event) || `event-${event.id}`;
+    const url = `${window.location.origin}/#${anchorId}`;
     if (navigator.share) {
       navigator.share({ title: event.artist_name || event.title || 'Midway Music Hall Event', url }).catch(() => {});
       return;
@@ -121,9 +128,12 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
                     {monthEvents.map((event) => {
                       const readableTitle = event.artist_name || event.title || 'Midway Music Hall Event';
                       const hasPoster = hasRenderableImageVariant(event.image_variants);
+                      const anchorKey = getEventAnchorKey(event);
+                      const occurrenceCount = Number(event.occurrence_count || event.occurrences?.length || 0);
+                      const additionalOccurrences = formatAdditionalOccurrencesSummary(event);
                       return (
                       <article
-                        key={event.id || `${label}-${event.artist_name}`}
+                        key={anchorKey || `${label}-${event.artist_name}`}
                         className="bg-gray-800 rounded-xl border border-purple-500/20 p-4 flex flex-col md:flex-row gap-4"
                       >
                         <div className="w-full md:w-60 flex-shrink-0">
@@ -152,6 +162,11 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
                             <span className="px-2 py-1 text-xs rounded-full bg-purple-600/20 text-purple-100 border border-purple-500/30">
                               {formatEventDateTimeLabel(event)}
                             </span>
+                            {isMultiDayEvent(event) && (
+                              <span className="px-2 py-1 text-xs rounded-full bg-amber-500/15 text-amber-100 border border-amber-400/30">
+                                Multi-day run{occurrenceCount > 1 ? ` • ${occurrenceCount} dates` : ''}
+                              </span>
+                            )}
                             {event.venue_code && (
                               <span className="px-2 py-1 text-xs rounded-full bg-gray-700 text-gray-200 border border-gray-600">
                                 {event.venue_code}
@@ -173,11 +188,16 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
                           <p className="text-gray-300 text-sm">
                             {event.description || event.notes || 'Live performance at Midway Music Hall.'}
                           </p>
+                          {additionalOccurrences && (
+                            <p className="text-xs text-gray-400">
+                              Also: {additionalOccurrences}
+                            </p>
+                          )}
                           <div className="mt-2 flex flex-wrap gap-2">
                             {event.id && (
                               <>
                                 <a
-                                  href={`${API_BASE}/events/${event.id}.ics`}
+                                  href={event.ics_url ? `${API_BASE}${event.ics_url}` : `${API_BASE}/events/${event.id}.ics`}
                                   className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded"
                                   aria-label={`Add ${readableTitle} to calendar`}
                                 >

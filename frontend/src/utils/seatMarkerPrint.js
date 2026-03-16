@@ -1,4 +1,5 @@
 import { buildSeatLookupMap, describeSeatSelection, formatSeatLabel, isSeatRow } from './seatLabelUtils.js';
+import { buildEventRunDisplayLabel } from './eventRunSummary.js';
 
 const MARKERS_PER_PAGE = 4;
 const seatSortCollator = new Intl.Collator('en-US', { sensitivity: 'base', numeric: true });
@@ -54,7 +55,7 @@ const escapeHtml = (value) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-const formatEventDate = (request = {}) => {
+const formatSingleEventDate = (request = {}) => {
   const dateValue =
     request.start_datetime ||
     (request.event_date
@@ -71,6 +72,10 @@ const formatEventDate = (request = {}) => {
     minute: '2-digit',
   });
 };
+
+const formatEventDate = (request = {}) => buildEventRunDisplayLabel(request, {
+  formatSingleDay: (rawValue) => formatSingleEventDate({ ...request, start_datetime: rawValue }),
+});
 
 const eventNameForRequest = (request = {}) =>
   request.event_display_name || request.event_artist_name || request.event_title || `Event ${request.event_id || ''}`.trim();

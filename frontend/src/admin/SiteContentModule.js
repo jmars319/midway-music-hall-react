@@ -1,6 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { API_BASE } from '../apiConfig';
 import { invalidateSiteContentCache } from '../hooks/useSiteContent';
+import AdminCollapsibleSection from './AdminCollapsibleSection';
+import AdminStickyActionBar from './AdminStickyActionBar';
+import useCollapsibleSections from './useCollapsibleSections';
+
+const SITE_CONTENT_SECTION_STORAGE_KEY = 'mmh_site_content_editor_sections';
 
 const emptyContact = () => ({
   name: '',
@@ -112,6 +117,10 @@ const parseAnnouncementPopupSetting = (value) => {
   }
 };
 
+const countFilledItems = (items = [], fields = []) => items.filter((item) => (
+  fields.some((field) => String(item?.[field] || '').trim() !== '')
+)).length;
+
 export default function SiteContentModule() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -139,6 +148,31 @@ export default function SiteContentModule() {
   const [announcement, setAnnouncement] = useState(emptyAnnouncement());
   const [reservationBanner, setReservationBanner] = useState(emptyReservationBanner());
   const [announcementPopup, setAnnouncementPopup] = useState(emptyAnnouncementPopup());
+  const sectionIds = useMemo(() => ([
+    'venue-basics',
+    'announcement-banner',
+    'reservation-banner',
+    'announcement-popup',
+    'contacts',
+    'policies',
+    'social-links',
+    'lessons',
+  ]), []);
+  const sectionDefaults = useMemo(() => ({
+    'venue-basics': false,
+    'announcement-banner': true,
+    'reservation-banner': true,
+    'announcement-popup': true,
+    contacts: true,
+    policies: true,
+    'social-links': true,
+    lessons: true,
+  }), []);
+  const {
+    collapsedSections,
+    toggleSection,
+    setSectionsState,
+  } = useCollapsibleSections(SITE_CONTENT_SECTION_STORAGE_KEY, sectionDefaults);
 
   const loadSettings = async () => {
     setLoading(true);
@@ -226,6 +260,37 @@ export default function SiteContentModule() {
   const updateAnnouncementPopupField = (field, value) => {
     setAnnouncementPopup((prev) => ({ ...prev, [field]: value }));
   };
+
+  const sectionSummaries = useMemo(() => {
+    const publicLinksCount = ['facebook_url', 'instagram_url', 'twitter_url', 'google_review_url']
+      .filter((field) => String(form[field] || '').trim() !== '')
+      .length;
+    const contactCount = countFilledItems(contacts, ['name', 'phone', 'email']);
+    const lessonCount = countFilledItems(lessons, ['title', 'schedule', 'price']);
+    return {
+      'venue-basics': [
+        form.business_name || 'Venue name missing',
+        form.business_phone || form.business_email || 'No public contact set',
+      ].filter(Boolean).join(' • '),
+      'announcement-banner': announcement.enabled
+        ? `${announcement.severity} banner • ${announcement.message || 'Message ready'}`
+        : 'Disabled',
+      'reservation-banner': reservationBanner.enabled
+        ? `${reservationBanner.severity} banner • ${reservationBanner.message || 'Message ready'}`
+        : 'Disabled',
+      'announcement-popup': announcementPopup.enabled
+        ? `${announcementPopup.severity} popup • ${announcementPopup.allow_during_seat_selection ? 'Shows during seat selection' : 'Hidden during seat selection'}`
+        : 'Disabled',
+      contacts: `${contactCount} contact card${contactCount === 1 ? '' : 's'} configured`,
+      policies: [
+        form.policy_family_text ? 'Family reminder' : null,
+        form.policy_refund_text ? 'Refund policy' : null,
+        form.policy_additional_text ? 'Additional notes' : null,
+      ].filter(Boolean).join(' • ') || 'No policy copy added',
+      'social-links': `${publicLinksCount} public link${publicLinksCount === 1 ? '' : 's'} set`,
+      lessons: `${lessonCount} lesson block${lessonCount === 1 ? '' : 's'} configured`,
+    };
+  }, [announcement, announcementPopup, contacts, form, lessons, reservationBanner]);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -368,9 +433,33 @@ export default function SiteContentModule() {
           <div className="animate-spin h-10 w-10 border-4 border-purple-500 border-t-transparent rounded-full" />
         </div>
       ) : (
-        <form onSubmit={handleSave} className="space-y-8">
-          <section className="bg-gray-800 rounded-xl border border-purple-500/30 p-6 space-y-4">
-            <div>
+        <form onSubmit={handleSave} className="space-y-5 pb-4">
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setSectionsState(sectionIds, false)}
+              className="rounded bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600"
+            >
+              Expand All
+            </button>
+            <button
+              type="button"
+              onClick={() => setSectionsState(sectionIds, true)}
+              className="rounded bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600"
+            >
+              Collapse All
+            </button>
+          </div>
+
+          <AdminCollapsibleSection
+            id="site-content-venue-basics"
+            title="Venue Basics & Map"
+            description="Shown in the footer, About section, and map block."
+            summary={sectionSummaries['venue-basics']}
+            isCollapsed={Boolean(collapsedSections['venue-basics'])}
+            onToggle={() => toggleSection('venue-basics')}
+          >
+            <div className="sr-only">
               <h2 className="text-xl font-semibold text-white">Venue Basics & Map</h2>
               <p className="text-sm text-gray-400">Shown in the footer, About section, and map block.</p>
             </div>
@@ -412,10 +501,17 @@ export default function SiteContentModule() {
                 <p className="text-xs text-gray-400 mt-1">Displayed in the footer and “First Time Here” section.</p>
               </div>
             </div>
-          </section>
+          </AdminCollapsibleSection>
 
-          <section className="bg-gray-800 rounded-xl border border-purple-500/30 p-6 space-y-4">
-            <div>
+          <AdminCollapsibleSection
+            id="site-content-announcement-banner"
+            title="Announcement Banner"
+            description="Optional banner for weather alerts, ops updates, or major announcements."
+            summary={sectionSummaries['announcement-banner']}
+            isCollapsed={Boolean(collapsedSections['announcement-banner'])}
+            onToggle={() => toggleSection('announcement-banner')}
+          >
+            <div className="sr-only">
               <h2 className="text-xl font-semibold text-white">Announcement banner</h2>
               <p className="text-sm text-gray-400">Optional banner for weather alerts, ops updates, or major announcements.</p>
             </div>
@@ -479,10 +575,17 @@ export default function SiteContentModule() {
                 />
               </div>
             </div>
-          </section>
+          </AdminCollapsibleSection>
 
-          <section className="bg-gray-800 rounded-xl border border-purple-500/30 p-6 space-y-4">
-            <div>
+          <AdminCollapsibleSection
+            id="site-content-reservation-banner"
+            title="Reservation Flow Banner"
+            description="Shown only inside the seating request modal."
+            summary={sectionSummaries['reservation-banner']}
+            isCollapsed={Boolean(collapsedSections['reservation-banner'])}
+            onToggle={() => toggleSection('reservation-banner')}
+          >
+            <div className="sr-only">
               <h2 className="text-xl font-semibold text-white">Reservation flow banner</h2>
               <p className="text-sm text-gray-400">Shown only inside the seating request modal.</p>
             </div>
@@ -546,10 +649,17 @@ export default function SiteContentModule() {
                 />
               </div>
             </div>
-          </section>
+          </AdminCollapsibleSection>
 
-          <section className="bg-gray-800 rounded-xl border border-purple-500/30 p-6 space-y-4">
-            <div>
+          <AdminCollapsibleSection
+            id="site-content-announcement-popup"
+            title="Announcement Popup"
+            description="Dismissible popup announcement with a 24-hour cooldown."
+            summary={sectionSummaries['announcement-popup']}
+            isCollapsed={Boolean(collapsedSections['announcement-popup'])}
+            onToggle={() => toggleSection('announcement-popup')}
+          >
+            <div className="sr-only">
               <h2 className="text-xl font-semibold text-white">Announcement popup</h2>
               <p className="text-sm text-gray-400">Dismissible popup announcement with a 24-hour cooldown.</p>
             </div>
@@ -613,10 +723,17 @@ export default function SiteContentModule() {
                 />
               </div>
             </div>
-          </section>
+          </AdminCollapsibleSection>
 
-          <section className="bg-gray-800 rounded-xl border border-purple-500/30 p-6 space-y-4">
-            <div>
+          <AdminCollapsibleSection
+            id="site-content-contacts"
+            title="Contact Cards"
+            description="Shown on the About page and footer. List each person guests may reach out to."
+            summary={sectionSummaries.contacts}
+            isCollapsed={Boolean(collapsedSections.contacts)}
+            onToggle={() => toggleSection('contacts')}
+          >
+            <div className="sr-only">
               <h2 className="text-xl font-semibold text-white">Contact cards</h2>
               <p className="text-sm text-gray-400">Shown on the About page and footer. List each person guests may reach out to.</p>
             </div>
@@ -659,10 +776,17 @@ export default function SiteContentModule() {
             <button type="button" onClick={addContact} className="px-4 py-2 rounded bg-gray-700 text-white text-sm">
               + Add another contact
             </button>
-          </section>
+          </AdminCollapsibleSection>
 
-          <section className="bg-gray-800 rounded-xl border border-purple-500/30 p-6 space-y-4">
-            <div>
+          <AdminCollapsibleSection
+            id="site-content-policies"
+            title="Policies"
+            description="Displayed in the About and First Time Here sections."
+            summary={sectionSummaries.policies}
+            isCollapsed={Boolean(collapsedSections.policies)}
+            onToggle={() => toggleSection('policies')}
+          >
+            <div className="sr-only">
               <h2 className="text-xl font-semibold text-white">Policies</h2>
               <p className="text-sm text-gray-400">Displayed in the About and First Time Here sections.</p>
             </div>
@@ -680,10 +804,17 @@ export default function SiteContentModule() {
               <label className="block text-sm text-gray-300 mb-1">Additional notes</label>
               <textarea name="policy_additional_text" value={form.policy_additional_text} onChange={handleFieldChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" rows="3" placeholder="Optional reminders or parking notes." />
             </div>
-          </section>
+          </AdminCollapsibleSection>
 
-          <section className="bg-gray-800 rounded-xl border border-purple-500/30 p-6 space-y-4">
-            <div>
+          <AdminCollapsibleSection
+            id="site-content-social-links"
+            title="Social & Footer Links"
+            description="Used in the footer buttons so guests can follow the venue."
+            summary={sectionSummaries['social-links']}
+            isCollapsed={Boolean(collapsedSections['social-links'])}
+            onToggle={() => toggleSection('social-links')}
+          >
+            <div className="sr-only">
               <h2 className="text-xl font-semibold text-white">Social & Footer Links</h2>
               <p className="text-sm text-gray-400">Used in the footer buttons so guests can follow the venue.</p>
             </div>
@@ -730,10 +861,17 @@ export default function SiteContentModule() {
                 <p className="text-xs text-gray-400 mt-1">Guests see this link beneath the map and in the footer when provided.</p>
               </div>
             </div>
-          </section>
+          </AdminCollapsibleSection>
 
-          <section className="bg-gray-800 rounded-xl border border-purple-500/30 p-6 space-y-4">
-            <div>
+          <AdminCollapsibleSection
+            id="site-content-lessons"
+            title="Weekly Lessons & Classes"
+            description="Shown in the Lessons section. Leave blank if not offered."
+            summary={sectionSummaries.lessons}
+            isCollapsed={Boolean(collapsedSections.lessons)}
+            onToggle={() => toggleSection('lessons')}
+          >
+            <div className="sr-only">
               <h2 className="text-xl font-semibold text-white">Weekly lessons & classes</h2>
               <p className="text-sm text-gray-400">Shown in the Lessons section. Leave blank if not offered.</p>
             </div>
@@ -780,17 +918,15 @@ export default function SiteContentModule() {
             <button type="button" onClick={addLesson} className="px-4 py-2 rounded bg-gray-700 text-white text-sm">
               + Add another lesson
             </button>
-          </section>
+          </AdminCollapsibleSection>
 
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-6 py-3 rounded bg-purple-600 hover:bg-purple-700 text-white font-semibold disabled:opacity-60"
-            >
-              {saving ? 'Saving…' : 'Save Site Content'}
-            </button>
-          </div>
+          <AdminStickyActionBar
+            primaryLabel="Save Site Content"
+            isSaving={saving}
+            primaryDisabled={saving}
+            message={error || status || 'Save stays visible while you move between sections.'}
+            tone={error ? 'danger' : status ? 'success' : 'muted'}
+          />
         </form>
       )}
     </div>

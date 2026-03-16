@@ -6,6 +6,7 @@ import { buildSeatLegendItems, buildSeatStatusMap } from '../utils/seatingTheme'
 import useFocusTrap from '../utils/useFocusTrap';
 import { buildSeatLabel, buildSeatLookupMap, describeSeatSelection, formatSeatLabel, isSeatRow, seatIdsForRow } from '../utils/seatLabelUtils';
 import { buildMarkersForRequest, buildSeatMarkerPrintHtml } from '../utils/seatMarkerPrint';
+import { buildEventRunDisplayLabel, formatEventRunText, isMultiDayEventRun, resolveEventRunStartValue } from '../utils/eventRunSummary';
 import { getSeatReasonMessage, getAdminReservationFailureMessage } from '../utils/reservationReasonMessages';
 import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
@@ -77,6 +78,8 @@ const eventDisplayNameForRequest = (request = {}) =>
   request.event_title ||
   (request.event_id ? `Event ${request.event_id}` : 'Unassigned requests');
 const printNameSortCollator = new Intl.Collator('en-US', { sensitivity: 'base', numeric: true });
+const eventRunLabelForRequest = (request = {}) => buildEventRunDisplayLabel(request, { formatSingleDay: formatDateTime });
+const eventRunTextForRequest = (request = {}) => formatEventRunText(request, { formatSingleDay: formatDateTime });
 
 const toLocalInputValue = (value) => {
   if (!value) return '';
@@ -420,7 +423,8 @@ export default function SeatRequestsModule() {
         groups.set(key, {
           key,
           title: eventDisplayNameForRequest(req),
-          start: req.start_datetime,
+          start: resolveEventRunStartValue(req),
+          runLabel: eventRunLabelForRequest(req),
           requests: [],
         });
       }
@@ -469,11 +473,15 @@ export default function SeatRequestsModule() {
       ? 'Alphabetical (A-Z by customer)'
       : 'Current filtered order';
     const eventTitle = selectedEvent ? (selectedEvent.artist_name || selectedEvent.title || `Event ${selectedEvent.id}`) : 'All Events';
-    const eventDateValue = selectedEvent
-      ? (selectedEvent.start_datetime
-        || (selectedEvent.event_date ? `${selectedEvent.event_date} ${selectedEvent.event_time || ''}`.trim() : null))
+    const selectedEventPrintSource = selectedEvent
+      ? (printableRequests[0] || selectedEvent)
       : null;
-    const eventDateLabel = eventDateValue ? formatDateTime(eventDateValue) : '';
+    const eventDateHeading = selectedEventPrintSource && isMultiDayEventRun(selectedEventPrintSource)
+      ? 'Event run'
+      : 'Event date';
+    const eventDateLabel = selectedEventPrintSource
+      ? eventRunTextForRequest(selectedEventPrintSource)
+      : '';
     const timestamp = new Date().toLocaleString();
     const win = window.open('', 'mmh-seat-requests-print');
     if (!win) {
@@ -490,9 +498,10 @@ export default function SeatRequestsModule() {
         const createdAt = formatDateTime(req.created_at);
         const statusLabel = escapeHtml(req.status || '');
         const eventLabel = escapeHtml(eventDisplayNameForRequest(req) || '');
+        const eventRunLabel = escapeHtml(eventRunLabelForRequest(req));
         return `
           <tr>
-            ${showEventColumn ? `<td>${eventLabel}</td>` : ''}
+            ${showEventColumn ? `<td>${eventLabel}<div class="event-run">${eventRunLabel}</div></td>` : ''}
             <td>${escapeHtml(req.customer_name || '')}</td>
             <td class="contact-cell">${contactLines}</td>
             <td>${escapeHtml(seatCount)}</td>
@@ -548,6 +557,11 @@ export default function SeatRequestsModule() {
         font-size: 12px;
         color: #1f2937;
       }
+      .event-run {
+        margin-top: 2px;
+        font-size: 11px;
+        color: #4b5563;
+      }
       table {
         width: 100%;
         border-collapse: collapse;
@@ -596,7 +610,7 @@ export default function SeatRequestsModule() {
     </div>
     <h1>Seat Requests - ${escapeHtml(eventTitle)}</h1>
     <div class="meta">
-      ${selectedEvent ? `Event date: ${escapeHtml(eventDateLabel)}<br />` : ''}
+      ${selectedEvent ? `${escapeHtml(eventDateHeading)}: ${escapeHtml(eventDateLabel)}<br />` : ''}
       Order: ${escapeHtml(printOrderLabel)}<br />
       Printed: ${escapeHtml(timestamp)}
     </div>
@@ -994,7 +1008,7 @@ export default function SeatRequestsModule() {
                   {!hideEventColumn && (
                     <td className="px-4 py-3 align-top">
                       <div className={`text-sm ${isExpired ? 'text-gray-500 line-through' : 'text-white'}`}>{eventDisplayNameForRequest(req)}</div>
-                      <div className={`text-xs ${isExpired ? 'text-gray-600 line-through' : 'text-gray-400'}`}>{formatDateTime(req.start_datetime)}</div>
+                      <div className={`text-xs ${isExpired ? 'text-gray-600 line-through' : 'text-gray-400'}`}>{eventRunLabelForRequest(req)}</div>
                     </td>
                   )}
                   <td className="px-4 py-3 align-top">
@@ -1223,7 +1237,7 @@ export default function SeatRequestsModule() {
                       {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       <div>
                         <div className="font-semibold">{group.title}</div>
-                        <div className="text-xs text-gray-400">{formatDateTime(group.start)}</div>
+                        <div className="text-xs text-gray-400">{group.runLabel || formatDateTime(group.start)}</div>
                       </div>
                     </div>
                     <span className="text-xs text-gray-400">{group.requests.length} requests</span>
@@ -1767,7 +1781,12 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                               opacity,
                             }}
                           >
-                            <span className="text-center px-1">{label}</span>
+                            <span
+                              className="text-center px-1"
+                              style={rotation ? { transform: `rotate(${-rotation}deg)` } : undefined}
+                            >
+                              {label}
+                            </span>
                           </div>
                         </div>
                       );
@@ -1807,6 +1826,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                                   toggleSeat(seatId, reservedForRow, pendingForRow, meta)
                                 }
                                 seatReasonResolver={getSeatReasonMessage}
+                                textRotation={-(row.rotation || 0)}
                               />
                             </div>
                           </div>

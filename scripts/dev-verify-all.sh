@@ -39,7 +39,9 @@ scripts=(
   ./scripts/dev-verify-confirmation-email-send-once.sh
   ./scripts/dev-verify-event-create-defaults.sh
   ./scripts/dev-verify-admin-event-datetime-input.sh
+  ./scripts/dev-verify-multi-day-events.sh
   ./scripts/dev-verify-seat-requests-hide-past-events.sh
+  ./scripts/dev-verify-layout-builder-editor.sh
 )
 
 failed=0

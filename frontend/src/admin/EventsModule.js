@@ -3,7 +3,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Edit, Copy, CheckCircle, XCircle, Archive as ArchiveIcon } from 'lucide-react';
 import { API_BASE, getImageUrlSync } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
+import AdminCollapsibleSection from './AdminCollapsibleSection';
+import AdminStickyActionBar from './AdminStickyActionBar';
 import { getEventEditorFlags } from './eventEditorFlags';
+import useCollapsibleSections from './useCollapsibleSections';
 import { formatSeatLabel, isSeatRow, resolveRowHeaderLabels } from '../utils/seatLabelUtils';
 import { buildPricingRowKey, getEventPricingConfig, getTieredPriceSummary } from '../utils/eventPricing';
 import {
@@ -13,6 +16,7 @@ import {
   parseFriendlyEventTime,
 } from '../utils/adminEventDateTimeInput';
 const SECTION_STORAGE_KEY = 'mmh_event_sections';
+const EVENT_EDITOR_SECTION_STORAGE_KEY = 'mmh_event_editor_sections';
 
 const VENUE_LABELS = {
   MMH: 'Midway Music Hall',
@@ -49,6 +53,7 @@ const SESSION_TIMEZONE = 'America/New_York';
 const DATE_INPUT_ERROR = 'Use MM/DD/YYYY';
 const TIME_INPUT_ERROR = 'Use h:mm AM/PM (example: 7:00 PM)';
 const SCHEDULE_VALIDATION_SUMMARY = 'Please fix the highlighted fields.';
+const MIN_MULTI_DAY_OCCURRENCES = 2;
 
 const SORT_OPTIONS = [
   { value: 'start_asc', label: 'Start date (upcoming first)' },
@@ -80,6 +85,33 @@ const parseEventDate = (event) => {
 };
 
 const formatDateDisplay = (event) => {
+  const occurrenceRows = Array.isArray(event?.occurrences) ? event.occurrences : [];
+  if (Number(event?.is_multi_day) === 1 || occurrenceRows.length > 1 || Number(event?.occurrence_count) > 1) {
+    const first = occurrenceRows[0];
+    const last = occurrenceRows[occurrenceRows.length - 1];
+    const formatOccurrenceDate = (occurrence) => {
+      if (!occurrence) return '';
+      const date = parseEventDate({
+        ...event,
+        start_datetime: occurrence.start_datetime,
+        event_date: occurrence.event_date || occurrence.occurrence_date,
+        event_time: occurrence.event_time || occurrence.start_time,
+      });
+      if (!date) return occurrence.event_date || occurrence.occurrence_date || 'TBD';
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: SESSION_TIMEZONE,
+        month: 'short',
+        day: 'numeric',
+        weekday: 'short',
+      }).format(date);
+    };
+    const firstLabel = formatOccurrenceDate(first);
+    const lastLabel = formatOccurrenceDate(last);
+    if (firstLabel && lastLabel && firstLabel !== lastLabel) {
+      return `${firstLabel} -> ${lastLabel}`;
+    }
+    if (firstLabel) return `${firstLabel}${occurrenceRows.length > 1 ? ` (${occurrenceRows.length} dates)` : ''}`;
+  }
   const date = parseEventDate(event);
   if (!date) return event.event_date || 'TBD';
   return new Intl.DateTimeFormat('en-US', {
@@ -91,6 +123,25 @@ const formatDateDisplay = (event) => {
 };
 
 const formatTimeDisplay = (event) => {
+  const occurrenceRows = Array.isArray(event?.occurrences) ? event.occurrences : [];
+  if (Number(event?.is_multi_day) === 1 || occurrenceRows.length > 1 || Number(event?.occurrence_count) > 1) {
+    const labels = occurrenceRows
+      .slice(0, 2)
+      .map((occurrence) => formatTimeDisplay({
+        ...event,
+        occurrences: [],
+        is_multi_day: 0,
+        occurrence_count: 1,
+        start_datetime: occurrence.start_datetime,
+        event_date: occurrence.event_date || occurrence.occurrence_date,
+        event_time: occurrence.event_time || occurrence.start_time,
+      }))
+      .filter(Boolean);
+    if (!labels.length) {
+      return 'Multiple times';
+    }
+    return occurrenceRows.length > 1 ? `${labels.join(' / ')}${occurrenceRows.length > labels.length ? ' +' : ''}` : labels[0];
+  }
   const date = parseEventDate(event);
   if (!date) return event.event_time || 'TBD';
   return new Intl.DateTimeFormat('en-US', {
@@ -123,6 +174,17 @@ const valuesDiffer = (next, original) => {
   if (!nextVal && !originalVal) return false;
   return nextVal !== originalVal;
 };
+
+const normalizeOccurrenceRowsForComparison = (rows = []) => (
+  getNonEmptyOccurrenceRows(rows).map((row) => ({
+    event_date: String(row.event_date || '').trim(),
+    event_time: String(row.event_time || '').trim(),
+  }))
+);
+
+const occurrenceRowsDiffer = (nextRows = [], originalRows = []) => (
+  JSON.stringify(normalizeOccurrenceRowsForComparison(nextRows)) !== JSON.stringify(normalizeOccurrenceRowsForComparison(originalRows))
+);
 
 const eventAllowsSeatRequests = (event = {}) => {
   if (!event) return false;
@@ -314,11 +376,42 @@ const normalizeVenueKey = (venueCode) => {
   return VENUE_LABELS[key] ? key : 'MMH';
 };
 
+const buildOccurrenceRow = (eventDate = '', eventTime = '', sourceId = null) => ({
+  row_id: sourceId ? `occ-${sourceId}` : `occ-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  event_date: eventDate,
+  event_time: eventTime,
+});
+
+const buildOccurrenceRowsFromEvent = (event = {}) => {
+  const rawOccurrences = Array.isArray(event.occurrences) && event.occurrences.length
+    ? event.occurrences
+    : [{
+        id: 'single',
+        event_date: event.event_date,
+        event_time: event.event_time,
+      }];
+  return rawOccurrences.map((occurrence, index) => buildOccurrenceRow(
+    formatEventDateForInput(occurrence.event_date || occurrence.occurrence_date || (index === 0 ? event.event_date : '')),
+    formatEventTimeForInput(occurrence.event_time || occurrence.start_time || (index === 0 ? event.event_time : '')),
+    occurrence.id || occurrence.occurrence_key || index + 1,
+  ));
+};
+
+const getNonEmptyOccurrenceRows = (rows = []) => (
+  (Array.isArray(rows) ? rows : []).filter((row) => {
+    const date = String(row?.event_date || '').trim();
+    const time = String(row?.event_time || '').trim();
+    return date || time;
+  })
+);
+
 const initialForm = {
   artist_name: '',
   event_date: '',
   event_time: '',
   door_time: '',
+  multi_day_enabled: false,
+  occurrence_rows: [buildOccurrenceRow()],
   genre: '',
   description: '',
   series_schedule_label: '',
@@ -346,6 +439,61 @@ const initialForm = {
   payment_enabled: false,
 };
 
+const createInitialFormState = () => ({
+  ...initialForm,
+  pricing_tiers: buildDefaultPricingTiers(),
+  pricing_assignments: {},
+  occurrence_rows: [buildOccurrenceRow()],
+});
+
+const findLayoutName = (layouts, layoutId) => {
+  if (!layoutId) return '';
+  const match = layouts.find((layout) => String(layout.id) === String(layoutId));
+  return match?.name || `Layout #${layoutId}`;
+};
+
+const summarizePricingMode = (formData) => {
+  if (formData.pricing_mode === 'tiered') {
+    const completeTiers = (formData.pricing_tiers || []).filter((tier) => (
+      String(tier.label || '').trim() && normalizePriceInput(tier.price) !== null
+    ));
+    return `Tiered pricing • ${completeTiers.length} tier${completeTiers.length === 1 ? '' : 's'}`;
+  }
+  const ticket = formatPrice(formData.ticket_price);
+  const door = formatPrice(formData.door_price);
+  if (ticket && door && ticket !== door) {
+    return `Advance ${ticket} • Door ${door}`;
+  }
+  if (ticket || door) {
+    return ticket || door;
+  }
+  return 'No price set';
+};
+
+const summarizeOccurrenceSchedule = (formData) => {
+  if (!formData.multi_day_enabled) {
+    return [
+      formData.event_date || 'Date missing',
+      formData.event_time || 'Time missing',
+      formData.door_time ? `Doors ${formData.door_time}` : null,
+    ].filter(Boolean).join(' • ');
+  }
+  const rows = getNonEmptyOccurrenceRows(formData.occurrence_rows || []);
+  if (!rows.length) {
+    return 'Multi-day run • dates missing';
+  }
+  const labels = rows.slice(0, 2).map((row) => {
+    const parts = [row.event_date || 'Date missing', row.event_time || 'Time missing'].filter(Boolean);
+    return parts.join(' • ');
+  });
+  const suffix = rows.length > labels.length ? ` +${rows.length - labels.length} more` : '';
+  return [
+    `Multi-day run • ${rows.length} date${rows.length === 1 ? '' : 's'}`,
+    labels.join(' | ') + suffix,
+    formData.door_time ? `Doors ${formData.door_time}` : null,
+  ].filter(Boolean).join(' • ');
+};
+
 export default function EventsModule(){
   const [events, setEvents] = useState([]);
   const [layouts, setLayouts] = useState([]);
@@ -357,7 +505,7 @@ export default function EventsModule(){
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [formData, setFormData] = useState(initialForm);
+  const [formData, setFormData] = useState(createInitialFormState());
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -1151,6 +1299,96 @@ export default function EventsModule(){
     }
   }, [activePaymentConfig, formData.payment_enabled]);
 
+  const editorSectionIds = useMemo(() => ([
+    'basic-info',
+    'audience-venue',
+    'schedule',
+    'pricing',
+    'seating',
+    'payment',
+    'advanced',
+    'contact',
+    'media',
+  ]), []);
+  const editorSectionDefaults = useMemo(() => ({
+    'basic-info': false,
+    'audience-venue': true,
+    schedule: false,
+    pricing: true,
+    seating: true,
+    payment: true,
+    advanced: true,
+    contact: true,
+    media: true,
+  }), []);
+  const {
+    collapsedSections: collapsedEditorSections,
+    toggleSection: toggleEditorSection,
+    setSectionsState: setEditorSectionsState,
+  } = useCollapsibleSections(EVENT_EDITOR_SECTION_STORAGE_KEY, editorSectionDefaults);
+
+  const eventEditorSummaries = useMemo(() => {
+    const categoryLabel = selectedCategory?.name || 'Normal';
+    const venueLabel = VENUE_LABELS[normalizeVenueKey(formData.venue_code)];
+    const layoutLabel = findLayoutName(layouts, formData.layout_id);
+    const paymentLabel = activePaymentConfig
+      ? (activePaymentConfig.provider_label || 'Configured payment link')
+      : null;
+    const snapshotCount = seatingSnapshotsState.items?.length || 0;
+    return {
+      'basic-info': [
+        formData.artist_name || 'Artist missing',
+        formData.genre || categoryLabel,
+      ].filter(Boolean).join(' • '),
+      'audience-venue': [
+        venueLabel,
+        formData.venue_section ? `Section: ${formData.venue_section}` : null,
+        formData.age_restriction || 'All Ages',
+      ].filter(Boolean).join(' • '),
+      schedule: summarizeOccurrenceSchedule(formData),
+      pricing: summarizePricingMode(formData),
+      seating: formData.seating_enabled || formData.layout_id
+        ? [
+            formData.seating_enabled ? 'Reservations enabled' : 'Reservations hidden',
+            layoutLabel ? `Layout: ${layoutLabel}` : 'No layout assigned',
+            editing && snapshotCount ? `${snapshotCount} snapshot${snapshotCount === 1 ? '' : 's'}` : null,
+          ].filter(Boolean).join(' • ')
+        : 'Seat reservations disabled',
+      payment: !paymentSettingsAvailable
+        ? 'Migration required'
+        : activePaymentConfig
+          ? `${formData.payment_enabled ? 'Enabled' : 'Disabled'} • ${paymentLabel}`
+          : 'No payment config available',
+      advanced: [
+        formData.seat_request_email_override ? 'Custom seat inbox' : 'Default seat routing',
+        editorFlags.showRecurringPanel && (
+          formData.series_schedule_label || formData.series_summary || formData.series_footer_note
+        ) ? 'Recurring series copy' : null,
+        editorFlags.showBeachBandsPanel ? 'Beach Bands notes visible' : null,
+      ].filter(Boolean).join(' • '),
+      contact: [
+        formData.contact_name || null,
+        formData.contact_phone_raw || null,
+        formData.contact_email || null,
+      ].filter(Boolean).join(' • ') || 'No event contact set',
+      media: [
+        imagePreview || formData.image_url ? 'Custom image selected' : 'Default image',
+        formData.description ? 'Description added' : 'No description yet',
+      ].join(' • '),
+    };
+  }, [
+    activePaymentConfig,
+    editing,
+    editorFlags.showBeachBandsPanel,
+    editorFlags.showRecurringPanel,
+    formData,
+    imagePreview,
+    layouts,
+    paymentSettingsAvailable,
+    seatingSnapshotsState.items,
+    selectedCategory?.name,
+  ]);
+
   const snapshotPreviewLists = useMemo(() => {
     if (!snapshotPreviewState.snapshot) return null;
     const seatFilter = snapshotPreviewState.seatFilter.trim().toLowerCase();
@@ -1605,7 +1843,7 @@ export default function EventsModule(){
 
   const openAdd = () => {
     setEditing(null);
-    setFormData(initialForm);
+    setFormData(createInitialFormState());
     setEventPricingRows([]);
     setEventPricingRowsLoading(false);
     setImageFile(null);
@@ -1621,6 +1859,15 @@ export default function EventsModule(){
 
   const openEdit = (event) => {
     const pricingState = normalizePricingFormState(event);
+    const occurrenceRows = buildOccurrenceRowsFromEvent(event);
+    const isMultiDay = Number(event.is_multi_day) === 1
+      || Number(event.occurrence_count) > 1
+      || occurrenceRows.length > 1;
+    const primaryOccurrence = occurrenceRows[0] || buildOccurrenceRow(
+      formatEventDateForInput(event.event_date),
+      formatEventTimeForInput(event.event_time),
+      'primary',
+    );
     setEditing(event);
     setError('');
     setFieldErrors({});
@@ -1629,15 +1876,19 @@ export default function EventsModule(){
     setRefreshLayoutMessage('');
     setFormData({
       artist_name: event.artist_name || '',
-      event_date: formatEventDateForInput(event.event_date),
-      event_time: formatEventTimeForInput(event.event_time),
+      event_date: primaryOccurrence.event_date || formatEventDateForInput(event.event_date),
+      event_time: primaryOccurrence.event_time || formatEventTimeForInput(event.event_time),
       door_time: formatEventTimeForInput(event.door_time),
+      multi_day_enabled: isMultiDay,
+      occurrence_rows: occurrenceRows.length ? occurrenceRows : [buildOccurrenceRow()],
       genre: event.genre || '',
       description: event.description || '',
       series_schedule_label: event.series_schedule_label || '',
       series_summary: event.series_summary || '',
       series_footer_note: event.series_footer_note || '',
       image_url: event.image_url || '',
+      hero_image_id: event.hero_image_id || null,
+      poster_image_id: event.poster_image_id || null,
       pricing_mode: pricingState.pricing_mode,
       pricing_tiers: pricingState.pricing_tiers,
       pricing_assignments: pricingState.pricing_assignments,
@@ -1816,6 +2067,146 @@ export default function EventsModule(){
       return;
     }
     setLayoutConfirmState({ open: true, pendingValue: normalized });
+  };
+
+  const clearOccurrenceFieldError = (index, field) => {
+    setFieldErrors((prev) => {
+      const occurrenceErrors = prev.occurrences || {};
+      if (!occurrenceErrors[index]?.[field]) {
+        return prev;
+      }
+      const nextOccurrenceErrors = { ...occurrenceErrors };
+      const nextRowErrors = { ...(nextOccurrenceErrors[index] || {}) };
+      delete nextRowErrors[field];
+      if (Object.keys(nextRowErrors).length) {
+        nextOccurrenceErrors[index] = nextRowErrors;
+      } else {
+        delete nextOccurrenceErrors[index];
+      }
+      const next = { ...prev };
+      if (Object.keys(nextOccurrenceErrors).length) {
+        next.occurrences = nextOccurrenceErrors;
+      } else {
+        delete next.occurrences;
+      }
+      return next;
+    });
+    if (error === SCHEDULE_VALIDATION_SUMMARY) {
+      setError('');
+    }
+  };
+
+  const handleMultiDayToggle = (enabled) => {
+    setFormData((prev) => {
+      const existingRows = getNonEmptyOccurrenceRows(prev.occurrence_rows || []);
+      const seedRows = existingRows.length
+        ? existingRows.map((row) => ({ ...row }))
+        : [buildOccurrenceRow(prev.event_date, prev.event_time)];
+      const nextRows = enabled && seedRows.length < MIN_MULTI_DAY_OCCURRENCES
+        ? [...seedRows, buildOccurrenceRow('', '')]
+        : seedRows;
+      const firstRow = nextRows[0] || buildOccurrenceRow(prev.event_date, prev.event_time);
+      return {
+        ...prev,
+        multi_day_enabled: enabled,
+        occurrence_rows: nextRows,
+        event_date: enabled ? prev.event_date : (firstRow.event_date || prev.event_date),
+        event_time: enabled ? prev.event_time : (firstRow.event_time || prev.event_time),
+      };
+    });
+    setFieldErrors((prev) => {
+      if (!prev.occurrences) return prev;
+      const next = { ...prev };
+      delete next.occurrences;
+      return next;
+    });
+  };
+
+  const handleOccurrenceRowChange = (index, field, value) => {
+    clearOccurrenceFieldError(index, field);
+    setFormData((prev) => ({
+      ...prev,
+      occurrence_rows: (prev.occurrence_rows || []).map((row, rowIndex) => (
+        rowIndex === index
+          ? {
+              ...row,
+              [field]: value,
+            }
+          : row
+      )),
+    }));
+  };
+
+  const handleOccurrenceBlur = (index, field) => {
+    setFormData((prev) => {
+      const rows = [...(prev.occurrence_rows || [])];
+      const current = rows[index];
+      if (!current) {
+        return prev;
+      }
+      const rawValue = String(current[field] || '').trim();
+      if (!rawValue) {
+        return prev;
+      }
+      const normalized = field === 'event_date'
+        ? formatEventDateForInput(rawValue)
+        : formatEventTimeForInput(rawValue);
+      if (!normalized || normalized === current[field]) {
+        return prev;
+      }
+      rows[index] = {
+        ...current,
+        [field]: normalized,
+      };
+      return {
+        ...prev,
+        occurrence_rows: rows,
+      };
+    });
+    clearOccurrenceFieldError(index, field);
+  };
+
+  const handleAddOccurrenceRow = () => {
+    setFormData((prev) => ({
+      ...prev,
+      multi_day_enabled: true,
+      occurrence_rows: [...(prev.occurrence_rows || []), buildOccurrenceRow('', '')],
+    }));
+  };
+
+  const handleRemoveOccurrenceRow = (index) => {
+    setFormData((prev) => {
+      const rows = [...(prev.occurrence_rows || [])];
+      if (rows.length <= 1) {
+        return prev;
+      }
+      rows.splice(index, 1);
+      return {
+        ...prev,
+        occurrence_rows: rows,
+      };
+    });
+    setFieldErrors((prev) => {
+      const occurrenceErrors = prev.occurrences || {};
+      if (!Object.keys(occurrenceErrors).length) {
+        return prev;
+      }
+      const nextOccurrenceErrors = {};
+      Object.entries(occurrenceErrors).forEach(([key, value]) => {
+        const numericIndex = Number(key);
+        if (Number.isNaN(numericIndex) || numericIndex === index) {
+          return;
+        }
+        nextOccurrenceErrors[numericIndex > index ? numericIndex - 1 : numericIndex] = value;
+      });
+      const next = { ...prev };
+      if (Object.keys(nextOccurrenceErrors).length) {
+        next.occurrences = nextOccurrenceErrors;
+      } else {
+        delete next.occurrences;
+      }
+      return next;
+    });
   };
 
   const handleChange = (e) => {
@@ -2177,11 +2568,13 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       payload.category_id = Number.isFinite(parsedCategoryId) && parsedCategoryId > 0 ? parsedCategoryId : null;
       if (formData.pricing_mode === 'tiered') {
         if (!normalizedLayoutId) {
+          setEditorSectionsState(['pricing', 'seating'], false);
           setError('Tiered pricing requires a seating layout.');
           setSubmitting(false);
           return;
         }
         if (!pricingAssignmentRows.length) {
+          setEditorSectionsState(['pricing', 'seating'], false);
           setError('Tiered pricing requires seat/table groups in the selected layout.');
           setSubmitting(false);
           return;
@@ -2199,6 +2592,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
           return hasAnyContent && (!tier.label || tier.price === null);
         });
         if (incompleteTier) {
+          setEditorSectionsState(['pricing'], false);
           setError('Each pricing tier needs a label and price before saving.');
           setSubmitting(false);
           return;
@@ -2207,6 +2601,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
           .filter((tier) => tier.label && tier.price !== null)
           .map(({ rawPrice, ...tier }) => tier);
         if (normalizedTiers.length < 3) {
+          setEditorSectionsState(['pricing'], false);
           setError('Tiered pricing requires at least 3 complete tiers.');
           setSubmitting(false);
           return;
@@ -2218,6 +2613,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
           return normalizedTiers.some((tier) => tier.id === nextAssignments[rowKey]);
         });
         if (!allRowsAssigned) {
+          setEditorSectionsState(['pricing'], false);
           setError('Assign every seat/table group to a pricing tier before saving.');
           setSubmitting(false);
           return;
@@ -2249,6 +2645,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       payload.seat_request_email_override = (payload.seat_request_email_override || '').trim() || null;
       payload.seating_enabled = formData.seating_enabled ? 1 : 0;
       payload.payment_enabled = formData.payment_enabled ? 1 : 0;
+      payload.multi_day_enabled = formData.multi_day_enabled ? 1 : 0;
       payload.venue_code = (payload.venue_code || 'MMH').toUpperCase();
       const originalLayoutKey = editing?.layout_id ? String(editing.layout_id) : '';
       const newLayoutKey = normalizedLayoutId ? String(normalizedLayoutId) : '';
@@ -2259,51 +2656,138 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       const originalEventDate = formatEventDateForInput(editing?.event_date);
       const originalEventTime = formatEventTimeForInput(editing?.event_time);
       const originalDoorTimeValue = formatEventTimeForInput(editing?.door_time);
+      const originalOccurrenceRows = editing ? buildOccurrenceRowsFromEvent(editing) : [];
+      const originalMultiDay = Boolean(editing && (
+        Number(editing.is_multi_day) === 1
+        || Number(editing.occurrence_count) > 1
+        || getNonEmptyOccurrenceRows(originalOccurrenceRows).length > 1
+      ));
       const startOrEndProvided = Boolean(payload.start_datetime || payload.end_datetime);
       const scheduleFieldsChanged = editing
         ? startOrEndProvided ||
           valuesDiffer(eventDateValue, originalEventDate) ||
           valuesDiffer(eventTimeValue, originalEventTime) ||
-          valuesDiffer(doorTimeValue, originalDoorTimeValue)
+          valuesDiffer(doorTimeValue, originalDoorTimeValue) ||
+          Boolean(formData.multi_day_enabled) !== originalMultiDay ||
+          occurrenceRowsDiffer(formData.occurrence_rows, originalOccurrenceRows)
         : Boolean(eventDateValue || eventTimeValue || doorTimeValue || startOrEndProvided);
       const mustRequireSchedule = editorFlags.requireScheduleFields || scheduleFieldsChanged;
       if (mustRequireSchedule) {
-        const parsedEventDate = parseFriendlyEventDate(eventDateValue);
-        const parsedEventTime = parseFriendlyEventTime(eventTimeValue);
         const parsedDoorTime = parseFriendlyEventTime(doorTimeValue);
         const nextFieldErrors = {};
-        if (!parsedEventDate) {
-          nextFieldErrors.event_date = DATE_INPUT_ERROR;
-        }
-        if (!parsedEventTime) {
-          nextFieldErrors.event_time = TIME_INPUT_ERROR;
-        }
         if (!parsedDoorTime) {
           nextFieldErrors.door_time = TIME_INPUT_ERROR;
         }
-        if (Object.keys(nextFieldErrors).length > 0) {
-          setFieldErrors(nextFieldErrors);
-          setError(SCHEDULE_VALIDATION_SUMMARY);
-          setSubmitting(false);
-          const firstInvalid = ['event_date', 'event_time', 'door_time'].find((field) => nextFieldErrors[field]);
-          if (firstInvalid) {
-            requestAnimationFrame(() => {
-              const input = scheduleInputRefs.current[firstInvalid];
-              if (input && typeof input.focus === 'function') {
-                input.focus();
-              }
+        let scheduleErrorMessage = SCHEDULE_VALIDATION_SUMMARY;
+        let firstInvalidKey = null;
+        if (formData.multi_day_enabled) {
+          const occurrenceErrors = {};
+          const normalizedOccurrences = [];
+          (formData.occurrence_rows || []).forEach((row, index) => {
+            const rawDate = String(row?.event_date || '').trim();
+            const rawTime = String(row?.event_time || '').trim();
+            const hasAnyValue = Boolean(rawDate || rawTime);
+            if (!hasAnyValue) {
+              return;
+            }
+            const parsedDate = parseFriendlyEventDate(rawDate);
+            const parsedTime = parseFriendlyEventTime(rawTime);
+            if (!parsedDate) {
+              occurrenceErrors[index] = {
+                ...(occurrenceErrors[index] || {}),
+                event_date: DATE_INPUT_ERROR,
+              };
+              firstInvalidKey = firstInvalidKey || `occurrence_${index}_event_date`;
+            }
+            if (!parsedTime) {
+              occurrenceErrors[index] = {
+                ...(occurrenceErrors[index] || {}),
+                event_time: TIME_INPUT_ERROR,
+              };
+              firstInvalidKey = firstInvalidKey || `occurrence_${index}_event_time`;
+            }
+            if (parsedDate && parsedTime) {
+              normalizedOccurrences.push({
+                event_date: parsedDate,
+                event_time: parsedTime,
+              });
+            }
+          });
+          if (normalizedOccurrences.length < MIN_MULTI_DAY_OCCURRENCES) {
+            const blankIndex = (formData.occurrence_rows || []).findIndex((row) => {
+              const rawDate = String(row?.event_date || '').trim();
+              const rawTime = String(row?.event_time || '').trim();
+              return !rawDate && !rawTime;
             });
+            const focusIndex = blankIndex !== -1 ? blankIndex : Math.min(normalizedOccurrences.length, Math.max((formData.occurrence_rows || []).length - 1, 0));
+            occurrenceErrors[focusIndex] = {
+              ...(occurrenceErrors[focusIndex] || {}),
+              event_date: occurrenceErrors[focusIndex]?.event_date || DATE_INPUT_ERROR,
+              event_time: occurrenceErrors[focusIndex]?.event_time || TIME_INPUT_ERROR,
+            };
+            firstInvalidKey = firstInvalidKey || `occurrence_${focusIndex}_event_date`;
+            scheduleErrorMessage = `Add at least ${MIN_MULTI_DAY_OCCURRENCES} dated occurrences or turn off Multi-Day Event.`;
           }
-          return;
+          if (Object.keys(occurrenceErrors).length > 0 || Object.keys(nextFieldErrors).length > 0) {
+            if (Object.keys(occurrenceErrors).length > 0) {
+              nextFieldErrors.occurrences = occurrenceErrors;
+            }
+            setFieldErrors(nextFieldErrors);
+            setError(scheduleErrorMessage);
+            setEditorSectionsState(['schedule'], false);
+            setSubmitting(false);
+            const focusKey = firstInvalidKey || (nextFieldErrors.door_time ? 'door_time' : null);
+            if (focusKey) {
+              requestAnimationFrame(() => {
+                const input = scheduleInputRefs.current[focusKey];
+                if (input && typeof input.focus === 'function') {
+                  input.focus();
+                }
+              });
+            }
+            return;
+          }
+          payload.event_date = normalizedOccurrences[0].event_date;
+          payload.event_time = normalizedOccurrences[0].event_time;
+          payload.door_time = `${normalizedOccurrences[0].event_date} ${parsedDoorTime}`;
+          payload.occurrences = normalizedOccurrences;
+        } else {
+          const parsedEventDate = parseFriendlyEventDate(eventDateValue);
+          const parsedEventTime = parseFriendlyEventTime(eventTimeValue);
+          if (!parsedEventDate) {
+            nextFieldErrors.event_date = DATE_INPUT_ERROR;
+          }
+          if (!parsedEventTime) {
+            nextFieldErrors.event_time = TIME_INPUT_ERROR;
+          }
+          if (Object.keys(nextFieldErrors).length > 0) {
+            setFieldErrors(nextFieldErrors);
+            setError(SCHEDULE_VALIDATION_SUMMARY);
+            setEditorSectionsState(['schedule'], false);
+            setSubmitting(false);
+            const firstInvalid = ['event_date', 'event_time', 'door_time'].find((field) => nextFieldErrors[field]);
+            if (firstInvalid) {
+              requestAnimationFrame(() => {
+                const input = scheduleInputRefs.current[firstInvalid];
+                if (input && typeof input.focus === 'function') {
+                  input.focus();
+                }
+              });
+            }
+            return;
+          }
+          payload.event_date = parsedEventDate;
+          payload.event_time = parsedEventTime;
+          payload.door_time = `${parsedEventDate} ${parsedDoorTime}`;
+          delete payload.occurrences;
         }
-        payload.event_date = parsedEventDate;
-        payload.event_time = parsedEventTime;
-        payload.door_time = `${parsedEventDate} ${parsedDoorTime}`;
       } else {
         delete payload.event_date;
         delete payload.event_time;
         delete payload.door_time;
+        delete payload.occurrences;
       }
+      delete payload.occurrence_rows;
       const seatOverrideValue = String(payload.seat_request_email_override || '').trim();
       const contactEmailValue = String(payload.contact_email || '').trim();
       const emailFieldErrors = {};
@@ -2316,6 +2800,16 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       if (Object.keys(emailFieldErrors).length > 0) {
         setFieldErrors(emailFieldErrors);
         setError(SCHEDULE_VALIDATION_SUMMARY);
+        const sectionsToOpen = [];
+        if (emailFieldErrors.seat_request_email_override) {
+          sectionsToOpen.push('advanced');
+        }
+        if (emailFieldErrors.contact_email) {
+          sectionsToOpen.push('contact');
+        }
+        if (sectionsToOpen.length) {
+          setEditorSectionsState(sectionsToOpen, false);
+        }
         setSubmitting(false);
         const firstInvalidEmailField = ['seat_request_email_override', 'contact_email'].find((field) => emailFieldErrors[field]);
         if (firstInvalidEmailField) {
@@ -2486,11 +2980,17 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
 
   const duplicateEvent = async (event) => {
     const baseName = event.artist_name || event.title || 'Untitled Event';
+    const occurrenceRows = buildOccurrenceRowsFromEvent(event);
+    const activeOccurrences = getNonEmptyOccurrenceRows(occurrenceRows);
+    const isMultiDay = Number(event.is_multi_day) === 1
+      || Number(event.occurrence_count) > 1
+      || activeOccurrences.length > 1;
+    const firstOccurrence = activeOccurrences[0] || occurrenceRows[0] || null;
     const startParts = (event.start_datetime || '').split(' ');
     const fallbackDate = startParts[0] || '';
     const fallbackTime = startParts[1] ? startParts[1].slice(0, 5) : '';
-    const eventDate = event.event_date || fallbackDate;
-    const eventTime = event.event_time || fallbackTime;
+    const eventDate = firstOccurrence?.event_date || event.event_date || fallbackDate;
+    const eventTime = firstOccurrence?.event_time || event.event_time || fallbackTime;
     if (!eventDate || !eventTime) {
       alert('Please set a date and time before duplicating this event.');
       return;
@@ -2508,6 +3008,13 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       event_date: eventDate,
       event_time: eventTime,
       door_time: event.door_time,
+      multi_day_enabled: isMultiDay,
+      occurrences: isMultiDay
+        ? activeOccurrences.map((occurrence) => ({
+            event_date: parseFriendlyEventDate(occurrence.event_date) || occurrence.event_date,
+            event_time: parseFriendlyEventTime(occurrence.event_time) || occurrence.event_time,
+          }))
+        : undefined,
       ticket_price: event.ticket_price || '',
       door_price: event.door_price || '',
       min_ticket_price: event.min_ticket_price || '',
@@ -2861,872 +3368,1085 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
 
       {showForm && (
         <>
-        <div className="fixed inset-0 bg-black/60 flex items-start justify-center p-4 z-50 overflow-auto">
-          <div className="bg-gray-800 rounded-xl max-w-3xl w-full p-6 border border-purple-500/30">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">{editing ? 'Edit Event' : 'Add Event'}</h2>
-              <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-white">Close</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-purple-500/30 bg-gray-800 shadow-2xl">
+            <div className="shrink-0 border-b border-purple-500/20 px-6 py-4">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold">{editing ? 'Edit Event' : 'Add Event'}</h2>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Organize the event into sections, then save without losing sight of the action bar.
+                  </p>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditorSectionsState(editorSectionIds, false)}
+                    className="rounded bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600"
+                  >
+                    Expand All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditorSectionsState(editorSectionIds, true)}
+                    className="rounded bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600"
+                  >
+                    Collapse All
+                  </button>
+                  <button type="button" onClick={() => setShowForm(false)} className="rounded bg-gray-700 px-3 py-2 text-sm text-white hover:bg-gray-600">
+                    Close
+                  </button>
+                </div>
+              </div>
             </div>
 
-            {error && (
-              <div
-                className="mb-4 p-3 bg-red-600/10 border border-red-600 text-red-400 rounded"
-                role="alert"
-                aria-live="assertive"
-              >
-                {error}
-              </div>
-            )}
+            <form noValidate onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                {error && (
+                  <div
+                    className="rounded border border-red-600 bg-red-600/10 p-3 text-red-400"
+                    role="alert"
+                    aria-live="assertive"
+                  >
+                    {error}
+                  </div>
+                )}
 
-            <form noValidate onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Artist Name*</label>
-                <input name="artist_name" value={formData.artist_name} onChange={handleChange} required className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Genre</label>
-                <input name="genre" value={formData.genre} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Category</label>
-                <select
-                  name="category_id"
-                  value={formData.category_id}
-                  onChange={handleChange}
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
+                <AdminCollapsibleSection
+                  id="event-editor-basic-info"
+                  title="Basic Event Information"
+                  description="Core show identity and category metadata."
+                  summary={eventEditorSummaries['basic-info']}
+                  isCollapsed={Boolean(collapsedEditorSections['basic-info'])}
+                  onToggle={() => toggleEditorSection('basic-info')}
                 >
-                  <option value="">
-                    {categories.length ? 'Select category (defaults to Normal)' : 'Loading categories…'}
-                  </option>
-                  {categoryOptions.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}{cat.is_active ? '' : ' (inactive)'}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-400 mt-1">Inactive categories remain selectable if already assigned to this event.</p>
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Event Date*</label>
-                <input
-                  type="text"
-                  name="event_date"
-                  value={formData.event_date}
-                  onChange={handleChange}
-                  onBlur={handleScheduleBlur}
-                  placeholder="MM/DD/YYYY"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  aria-required={scheduleInputsRequired}
-                  aria-invalid={fieldErrors.event_date ? 'true' : 'false'}
-                  aria-describedby={fieldErrors.event_date ? 'event-date-error' : undefined}
-                  ref={(node) => { scheduleInputRefs.current.event_date = node; }}
-                  className={`w-full px-4 py-2 rounded border text-white ${
-                    fieldErrors.event_date
-                      ? 'border-red-500 bg-red-900/25 focus:ring-2 focus:ring-red-500 focus:border-red-500'
-                      : 'border-gray-600 bg-gray-700 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
-                  }`}
-                />
-                {fieldErrors.event_date && (
-                  <p id="event-date-error" className="text-xs text-red-300 mt-1">
-                    {fieldErrors.event_date}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Event Time*</label>
-                <input
-                  type="text"
-                  name="event_time"
-                  value={formData.event_time}
-                  onChange={handleChange}
-                  onBlur={handleScheduleBlur}
-                  placeholder="h:mm AM/PM"
-                  inputMode="text"
-                  autoComplete="off"
-                  aria-required={scheduleInputsRequired}
-                  aria-invalid={fieldErrors.event_time ? 'true' : 'false'}
-                  aria-describedby={fieldErrors.event_time ? 'event-time-error' : undefined}
-                  ref={(node) => { scheduleInputRefs.current.event_time = node; }}
-                  className={`w-full px-4 py-2 rounded border text-white ${
-                    fieldErrors.event_time
-                      ? 'border-red-500 bg-red-900/25 focus:ring-2 focus:ring-red-500 focus:border-red-500'
-                      : 'border-gray-600 bg-gray-700 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
-                  }`}
-                />
-                {fieldErrors.event_time && (
-                  <p id="event-time-error" className="text-xs text-red-300 mt-1">
-                    {fieldErrors.event_time}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Doors Open Time*</label>
-                <input
-                  type="text"
-                  name="door_time"
-                  value={formData.door_time}
-                  onChange={handleChange}
-                  onBlur={handleScheduleBlur}
-                  placeholder="h:mm AM/PM"
-                  inputMode="text"
-                  autoComplete="off"
-                  aria-required={scheduleInputsRequired}
-                  aria-invalid={fieldErrors.door_time ? 'true' : 'false'}
-                  aria-describedby={fieldErrors.door_time ? 'door-time-help door-time-error' : 'door-time-help'}
-                  ref={(node) => { scheduleInputRefs.current.door_time = node; }}
-                  className={`w-full px-4 py-2 rounded border text-white ${
-                    fieldErrors.door_time
-                      ? 'border-red-500 bg-red-900/25 focus:ring-2 focus:ring-red-500 focus:border-red-500'
-                      : 'border-gray-600 bg-gray-700 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
-                  }`}
-                />
-                <p id="door-time-help" className="text-xs text-gray-400 mt-1">
-                  This feeds the “Doors Open” line on the public schedule.
-                </p>
-                {fieldErrors.door_time && (
-                  <p id="door-time-error" className="text-xs text-red-300 mt-1">
-                    {fieldErrors.door_time}
-                  </p>
-                )}
-              </div>
-
-              <div className="md:col-span-2 rounded-xl border border-purple-500/30 bg-gray-900/50 p-4 space-y-4">
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <label className="block text-sm text-gray-200 mb-1">Pricing</label>
-                    <p className="text-xs text-gray-400">
-                      Choose flat pricing for standard shows or tiered pricing for special seating-based events.
-                    </p>
-                  </div>
-                  <div className="w-full md:w-56">
-                    <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">Pricing Mode</label>
-                    <select
-                      value={formData.pricing_mode}
-                      onChange={(e) => handlePricingModeChange(e.target.value)}
-                      className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                    >
-                      <option value="flat">Flat pricing</option>
-                      <option value="tiered">Tiered seating pricing</option>
-                    </select>
-                  </div>
-                </div>
-
-                {formData.pricing_mode === 'tiered' ? (
-                  <div className="space-y-5">
-                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
-                      <p className="text-sm font-semibold text-amber-100">
-                        Tiered pricing replaces the normal price display for this event.
-                      </p>
-                      <p className="mt-1 text-xs text-amber-50/90">
-                        Assign each seat/table group to a tier. Seat colors stay reserved for availability states, so customers see pricing as a legend/list in the seating flow.
-                      </p>
-                      {tieredPricingPreview && (
-                        <p className="mt-2 text-sm text-amber-100">Preview: {tieredPricingPreview}</p>
-                      )}
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <h3 className="text-sm font-semibold text-white">Price tiers</h3>
-                          <p className="text-xs text-gray-400">Minimum 3 tiers. Add more if this event needs them.</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleAddPricingTier}
-                          className="inline-flex items-center justify-center rounded bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500"
-                        >
-                          Add tier
-                        </button>
-                      </div>
-                      <div className="grid gap-4 lg:grid-cols-2">
-                        {(formData.pricing_tiers || []).map((tier, index) => (
-                          <div key={tier.id} className="rounded-xl border border-gray-700 bg-gray-950/60 p-4 space-y-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <p className="text-sm font-semibold text-white">Tier {index + 1}</p>
-                              <button
-                                type="button"
-                                onClick={() => handleRemovePricingTier(tier.id)}
-                                disabled={(formData.pricing_tiers || []).length <= 3}
-                                className="text-xs font-semibold text-red-200 disabled:text-gray-500 disabled:cursor-not-allowed hover:text-white"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_9rem_5rem]">
-                              <div>
-                                <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">Label</label>
-                                <input
-                                  type="text"
-                                  value={tier.label}
-                                  onChange={(e) => handlePricingTierChange(tier.id, 'label', e.target.value)}
-                                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                                  placeholder="VIP"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">Price</label>
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  value={tier.price}
-                                  onChange={(e) => handlePricingTierChange(tier.id, 'price', e.target.value)}
-                                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                                  placeholder="25.00"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">Color</label>
-                                <input
-                                  type="color"
-                                  value={tier.color || DEFAULT_PRICING_TIER_COLORS[index % DEFAULT_PRICING_TIER_COLORS.length]}
-                                  onChange={(e) => handlePricingTierChange(tier.id, 'color', e.target.value)}
-                                  className="h-11 w-full rounded bg-gray-700 p-1"
-                                />
-                              </div>
-                            </div>
-                            <div>
-                              <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">Optional note</label>
-                              <input
-                                type="text"
-                                value={tier.note}
-                                onChange={(e) => handlePricingTierChange(tier.id, 'note', e.target.value)}
-                                className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                                placeholder="Closest to the stage"
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div>
-                        <h3 className="text-sm font-semibold text-white">Seat/table assignments</h3>
-                        <p className="text-xs text-gray-400">
-                          Each interactive row or table group in the selected layout needs a tier assignment.
-                        </p>
-                      </div>
-                      {!formData.layout_id ? (
-                        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-                          Choose a seating layout before enabling tiered pricing.
-                        </div>
-                      ) : eventPricingRowsLoading ? (
-                        <div className="rounded-lg border border-gray-700 bg-gray-950/60 px-4 py-3 text-sm text-gray-300">
-                          Loading this event&apos;s current seat groups…
-                        </div>
-                      ) : pricingAssignmentOptions.length === 0 ? (
-                        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-                          The selected layout has no active seat/table groups to assign.
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {pricingAssignmentOptions.map(({ rowKey, label, seatCount }) => (
-                            <div key={rowKey} className="grid gap-3 rounded-lg border border-gray-700 bg-gray-950/60 p-3 md:grid-cols-[minmax(0,1fr)_16rem] md:items-center">
-                              <div>
-                                <p className="font-medium text-white">{label}</p>
-                                <p className="text-xs text-gray-400">
-                                  {seatCount} {seatCount === 1 ? 'seat' : 'seats'}
-                                </p>
-                              </div>
-                              <select
-                                value={formData.pricing_assignments?.[rowKey] || ''}
-                                onChange={(e) => handlePricingAssignmentChange(rowKey, e.target.value)}
-                                className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                              >
-                                <option value="">Choose tier…</option>
-                                {(formData.pricing_tiers || []).map((tier) => (
-                                  <option key={tier.id} value={tier.id}>
-                                    {tier.label || 'Untitled tier'}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
-                      <label className="block text-sm text-gray-300 mb-1">Ticket Price</label>
-                      <input
-                        name="ticket_price"
-                        value={formData.ticket_price}
-                        onChange={handleChange}
-                        type="number"
-                        step="0.01"
-                        className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                        placeholder="Leave blank for free shows"
-                      />
-                      <p className="text-xs text-gray-400 mt-1">Leave blank if this event is free or donation-based.</p>
+                      <label className="block text-sm text-gray-300 mb-1">Artist Name*</label>
+                      <input name="artist_name" value={formData.artist_name} onChange={handleChange} required className="w-full rounded bg-gray-700 px-4 py-2 text-white" />
                     </div>
-
                     <div>
-                      <label className="block text-sm text-gray-300 mb-1">Door Price</label>
-                      <input
-                        name="door_price"
-                        value={formData.door_price}
-                        onChange={handleChange}
-                        type="number"
-                        step="0.01"
-                        className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                        placeholder="Leave blank if no door cover"
-                      />
-                      <p className="text-xs text-gray-400 mt-1">If there is no separate door price, leave blank.</p>
+                      <label className="block text-sm text-gray-300 mb-1">Genre</label>
+                      <input name="genre" value={formData.genre} onChange={handleChange} className="w-full rounded bg-gray-700 px-4 py-2 text-white" />
                     </div>
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Age Restriction</label>
-                <select name="age_restriction" value={formData.age_restriction} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded">
-                  <option>All Ages</option>
-                  <option>18+</option>
-                  <option>21+</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Venue Section</label>
-                <input name="venue_section" value={formData.venue_section} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Seat Reservations</label>
-                <label className="inline-flex items-center gap-2 text-gray-200">
-                  <input
-                    type="checkbox"
-                    name="seating_enabled"
-                    checked={!!formData.seating_enabled}
-                    onChange={handleChange}
-                    className="h-4 w-4 rounded border-gray-600"
-                  />
-                  <span>{formData.seating_enabled ? 'Enabled' : 'Disabled'}</span>
-                </label>
-                <p className="text-xs text-gray-400 mt-1">
-                  Toggle to hide or show seating UI without losing layouts or reservations.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Venue*</label>
-                <select
-                  name="venue_code"
-                  value={formData.venue_code}
-                  onChange={handleChange}
-                  required
-                  className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                >
-                  <option value="MMH">Midway Music Hall</option>
-                  <option value="TGP">The Gathering Place</option>
-                </select>
-                <p className="text-xs text-gray-400 mt-1">Controls which public schedule and filtering bucket this show appears in.</p>
-              </div>
-
-              {editorFlags.showSeatingPanel && (
-                <>
-                  <div>
-                    <label className="block text-sm text-gray-300 mb-1">Seating Layout</label>
-                    <select name="layout_id" value={formData.layout_id} onChange={handleChange} className="w-full px-4 py-2 bg-gray-700 text-white rounded">
-                      <option value="">None (No seat reservations)</option>
-                      {layouts.map(layout => (
-                        <option key={layout.id} value={layout.id}>
-                          {layout.name} {layout.is_default === 1 ? '(Default)' : ''}
+                    <div className="md:col-span-2">
+                      <label className="block text-sm text-gray-300 mb-1">Category</label>
+                      <select
+                        name="category_id"
+                        value={formData.category_id}
+                        onChange={handleChange}
+                        className="w-full rounded bg-gray-700 px-4 py-2 text-white"
+                      >
+                        <option value="">
+                          {categories.length ? 'Select category (defaults to Normal)' : 'Loading categories…'}
                         </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Select a layout or leave as None. Changing layouts will prompt a confirmation and creates a recovery snapshot.
-                    </p>
-                    {editing && (formData.layout_id || editing.layout_id) && (
-                      <div className="mt-3 space-y-2">
-                        <button
-                          type="button"
-                          onClick={refreshLayoutSnapshot}
-                          disabled={refreshingLayout}
-                          className="inline-flex items-center justify-center rounded bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm font-medium text-white transition"
-                        >
-                          {refreshingLayout ? 'Refreshing layout…' : 'Apply latest layout template'}
-                        </button>
-                        <p className="text-xs text-gray-400">
-                          Use this after editing the layout template so the public seating chart stays in sync.
+                        {categoryOptions.map((cat) => (
+                          <option key={cat.id} value={cat.id}>
+                            {cat.name}{cat.is_active ? '' : ' (inactive)'}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-xs text-gray-400">Inactive categories remain selectable if already assigned to this event.</p>
+                    </div>
+                  </div>
+                </AdminCollapsibleSection>
+
+                <AdminCollapsibleSection
+                  id="event-editor-audience-venue"
+                  title="Audience & Venue"
+                  description="Controls age guidance, room labeling, and public venue placement."
+                  summary={eventEditorSummaries['audience-venue']}
+                  isCollapsed={Boolean(collapsedEditorSections['audience-venue'])}
+                  onToggle={() => toggleEditorSection('audience-venue')}
+                >
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Age Restriction</label>
+                      <select name="age_restriction" value={formData.age_restriction} onChange={handleChange} className="w-full rounded bg-gray-700 px-4 py-2 text-white">
+                        <option>All Ages</option>
+                        <option>18+</option>
+                        <option>21+</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Venue*</label>
+                      <select
+                        name="venue_code"
+                        value={formData.venue_code}
+                        onChange={handleChange}
+                        required
+                        className="w-full rounded bg-gray-700 px-4 py-2 text-white"
+                      >
+                        <option value="MMH">Midway Music Hall</option>
+                        <option value="TGP">The Gathering Place</option>
+                      </select>
+                      <p className="mt-1 text-xs text-gray-400">Controls which public schedule and filtering bucket this show appears in.</p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm text-gray-300 mb-1">Venue Section</label>
+                      <input name="venue_section" value={formData.venue_section} onChange={handleChange} className="w-full rounded bg-gray-700 px-4 py-2 text-white" />
+                    </div>
+                  </div>
+                </AdminCollapsibleSection>
+
+                <AdminCollapsibleSection
+                  id="event-editor-schedule"
+                  title="Schedule / Date & Time"
+                  description="Primary date, start time, and doors-open time."
+                  summary={eventEditorSummaries.schedule}
+                  isCollapsed={Boolean(collapsedEditorSections.schedule)}
+                  onToggle={() => toggleEditorSection('schedule')}
+                >
+                  <div className="space-y-5">
+                    <div className="rounded-xl border border-purple-500/20 bg-gray-900/40 p-4">
+                      <label className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(formData.multi_day_enabled)}
+                          onChange={(e) => handleMultiDayToggle(e.target.checked)}
+                          className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-800 text-purple-500 focus:ring-purple-500"
+                        />
+                        <span>
+                          <span className="block text-sm font-semibold text-white">Multi-Day Event</span>
+                          <span className="mt-1 block text-xs text-gray-400">
+                            Reveal multiple event dates with their own start times while keeping one shared reservation and pricing context.
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+
+                    {!formData.multi_day_enabled ? (
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="block text-sm text-gray-300 mb-1">Event Date*</label>
+                          <input
+                            type="text"
+                            name="event_date"
+                            value={formData.event_date}
+                            onChange={handleChange}
+                            onBlur={handleScheduleBlur}
+                            placeholder="MM/DD/YYYY"
+                            inputMode="numeric"
+                            autoComplete="off"
+                            aria-required={scheduleInputsRequired}
+                            aria-invalid={fieldErrors.event_date ? 'true' : 'false'}
+                            aria-describedby={fieldErrors.event_date ? 'event-date-error' : undefined}
+                            ref={(node) => { scheduleInputRefs.current.event_date = node; }}
+                            className={`w-full rounded border px-4 py-2 text-white ${
+                              fieldErrors.event_date
+                                ? 'border-red-500 bg-red-900/25 focus:border-red-500 focus:ring-2 focus:ring-red-500'
+                                : 'border-gray-600 bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500'
+                            }`}
+                          />
+                          {fieldErrors.event_date && (
+                            <p id="event-date-error" className="mt-1 text-xs text-red-300">
+                              {fieldErrors.event_date}
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-sm text-gray-300 mb-1">Event Time*</label>
+                          <input
+                            type="text"
+                            name="event_time"
+                            value={formData.event_time}
+                            onChange={handleChange}
+                            onBlur={handleScheduleBlur}
+                            placeholder="h:mm AM/PM"
+                            inputMode="text"
+                            autoComplete="off"
+                            aria-required={scheduleInputsRequired}
+                            aria-invalid={fieldErrors.event_time ? 'true' : 'false'}
+                            aria-describedby={fieldErrors.event_time ? 'event-time-error' : undefined}
+                            ref={(node) => { scheduleInputRefs.current.event_time = node; }}
+                            className={`w-full rounded border px-4 py-2 text-white ${
+                              fieldErrors.event_time
+                                ? 'border-red-500 bg-red-900/25 focus:border-red-500 focus:ring-2 focus:ring-red-500'
+                                : 'border-gray-600 bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500'
+                            }`}
+                          />
+                          {fieldErrors.event_time && (
+                            <p id="event-time-error" className="mt-1 text-xs text-red-300">
+                              {fieldErrors.event_time}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex flex-col gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-amber-100">Event run dates</p>
+                            <p className="mt-1 text-xs text-amber-50/90">
+                              Add each date and start time in this run. Customers will choose seats once and keep those seats for every date listed here.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleAddOccurrenceRow}
+                            className="inline-flex items-center justify-center rounded bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500"
+                          >
+                            Add Date
+                          </button>
+                        </div>
+                        <div className="space-y-3">
+                          {(formData.occurrence_rows || []).map((row, index) => {
+                            const occurrenceErrors = fieldErrors.occurrences?.[index] || {};
+                            return (
+                              <div key={row.row_id} className="rounded-xl border border-gray-700 bg-gray-900/50 p-4">
+                                <div className="mb-3 flex items-center justify-between gap-3">
+                                  <p className="text-sm font-semibold text-white">Occurrence {index + 1}</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveOccurrenceRow(index)}
+                                    disabled={(formData.occurrence_rows || []).length <= 1}
+                                    className="text-xs font-semibold text-red-200 hover:text-white disabled:cursor-not-allowed disabled:text-gray-500"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                  <div>
+                                    <label className="block text-sm text-gray-300 mb-1">Date*</label>
+                                    <input
+                                      type="text"
+                                      value={row.event_date}
+                                      onChange={(e) => handleOccurrenceRowChange(index, 'event_date', e.target.value)}
+                                      onBlur={() => handleOccurrenceBlur(index, 'event_date')}
+                                      placeholder="MM/DD/YYYY"
+                                      inputMode="numeric"
+                                      autoComplete="off"
+                                      aria-required={scheduleInputsRequired}
+                                      aria-invalid={occurrenceErrors.event_date ? 'true' : 'false'}
+                                      ref={(node) => { scheduleInputRefs.current[`occurrence_${index}_event_date`] = node; }}
+                                      className={`w-full rounded border px-4 py-2 text-white ${
+                                        occurrenceErrors.event_date
+                                          ? 'border-red-500 bg-red-900/25 focus:border-red-500 focus:ring-2 focus:ring-red-500'
+                                          : 'border-gray-600 bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500'
+                                      }`}
+                                    />
+                                    {occurrenceErrors.event_date && (
+                                      <p className="mt-1 text-xs text-red-300">
+                                        {occurrenceErrors.event_date}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <label className="block text-sm text-gray-300 mb-1">Start Time*</label>
+                                    <input
+                                      type="text"
+                                      value={row.event_time}
+                                      onChange={(e) => handleOccurrenceRowChange(index, 'event_time', e.target.value)}
+                                      onBlur={() => handleOccurrenceBlur(index, 'event_time')}
+                                      placeholder="h:mm AM/PM"
+                                      inputMode="text"
+                                      autoComplete="off"
+                                      aria-required={scheduleInputsRequired}
+                                      aria-invalid={occurrenceErrors.event_time ? 'true' : 'false'}
+                                      ref={(node) => { scheduleInputRefs.current[`occurrence_${index}_event_time`] = node; }}
+                                      className={`w-full rounded border px-4 py-2 text-white ${
+                                        occurrenceErrors.event_time
+                                          ? 'border-red-500 bg-red-900/25 focus:border-red-500 focus:ring-2 focus:ring-red-500'
+                                          : 'border-gray-600 bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500'
+                                      }`}
+                                    />
+                                    {occurrenceErrors.event_time && (
+                                      <p className="mt-1 text-xs text-red-300">
+                                        {occurrenceErrors.event_time}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="md:col-span-2">
+                      <label className="block text-sm text-gray-300 mb-1">
+                        {formData.multi_day_enabled ? 'Doors Open Time (applies to each date)*' : 'Doors Open Time*'}
+                      </label>
+                      <input
+                        type="text"
+                        name="door_time"
+                        value={formData.door_time}
+                        onChange={handleChange}
+                        onBlur={handleScheduleBlur}
+                        placeholder="h:mm AM/PM"
+                        inputMode="text"
+                        autoComplete="off"
+                        aria-required={scheduleInputsRequired}
+                        aria-invalid={fieldErrors.door_time ? 'true' : 'false'}
+                        aria-describedby={fieldErrors.door_time ? 'door-time-help door-time-error' : 'door-time-help'}
+                        ref={(node) => { scheduleInputRefs.current.door_time = node; }}
+                        className={`w-full rounded border px-4 py-2 text-white ${
+                          fieldErrors.door_time
+                            ? 'border-red-500 bg-red-900/25 focus:border-red-500 focus:ring-2 focus:ring-red-500'
+                            : 'border-gray-600 bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500'
+                        }`}
+                      />
+                      <p id="door-time-help" className="mt-1 text-xs text-gray-400">
+                        {formData.multi_day_enabled
+                          ? 'This shared doors-open time is applied to each configured date in the run.'
+                          : 'This feeds the “Doors Open” line on the public schedule.'}
+                      </p>
+                      {fieldErrors.door_time && (
+                        <p id="door-time-error" className="mt-1 text-xs text-red-300">
+                          {fieldErrors.door_time}
                         </p>
-                        {refreshLayoutMessage && <p className="text-xs text-green-400">{refreshLayoutMessage}</p>}
-                        {refreshLayoutError && <p className="text-xs text-red-400">{refreshLayoutError}</p>}
+                      )}
+                    </div>
+                  </div>
+                </AdminCollapsibleSection>
+
+                <AdminCollapsibleSection
+                  id="event-editor-pricing"
+                  title="Pricing"
+                  description="Flat or tiered pricing for the event."
+                  summary={eventEditorSummaries.pricing}
+                  isCollapsed={Boolean(collapsedEditorSections.pricing)}
+                  onToggle={() => toggleEditorSection('pricing')}
+                >
+                  <div className="space-y-4 rounded-xl border border-purple-500/30 bg-gray-900/50 p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <label className="mb-1 block text-sm text-gray-200">Pricing</label>
+                        <p className="text-xs text-gray-400">
+                          Choose flat pricing for standard shows or tiered pricing for special seating-based events.
+                        </p>
+                      </div>
+                      <div className="w-full md:w-56">
+                        <label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">Pricing Mode</label>
+                        <select
+                          value={formData.pricing_mode}
+                          onChange={(e) => handlePricingModeChange(e.target.value)}
+                          className="w-full rounded bg-gray-700 px-4 py-2 text-white"
+                        >
+                          <option value="flat">Flat pricing</option>
+                          <option value="tiered">Tiered seating pricing</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {formData.pricing_mode === 'tiered' ? (
+                      <div className="space-y-5">
+                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+                          <p className="text-sm font-semibold text-amber-100">
+                            Tiered pricing replaces the normal price display for this event.
+                          </p>
+                          <p className="mt-1 text-xs text-amber-50/90">
+                            Assign each seat/table group to a tier. Seat colors stay reserved for availability states, so customers see pricing as a legend/list in the seating flow.
+                          </p>
+                          {tieredPricingPreview && (
+                            <p className="mt-2 text-sm text-amber-100">Preview: {tieredPricingPreview}</p>
+                          )}
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <h3 className="text-sm font-semibold text-white">Price tiers</h3>
+                              <p className="text-xs text-gray-400">Minimum 3 tiers. Add more if this event needs them.</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleAddPricingTier}
+                              className="inline-flex items-center justify-center rounded bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500"
+                            >
+                              Add tier
+                            </button>
+                          </div>
+                          <div className="grid gap-4 lg:grid-cols-2">
+                            {(formData.pricing_tiers || []).map((tier, index) => (
+                              <div key={tier.id} className="space-y-3 rounded-xl border border-gray-700 bg-gray-950/60 p-4">
+                                <div className="flex items-center justify-between gap-3">
+                                  <p className="text-sm font-semibold text-white">Tier {index + 1}</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemovePricingTier(tier.id)}
+                                    disabled={(formData.pricing_tiers || []).length <= 3}
+                                    className="text-xs font-semibold text-red-200 hover:text-white disabled:cursor-not-allowed disabled:text-gray-500"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_9rem_5rem]">
+                                  <div>
+                                    <label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">Label</label>
+                                    <input
+                                      type="text"
+                                      value={tier.label}
+                                      onChange={(e) => handlePricingTierChange(tier.id, 'label', e.target.value)}
+                                      className="w-full rounded bg-gray-700 px-4 py-2 text-white"
+                                      placeholder="VIP"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">Price</label>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      value={tier.price}
+                                      onChange={(e) => handlePricingTierChange(tier.id, 'price', e.target.value)}
+                                      className="w-full rounded bg-gray-700 px-4 py-2 text-white"
+                                      placeholder="25.00"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">Color</label>
+                                    <input
+                                      type="color"
+                                      value={tier.color || DEFAULT_PRICING_TIER_COLORS[index % DEFAULT_PRICING_TIER_COLORS.length]}
+                                      onChange={(e) => handlePricingTierChange(tier.id, 'color', e.target.value)}
+                                      className="h-11 w-full rounded bg-gray-700 p-1"
+                                    />
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">Optional note</label>
+                                  <input
+                                    type="text"
+                                    value={tier.note}
+                                    onChange={(e) => handlePricingTierChange(tier.id, 'note', e.target.value)}
+                                    className="w-full rounded bg-gray-700 px-4 py-2 text-white"
+                                    placeholder="Closest to the stage"
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div>
+                            <h3 className="text-sm font-semibold text-white">Seat/table assignments</h3>
+                            <p className="text-xs text-gray-400">
+                              Each interactive row or table group in the selected layout needs a tier assignment.
+                            </p>
+                          </div>
+                          {!formData.layout_id ? (
+                            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                              Choose a seating layout before enabling tiered pricing.
+                            </div>
+                          ) : eventPricingRowsLoading ? (
+                            <div className="rounded-lg border border-gray-700 bg-gray-950/60 px-4 py-3 text-sm text-gray-300">
+                              Loading this event&apos;s current seat groups…
+                            </div>
+                          ) : pricingAssignmentOptions.length === 0 ? (
+                            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                              The selected layout has no active seat/table groups to assign.
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {pricingAssignmentOptions.map(({ rowKey, label, seatCount }) => (
+                                <div key={rowKey} className="grid gap-3 rounded-lg border border-gray-700 bg-gray-950/60 p-3 md:grid-cols-[minmax(0,1fr)_16rem] md:items-center">
+                                  <div>
+                                    <p className="font-medium text-white">{label}</p>
+                                    <p className="text-xs text-gray-400">
+                                      {seatCount} {seatCount === 1 ? 'seat' : 'seats'}
+                                    </p>
+                                  </div>
+                                  <select
+                                    value={formData.pricing_assignments?.[rowKey] || ''}
+                                    onChange={(e) => handlePricingAssignmentChange(rowKey, e.target.value)}
+                                    className="w-full rounded bg-gray-700 px-4 py-2 text-white"
+                                  >
+                                    <option value="">Choose tier…</option>
+                                    {(formData.pricing_tiers || []).map((tier) => (
+                                      <option key={tier.id} value={tier.id}>
+                                        {tier.label || 'Untitled tier'}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="block text-sm text-gray-300 mb-1">Ticket Price</label>
+                          <input
+                            name="ticket_price"
+                            value={formData.ticket_price}
+                            onChange={handleChange}
+                            type="number"
+                            step="0.01"
+                            className="w-full rounded bg-gray-700 px-4 py-2 text-white"
+                            placeholder="Leave blank for free shows"
+                          />
+                          <p className="mt-1 text-xs text-gray-400">Leave blank if this event is free or donation-based.</p>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm text-gray-300 mb-1">Door Price</label>
+                          <input
+                            name="door_price"
+                            value={formData.door_price}
+                            onChange={handleChange}
+                            type="number"
+                            step="0.01"
+                            className="w-full rounded bg-gray-700 px-4 py-2 text-white"
+                            placeholder="Leave blank if no door cover"
+                          />
+                          <p className="mt-1 text-xs text-gray-400">If there is no separate door price, leave blank.</p>
+                        </div>
                       </div>
                     )}
                   </div>
+                </AdminCollapsibleSection>
 
-                  {editing && (
-                    <div className="md:col-span-2 rounded-2xl border border-gray-700 bg-gray-900/40 p-4 space-y-3">
-                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <AdminCollapsibleSection
+                  id="event-editor-seating"
+                  title="Seating Configuration"
+                  description="Layout binding, reservation visibility, and recovery snapshots."
+                  summary={eventEditorSummaries.seating}
+                  isCollapsed={Boolean(collapsedEditorSections.seating)}
+                  onToggle={() => toggleEditorSection('seating')}
+                >
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Seat Reservations</label>
+                      <label className="inline-flex items-center gap-2 text-gray-200">
+                        <input
+                          type="checkbox"
+                          name="seating_enabled"
+                          checked={!!formData.seating_enabled}
+                          onChange={handleChange}
+                          className="h-4 w-4 rounded border-gray-600"
+                        />
+                        <span>{formData.seating_enabled ? 'Enabled' : 'Disabled'}</span>
+                      </label>
+                      <p className="mt-1 text-xs text-gray-400">
+                        Toggle to hide or show seating UI without losing layouts or reservations.
+                      </p>
+                    </div>
+
+                    {editorFlags.showSeatingPanel ? (
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-1">Seating Layout</label>
+                        <select name="layout_id" value={formData.layout_id} onChange={handleChange} className="w-full rounded bg-gray-700 px-4 py-2 text-white">
+                          <option value="">None (No seat reservations)</option>
+                          {layouts.map((layout) => (
+                            <option key={layout.id} value={layout.id}>
+                              {layout.name} {layout.is_default === 1 ? '(Default)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="mt-1 text-xs text-gray-400">
+                          Select a layout or leave as None. Changing layouts will prompt a confirmation and creates a recovery snapshot.
+                        </p>
+                        {editing && (formData.layout_id || editing.layout_id) && (
+                          <div className="mt-3 space-y-2">
+                            <button
+                              type="button"
+                              onClick={refreshLayoutSnapshot}
+                              disabled={refreshingLayout}
+                              className="inline-flex items-center justify-center rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {refreshingLayout ? 'Refreshing layout…' : 'Apply latest layout template'}
+                            </button>
+                            <p className="text-xs text-gray-400">
+                              Use this after editing the layout template so the public seating chart stays in sync.
+                            </p>
+                            {refreshLayoutMessage && <p className="text-xs text-green-400">{refreshLayoutMessage}</p>}
+                            {refreshLayoutError && <p className="text-xs text-red-400">{refreshLayoutError}</p>}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-gray-700 bg-gray-900/40 p-4 text-sm text-gray-300">
+                        Enable seat reservations to pick a layout and manage seating snapshots for this event.
+                      </div>
+                    )}
+
+                    {editorFlags.showSeatingPanel && editing && (
+                      <div className="md:col-span-2 space-y-3 rounded-2xl border border-gray-700 bg-gray-900/40 p-4">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <h3 className="text-base font-semibold text-white">Seating Snapshots</h3>
+                            <p className="text-xs text-gray-400">
+                              Latest recovery checkpoints captured before layout changes.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => fetchSeatingSnapshots(editing.id)}
+                            disabled={seatingSnapshotsState.loading}
+                            className="inline-flex items-center justify-center rounded bg-gray-700 px-3 py-1 text-xs font-semibold text-white hover:bg-gray-600 disabled:opacity-50"
+                          >
+                            {seatingSnapshotsState.loading ? 'Loading…' : 'Refresh'}
+                          </button>
+                        </div>
+                        {seatingSnapshotsState.error && (
+                          <p className="text-xs text-red-400">{seatingSnapshotsState.error}</p>
+                        )}
+                        {snapshotCopyMessage && (
+                          <p className="text-xs text-emerald-300">{snapshotCopyMessage}</p>
+                        )}
+                        {snapshotRestoreState.error && (
+                          <p className="text-xs text-red-400">{snapshotRestoreState.error}</p>
+                        )}
+                        {snapshotRestoreState.message && (
+                          <div
+                            className={`rounded px-3 py-2 text-sm ${
+                              snapshotRestoreState.conflicts.length > 0
+                                ? 'border border-amber-500 bg-amber-900/20 text-amber-100'
+                                : 'border border-emerald-600 bg-emerald-900/20 text-emerald-100'
+                            }`}
+                          >
+                            <p>{snapshotRestoreState.message}</p>
+                            {snapshotRestoreState.conflicts.length > 0 && (
+                              <div className="mt-2">
+                                <p className="text-xs font-semibold">Conflicts to follow up:</p>
+                                <ul className="mt-1 list-disc space-y-1 pl-4 text-xs">
+                                  {snapshotRestoreState.conflicts.map((conflict, idx) => (
+                                    <li key={conflict.seat || conflict.type || idx}>{describeSnapshotConflict(conflict)}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {seatingSnapshotsState.loading ? (
+                          <p className="text-sm text-gray-400">Loading snapshots…</p>
+                        ) : seatingSnapshotsState.items.length === 0 ? (
+                          <p className="text-sm text-gray-400">
+                            No snapshots yet. A recovery snapshot is saved automatically before each layout change.
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            {seatingSnapshotsState.items.map((snapshot) => (
+                              <div key={snapshot.id} className="flex flex-col gap-2 rounded border border-gray-700 px-3 py-2 md:flex-row md:items-center md:justify-between">
+                                <div>
+                                  <p className="text-sm font-semibold text-white">Snapshot #{snapshot.id}</p>
+                                  <p className="text-xs text-gray-400">
+                                    {formatSnapshotTimestamp(snapshot.created_at)} · {snapshot.snapshot_type?.replace(/_/g, ' ')}
+                                  </p>
+                                  <p className="text-xs text-gray-400">
+                                    Reserved: {snapshot.reserved_seats?.length || 0} · Pending: {snapshot.pending_seats?.length || 0} · Holds: {snapshot.hold_seats?.length || 0}
+                                  </p>
+                                </div>
+                                <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => openSnapshotPreview(snapshot)}
+                                    className="inline-flex items-center justify-center rounded bg-gray-600 px-3 py-1 text-xs font-semibold text-white hover:bg-gray-500"
+                                    aria-label={`Preview snapshot ${snapshot.id}`}
+                                  >
+                                    Preview
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => copySnapshotPayload(snapshot)}
+                                    className="inline-flex items-center justify-center rounded bg-purple-600 px-3 py-1 text-xs font-semibold text-white hover:bg-purple-500"
+                                    aria-label={`Copy snapshot ${snapshot.id} JSON`}
+                                  >
+                                    Copy JSON
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRestoreSnapshot(snapshot)}
+                                    disabled={snapshotRestoreState.restoringId === snapshot.id}
+                                    className="inline-flex items-center justify-center rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {snapshotRestoreState.restoringId === snapshot.id ? 'Restoring…' : 'Restore layout & seats'}
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </AdminCollapsibleSection>
+
+                <AdminCollapsibleSection
+                  id="event-editor-payment"
+                  title="Payment Settings"
+                  description="Category or global payment-link configuration for this event."
+                  summary={eventEditorSummaries.payment}
+                  isCollapsed={Boolean(collapsedEditorSections.payment)}
+                  onToggle={() => toggleEditorSection('payment')}
+                >
+                  {paymentSettingsAvailable ? (
+                    <div className="space-y-3 rounded-2xl border border-indigo-700/40 bg-indigo-950/20 p-4">
+                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                         <div>
-                          <h3 className="text-base font-semibold text-white">Seating Snapshots</h3>
-                          <p className="text-xs text-gray-400">
-                            Latest recovery checkpoints captured before layout changes.
+                          <h3 className="text-lg font-semibold text-white">Payment Link</h3>
+                          <p className="text-sm text-gray-400">
+                            {activePaymentConfig
+                              ? `Uses the ${activePaymentConfig.provider_label || 'custom'} payment link saved in Payment Settings.`
+                              : 'No payment configuration detected for this category.'}
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => fetchSeatingSnapshots(editing.id)}
-                          disabled={seatingSnapshotsState.loading}
-                          className="inline-flex items-center justify-center rounded bg-gray-700 px-3 py-1 text-xs font-semibold text-white hover:bg-gray-600 disabled:opacity-50"
-                        >
-                          {seatingSnapshotsState.loading ? 'Loading…' : 'Refresh'}
-                        </button>
+                        <label className="inline-flex items-center gap-2 text-sm text-gray-200">
+                          <input
+                            type="checkbox"
+                            name="payment_enabled"
+                            checked={!!formData.payment_enabled}
+                            onChange={handleChange}
+                            disabled={!activePaymentConfig}
+                            className="h-4 w-4 rounded bg-gray-700"
+                          />
+                          <span>Enable for this event</span>
+                        </label>
                       </div>
-                      {seatingSnapshotsState.error && (
-                        <p className="text-xs text-red-400">{seatingSnapshotsState.error}</p>
+                      {paymentSettingsError && (
+                        <p className="text-xs text-red-400">{paymentSettingsError}</p>
                       )}
-                      {snapshotCopyMessage && (
-                        <p className="text-xs text-emerald-300">{snapshotCopyMessage}</p>
+                      {activePaymentConfig ? (
+                        <div className="grid grid-cols-1 gap-3 text-sm text-gray-300 md:grid-cols-2">
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-gray-400">Provider</p>
+                            <p className="font-medium text-white">{activePaymentConfig.provider_label || 'Custom link'}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-gray-400">Type</p>
+                            <p className="font-medium text-white">
+                              {activePaymentConfig.provider_type === 'paypal_hosted_button'
+                                ? 'PayPal hosted button'
+                                : activePaymentConfig.provider_type === 'paypal_orders'
+                                  ? 'PayPal Orders (scaffold)'
+                                  : 'External link'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-gray-400">Seat limit</p>
+                            <p className="font-medium text-white">{activePaymentConfig.limit_seats} seats</p>
+                          </div>
+                          <div className="md:col-span-2">
+                            <p className="text-xs uppercase tracking-wide text-gray-400">Button text</p>
+                            <p className="font-medium text-white">{activePaymentConfig.button_text}</p>
+                          </div>
+                          {activePaymentConfig.provider_type === 'paypal_hosted_button' ? (
+                            <>
+                              <div>
+                                <p className="text-xs uppercase tracking-wide text-gray-400">Hosted button ID</p>
+                                <p className="font-medium text-white">{activePaymentConfig.paypal_hosted_button_id || 'Not set'}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs uppercase tracking-wide text-gray-400">Currency</p>
+                                <p className="font-medium text-white">{activePaymentConfig.paypal_currency || 'USD'}</p>
+                              </div>
+                            </>
+                          ) : activePaymentConfig.provider_type === 'paypal_orders' ? (
+                            <div className="md:col-span-2">
+                              <p className="text-xs uppercase tracking-wide text-gray-400">Orders scaffold</p>
+                              <p className="text-white">Dynamic amount capture is planned but not enabled in production yet.</p>
+                            </div>
+                          ) : (
+                            <div className="md:col-span-2">
+                              <p className="text-xs uppercase tracking-wide text-gray-400">Payment URL</p>
+                              <p className="break-all font-mono text-white">{activePaymentConfig.payment_url || 'Not set'}</p>
+                            </div>
+                          )}
+                          {activePaymentConfig.over_limit_message && (
+                            <div className="md:col-span-2">
+                              <p className="text-xs uppercase tracking-wide text-gray-400">Over-limit message</p>
+                              <p className="text-white">{activePaymentConfig.over_limit_message}</p>
+                            </div>
+                          )}
+                          {activePaymentConfig.fine_print && (
+                            <div className="md:col-span-2">
+                              <p className="text-xs uppercase tracking-wide text-gray-400">Fine print</p>
+                              <p className="text-white">{activePaymentConfig.fine_print}</p>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-400">
+                          Configure payment links under <span className="font-semibold text-white">Payment Settings</span> to make this option available.
+                        </p>
                       )}
-                      {snapshotRestoreState.error && (
-                        <p className="text-xs text-red-400">{snapshotRestoreState.error}</p>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-amber-600/40 bg-amber-950/20 p-4 text-sm text-amber-100">
+                      Payment links are unavailable until the Payment Settings migration runs.
+                    </div>
+                  )}
+                </AdminCollapsibleSection>
+
+                <AdminCollapsibleSection
+                  id="event-editor-advanced"
+                  title="Routing & Advanced"
+                  description="Seat request routing and any category-specific admin notes."
+                  summary={eventEditorSummaries.advanced}
+                  isCollapsed={Boolean(collapsedEditorSections.advanced)}
+                  onToggle={() => toggleEditorSection('advanced')}
+                >
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Seat request email (optional)</label>
+                      <input
+                        type="text"
+                        inputMode="email"
+                        autoComplete="email"
+                        name="seat_request_email_override"
+                        value={formData.seat_request_email_override}
+                        onChange={handleChange}
+                        aria-invalid={fieldErrors.seat_request_email_override ? 'true' : 'false'}
+                        aria-describedby={fieldErrors.seat_request_email_override ? 'seat-request-email-error' : undefined}
+                        className={`w-full rounded border px-4 py-2 text-white ${
+                          fieldErrors.seat_request_email_override
+                            ? 'border-red-500 bg-red-900/25 focus:border-red-500 focus:ring-2 focus:ring-red-500'
+                            : 'border-gray-600 bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500'
+                        }`}
+                        placeholder="Leave blank for default routing"
+                      />
+                      <p className="mt-1 text-xs text-gray-400">
+                        {editingSeatRouting
+                          ? `Currently routed to ${editingSeatRouting.email} (${editingSeatRouting.label}).`
+                          : 'Leave blank to use the Beach Bands inbox for beach shows or the main staff inbox for everything else.'}
+                      </p>
+                      {fieldErrors.seat_request_email_override && (
+                        <p id="seat-request-email-error" className="mt-1 text-xs text-red-300">
+                          {fieldErrors.seat_request_email_override}
+                        </p>
                       )}
-                      {snapshotRestoreState.message && (
-                        <div
-                          className={`rounded px-3 py-2 text-sm ${
-                            snapshotRestoreState.conflicts.length > 0
-                              ? 'border border-amber-500 bg-amber-900/20 text-amber-100'
-                              : 'border border-emerald-600 bg-emerald-900/20 text-emerald-100'
+                    </div>
+
+                    {editorFlags.showRecurringPanel ? (
+                      <div className="space-y-4 rounded-2xl border border-blue-700/40 bg-blue-950/20 p-4">
+                        <div>
+                          <h3 className="text-lg font-semibold text-white">Recurring Series Details</h3>
+                          <p className="text-sm text-gray-400">Customize the public copy for this series. These fields power the Recurring Events grid on the home page.</p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="block text-sm text-gray-300 mb-1">Typical schedule label</label>
+                            <input
+                              name="series_schedule_label"
+                              value={formData.series_schedule_label}
+                              onChange={handleChange}
+                              className="w-full rounded bg-gray-800 px-4 py-2 text-white"
+                              placeholder="e.g., Thursdays · 6:00 – 10:00 PM"
+                            />
+                            <p className="mt-1 text-xs text-gray-400">Shown beneath the “Typical schedule” heading.</p>
+                          </div>
+                          <div>
+                            <label className="block text-sm text-gray-300 mb-1">Highlight summary</label>
+                            <textarea
+                              name="series_summary"
+                              value={formData.series_summary}
+                              onChange={handleChange}
+                              rows="3"
+                              className="w-full rounded bg-gray-800 px-4 py-2 text-white"
+                              placeholder="One-line overview that appears near the title."
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm text-gray-300 mb-1">Footer note</label>
+                          <textarea
+                            name="series_footer_note"
+                            value={formData.series_footer_note}
+                            onChange={handleChange}
+                            rows="2"
+                            className="w-full rounded bg-gray-800 px-4 py-2 text-white"
+                            placeholder="Optional line that shows at the bottom of the recurring card (e.g., Weekly classic car cruise in)."
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {editorFlags.showBeachBandsPanel && (
+                      <div className="space-y-3 rounded-2xl border border-cyan-600/40 bg-cyan-950/20 p-4">
+                        <div>
+                          <h3 className="text-lg font-semibold text-white">Beach Bands notes</h3>
+                          <p className="text-sm text-gray-300">
+                            Beach Bands shows use special routing and promo copy. Double-check pricing, sponsor copy, and imagery before publishing.
+                          </p>
+                          <p className="mt-1 text-xs text-gray-400">
+                            Future Beach Bands-only settings will live here so staff always knows why this section is visible.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </AdminCollapsibleSection>
+
+                <AdminCollapsibleSection
+                  id="event-editor-contact"
+                  title="Event Contact"
+                  description="Public contact details used across schedule, seating, and category-specific surfaces."
+                  summary={eventEditorSummaries.contact}
+                  isCollapsed={Boolean(collapsedEditorSections.contact)}
+                  onToggle={() => toggleEditorSection('contact')}
+                >
+                  <div className="space-y-4 rounded-2xl border border-gray-700 bg-gray-900/40 p-4">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-1">Contact Name</label>
+                        <input
+                          name="contact_name"
+                          value={formData.contact_name}
+                          onChange={handleChange}
+                          className="w-full rounded bg-gray-700 px-4 py-2 text-white"
+                          placeholder="Donna Cheek"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-1">Contact Phone</label>
+                        <input
+                          type="tel"
+                          name="contact_phone_raw"
+                          value={formData.contact_phone_raw}
+                          onChange={handleChange}
+                          className="w-full rounded bg-gray-700 px-4 py-2 text-white"
+                          placeholder="336-793-4218"
+                        />
+                        <p className="mt-1 text-xs text-gray-400">
+                          Used for seat confirmations and Beach Bands price inquiries.
+                        </p>
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-sm text-gray-300 mb-1">Contact Email</label>
+                        <input
+                          type="text"
+                          inputMode="email"
+                          autoComplete="email"
+                          name="contact_email"
+                          value={formData.contact_email}
+                          onChange={handleChange}
+                          aria-invalid={fieldErrors.contact_email ? 'true' : 'false'}
+                          aria-describedby={fieldErrors.contact_email ? 'contact-email-error' : undefined}
+                          className={`w-full rounded border px-4 py-2 text-white ${
+                            fieldErrors.contact_email
+                              ? 'border-red-500 bg-red-900/25 focus:border-red-500 focus:ring-2 focus:ring-red-500'
+                              : 'border-gray-600 bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500'
                           }`}
-                        >
-                          <p>{snapshotRestoreState.message}</p>
-                          {snapshotRestoreState.conflicts.length > 0 && (
-                            <div className="mt-2">
-                              <p className="text-xs font-semibold">Conflicts to follow up:</p>
-                              <ul className="mt-1 list-disc space-y-1 pl-4 text-xs">
-                                {snapshotRestoreState.conflicts.map((conflict, idx) => (
-                                  <li key={conflict.seat || conflict.type || idx}>{describeSnapshotConflict(conflict)}</li>
-                                ))}
-                              </ul>
+                          placeholder="events@midwaymusichall.net"
+                        />
+                        {fieldErrors.contact_email && (
+                          <p id="contact-email-error" className="mt-1 text-xs text-red-300">
+                            {fieldErrors.contact_email}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-1">Contact Notes (optional)</label>
+                      <textarea
+                        name="contact_notes"
+                        value={formData.contact_notes}
+                        onChange={handleChange}
+                        rows="3"
+                        className="w-full rounded bg-gray-700 px-4 py-2 text-white"
+                        placeholder="Add call hours, text instructions, or seat request guidance."
+                      />
+                    </div>
+                  </div>
+                </AdminCollapsibleSection>
+
+                <AdminCollapsibleSection
+                  id="event-editor-media"
+                  title="Event Media & Description"
+                  description="Poster image, uploads, and public event copy."
+                  summary={eventEditorSummaries.media}
+                  isCollapsed={Boolean(collapsedEditorSections.media)}
+                  onToggle={() => toggleEditorSection('media')}
+                >
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-2 block text-sm text-gray-300">Event Image</label>
+                      <div className="space-y-3">
+                        {(imagePreview || formData.image_url) && (
+                          <div className="relative inline-block">
+                            <ResponsiveImage
+                              src={imagePreview || getImageUrlSync(formData.image_url)}
+                              alt="Event preview"
+                              width={256}
+                              height={256}
+                              className="h-32 w-32 rounded-lg border-2 border-gray-600 object-cover"
+                            />
+                            <button
+                              type="button"
+                              onClick={clearImage}
+                              className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white hover:bg-red-700"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
+
+                        <div>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageChange}
+                            className="block w-full cursor-pointer text-sm text-gray-300 file:mr-4 file:cursor-pointer file:rounded file:border-0 file:bg-purple-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-purple-700"
+                          />
+                          <p className="mt-1 text-xs text-gray-400">Upload a custom image or leave empty to use the default logo</p>
+                        </div>
+
+                        <div>
+                          <label className="mb-1 block text-xs text-gray-400">Or enter image URL:</label>
+                          <input
+                            name="image_url"
+                            value={formData.image_url}
+                            onChange={handleChange}
+                            className="w-full rounded bg-gray-700 px-3 py-2 text-sm text-white"
+                            placeholder="https://example.com/image.jpg"
+                          />
+                        </div>
+                      </div>
+
+                      {(imageUploading || imageUploadProcessing) && (
+                        <div className="mt-3 space-y-2" aria-live="polite">
+                          {imageUploading && (
+                            <>
+                              <div className="flex justify-between text-xs text-gray-300">
+                                <span>Uploading image</span>
+                                <span>{imageUploadProgress}%</span>
+                              </div>
+                              <div
+                                className="h-2 w-full rounded-full bg-gray-600"
+                                role="progressbar"
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                                aria-valuenow={imageUploadProgress}
+                              >
+                                <div
+                                  className="h-2 rounded-full bg-purple-500 transition-all"
+                                  style={{ width: `${imageUploadProgress}%` }}
+                                />
+                              </div>
+                            </>
+                          )}
+                          {imageUploadProcessing && (
+                            <div className="flex items-center gap-2 text-xs text-gray-200">
+                              <span className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" aria-hidden="true" />
+                              <span>Processing images…</span>
                             </div>
                           )}
                         </div>
                       )}
-                      {seatingSnapshotsState.loading ? (
-                        <p className="text-sm text-gray-400">Loading snapshots…</p>
-                      ) : seatingSnapshotsState.items.length === 0 ? (
-                        <p className="text-sm text-gray-400">
-                          No snapshots yet. A recovery snapshot is saved automatically before each layout change.
-                        </p>
-                      ) : (
-                        <div className="space-y-2">
-                          {seatingSnapshotsState.items.map((snapshot) => (
-                            <div key={snapshot.id} className="flex flex-col gap-2 rounded border border-gray-700 px-3 py-2 md:flex-row md:items-center md:justify-between">
-                              <div>
-                                <p className="text-sm font-semibold text-white">Snapshot #{snapshot.id}</p>
-                                <p className="text-xs text-gray-400">
-                                  {formatSnapshotTimestamp(snapshot.created_at)} · {snapshot.snapshot_type?.replace(/_/g, ' ')}
-                                </p>
-                                <p className="text-xs text-gray-400">
-                                  Reserved: {snapshot.reserved_seats?.length || 0} · Pending: {snapshot.pending_seats?.length || 0} · Holds: {snapshot.hold_seats?.length || 0}
-                                </p>
-                              </div>
-                              <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                                <button
-                                  type="button"
-                                  onClick={() => openSnapshotPreview(snapshot)}
-                                  className="inline-flex items-center justify-center rounded bg-gray-600 px-3 py-1 text-xs font-semibold text-white hover:bg-gray-500"
-                                  aria-label={`Preview snapshot ${snapshot.id}`}
-                                >
-                                  Preview
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => copySnapshotPayload(snapshot)}
-                                  className="inline-flex items-center justify-center rounded bg-purple-600 px-3 py-1 text-xs font-semibold text-white hover:bg-purple-500"
-                                  aria-label={`Copy snapshot ${snapshot.id} JSON`}
-                                >
-                                  Copy JSON
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleRestoreSnapshot(snapshot)}
-                                  disabled={snapshotRestoreState.restoringId === snapshot.id}
-                                  className="inline-flex items-center justify-center rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  {snapshotRestoreState.restoringId === snapshot.id ? 'Restoring…' : 'Restore layout & seats'}
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
-                  )}
-                </>
-              )}
 
-              <div className="md:col-span-2">
-                <label className="block text-sm text-gray-300 mb-1">Seat request email (optional)</label>
-                <input
-                  type="text"
-                  inputMode="email"
-                  autoComplete="email"
-                  name="seat_request_email_override"
-                  value={formData.seat_request_email_override}
-                  onChange={handleChange}
-                  aria-invalid={fieldErrors.seat_request_email_override ? 'true' : 'false'}
-                  aria-describedby={fieldErrors.seat_request_email_override ? 'seat-request-email-error' : undefined}
-                  className={`w-full px-4 py-2 rounded border text-white ${
-                    fieldErrors.seat_request_email_override
-                      ? 'border-red-500 bg-red-900/25 focus:ring-2 focus:ring-red-500 focus:border-red-500'
-                      : 'border-gray-600 bg-gray-700 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
-                  }`}
-                  placeholder="Leave blank for default routing"
-                />
-                <p className="text-xs text-gray-400 mt-1">
-                  {editingSeatRouting
-                    ? `Currently routed to ${editingSeatRouting.email} (${editingSeatRouting.label}).`
-                    : 'Leave blank to use the Beach Bands inbox for beach shows or the main staff inbox for everything else.'}
-                </p>
-                {fieldErrors.seat_request_email_override && (
-                  <p id="seat-request-email-error" className="text-xs text-red-300 mt-1">
-                    {fieldErrors.seat_request_email_override}
-                  </p>
-                )}
-              </div>
-
-              {paymentSettingsAvailable ? (
-                <div className="md:col-span-2 rounded-2xl border border-indigo-700/40 bg-indigo-950/20 p-4 space-y-3">
-                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <h3 className="text-lg font-semibold text-white">Payment Link</h3>
-                      <p className="text-sm text-gray-400">
-                        {activePaymentConfig
-                          ? `Uses the ${activePaymentConfig.provider_label || 'custom'} payment link saved in Payment Settings.`
-                          : 'No payment configuration detected for this category.'}
-                      </p>
-                    </div>
-                    <label className="inline-flex items-center gap-2 text-sm text-gray-200">
-                      <input
-                        type="checkbox"
-                        name="payment_enabled"
-                        checked={!!formData.payment_enabled}
-                        onChange={handleChange}
-                        disabled={!activePaymentConfig}
-                        className="h-4 w-4 rounded bg-gray-700"
-                      />
-                      <span>Enable for this event</span>
-                    </label>
-                  </div>
-                  {paymentSettingsError && (
-                    <p className="text-xs text-red-400">{paymentSettingsError}</p>
-                  )}
-                  {activePaymentConfig ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-300">
-                      <div>
-                        <p className="text-xs text-gray-400 uppercase tracking-wide">Provider</p>
-                        <p className="text-white font-medium">{activePaymentConfig.provider_label || 'Custom link'}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-400 uppercase tracking-wide">Type</p>
-                        <p className="text-white font-medium">
-                          {activePaymentConfig.provider_type === 'paypal_hosted_button'
-                            ? 'PayPal hosted button'
-                            : activePaymentConfig.provider_type === 'paypal_orders'
-                              ? 'PayPal Orders (scaffold)'
-                              : 'External link'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-400 uppercase tracking-wide">Seat limit</p>
-                        <p className="text-white font-medium">{activePaymentConfig.limit_seats} seats</p>
-                      </div>
-                      <div className="md:col-span-2">
-                        <p className="text-xs text-gray-400 uppercase tracking-wide">Button text</p>
-                        <p className="text-white font-medium">{activePaymentConfig.button_text}</p>
-                      </div>
-                      {activePaymentConfig.provider_type === 'paypal_hosted_button' ? (
-                        <>
-                          <div>
-                            <p className="text-xs text-gray-400 uppercase tracking-wide">Hosted button ID</p>
-                            <p className="text-white font-medium">{activePaymentConfig.paypal_hosted_button_id || 'Not set'}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-gray-400 uppercase tracking-wide">Currency</p>
-                            <p className="text-white font-medium">{activePaymentConfig.paypal_currency || 'USD'}</p>
-                          </div>
-                        </>
-                      ) : activePaymentConfig.provider_type === 'paypal_orders' ? (
-                        <div className="md:col-span-2">
-                          <p className="text-xs text-gray-400 uppercase tracking-wide">Orders scaffold</p>
-                          <p className="text-white">Dynamic amount capture is planned but not enabled in production yet.</p>
-                        </div>
-                      ) : (
-                        <div className="md:col-span-2">
-                          <p className="text-xs text-gray-400 uppercase tracking-wide">Payment URL</p>
-                          <p className="text-white font-mono break-all">{activePaymentConfig.payment_url || 'Not set'}</p>
-                        </div>
-                      )}
-                      {activePaymentConfig.over_limit_message && (
-                        <div className="md:col-span-2">
-                          <p className="text-xs text-gray-400 uppercase tracking-wide">Over-limit message</p>
-                          <p className="text-white">{activePaymentConfig.over_limit_message}</p>
-                        </div>
-                      )}
-                      {activePaymentConfig.fine_print && (
-                        <div className="md:col-span-2">
-                          <p className="text-xs text-gray-400 uppercase tracking-wide">Fine print</p>
-                          <p className="text-white">{activePaymentConfig.fine_print}</p>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-400">
-                      Configure payment links under <span className="font-semibold text-white">Payment Settings</span> to make this option available.
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="md:col-span-2 rounded-2xl border border-amber-600/40 bg-amber-950/20 p-4 text-sm text-amber-100">
-                  Payment links are unavailable until the Payment Settings migration runs.
-                </div>
-              )}
-
-              {editorFlags.showRecurringPanel ? (
-                <div className="md:col-span-2 rounded-2xl border border-blue-700/40 bg-blue-950/20 p-4 space-y-4">
-                  <div>
-                    <h3 className="text-lg font-semibold text-white">Recurring Series Details</h3>
-                    <p className="text-sm text-gray-400">Customize the public copy for this series. These fields power the Recurring Events grid on the home page.</p>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm text-gray-300 mb-1">Typical schedule label</label>
-                      <input
-                        name="series_schedule_label"
-                        value={formData.series_schedule_label}
-                        onChange={handleChange}
-                        className="w-full px-4 py-2 bg-gray-800 text-white rounded"
-                        placeholder="e.g., Thursdays · 6:00 – 10:00 PM"
-                      />
-                      <p className="text-xs text-gray-400 mt-1">Shown beneath the “Typical schedule” heading.</p>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-gray-300 mb-1">Highlight summary</label>
-                      <textarea
-                        name="series_summary"
-                        value={formData.series_summary}
-                        onChange={handleChange}
-                        rows="3"
-                        className="w-full px-4 py-2 bg-gray-800 text-white rounded"
-                        placeholder="One-line overview that appears near the title."
-                      />
+                      <label className="block text-sm text-gray-300 mb-1">Description</label>
+                      <textarea name="description" value={formData.description} onChange={handleChange} rows="4" className="w-full rounded bg-gray-700 px-4 py-2 text-white" />
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-sm text-gray-300 mb-1">Footer note</label>
-                    <textarea
-                      name="series_footer_note"
-                      value={formData.series_footer_note}
-                      onChange={handleChange}
-                      rows="2"
-                      className="w-full px-4 py-2 bg-gray-800 text-white rounded"
-                      placeholder="Optional line that shows at the bottom of the recurring card (e.g., Weekly classic car cruise in)."
-                    />
-                  </div>
-                </div>
-              ) : null}
-
-              {editorFlags.showBeachBandsPanel && (
-                <div className="md:col-span-2 rounded-2xl border border-cyan-600/40 bg-cyan-950/20 p-4 space-y-3">
-                  <div>
-                    <h3 className="text-lg font-semibold text-white">Beach Bands notes</h3>
-                    <p className="text-sm text-gray-300">
-                      Beach Bands shows use special routing and promo copy. Double-check pricing, sponsor copy, and imagery before publishing.
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Future Beach Bands-only settings will live here so staff always knows why this section is visible.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <div className="md:col-span-2 rounded-2xl border border-gray-700 bg-gray-900/40 p-4 space-y-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-white">Event Contact</h3>
-                  <p className="text-sm text-gray-400">
-                    Displayed anywhere this event appears publicly (schedule, Beach Bands, seating requests).
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-gray-300 mb-1">Contact Name</label>
-                    <input
-                      name="contact_name"
-                      value={formData.contact_name}
-                      onChange={handleChange}
-                      className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                      placeholder="Donna Cheek"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-gray-300 mb-1">Contact Phone</label>
-                    <input
-                      type="tel"
-                      name="contact_phone_raw"
-                      value={formData.contact_phone_raw}
-                      onChange={handleChange}
-                      className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                      placeholder="336-793-4218"
-                    />
-                    <p className="text-xs text-gray-400 mt-1">
-                      Used for seat confirmations and Beach Bands price inquiries.
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-gray-300 mb-1">Contact Email</label>
-                    <input
-                      type="text"
-                      inputMode="email"
-                      autoComplete="email"
-                      name="contact_email"
-                      value={formData.contact_email}
-                      onChange={handleChange}
-                      aria-invalid={fieldErrors.contact_email ? 'true' : 'false'}
-                      aria-describedby={fieldErrors.contact_email ? 'contact-email-error' : undefined}
-                      className={`w-full px-4 py-2 rounded border text-white ${
-                        fieldErrors.contact_email
-                          ? 'border-red-500 bg-red-900/25 focus:ring-2 focus:ring-red-500 focus:border-red-500'
-                          : 'border-gray-600 bg-gray-700 focus:ring-2 focus:ring-purple-500 focus:border-purple-500'
-                      }`}
-                      placeholder="events@midwaymusichall.net"
-                    />
-                    {fieldErrors.contact_email && (
-                      <p id="contact-email-error" className="text-xs text-red-300 mt-1">
-                        {fieldErrors.contact_email}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-300 mb-1">Contact Notes (optional)</label>
-                  <textarea
-                    name="contact_notes"
-                    value={formData.contact_notes}
-                    onChange={handleChange}
-                    rows="3"
-                    className="w-full px-4 py-2 bg-gray-700 text-white rounded"
-                    placeholder="Add call hours, text instructions, or seat request guidance."
-                  />
-                </div>
+                </AdminCollapsibleSection>
               </div>
 
-              <div className="md:col-span-2">
-                <label className="block text-sm text-gray-300 mb-2">Event Image</label>
-                <div className="space-y-3">
-                  {/* Image Preview */}
-                  {(imagePreview || formData.image_url) && (
-                    <div className="relative inline-block">
-                      <ResponsiveImage 
-                        src={imagePreview || getImageUrlSync(formData.image_url)} 
-                        alt="Event preview"
-                        width={256}
-                        height={256}
-                        className="w-32 h-32 object-cover rounded-lg border-2 border-gray-600"
-                      />
-                      <button
-                        type="button"
-                        onClick={clearImage}
-                        className="absolute -top-2 -right-2 bg-red-600 hover:bg-red-700 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  )}
-                  
-                  {/* File Input */}
-                  <div>
-                    <input 
-                      type="file" 
-                      accept="image/*"
-                      onChange={handleImageChange}
-                      className="block w-full text-sm text-gray-300
-                        file:mr-4 file:py-2 file:px-4
-                        file:rounded file:border-0
-                        file:text-sm file:font-medium
-                        file:bg-purple-600 file:text-white
-                        hover:file:bg-purple-700
-                        file:cursor-pointer cursor-pointer"
-                    />
-                    <p className="text-xs text-gray-400 mt-1">Upload a custom image or leave empty to use the default logo</p>
-                  </div>
-                  
-                  {/* URL Input (fallback) */}
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Or enter image URL:</label>
-                    <input 
-                      name="image_url" 
-                      value={formData.image_url} 
-                      onChange={handleChange} 
-                      className="w-full px-3 py-2 bg-gray-700 text-white rounded text-sm" 
-                      placeholder="https://example.com/image.jpg"
-                    />
-                  </div>
-                </div>
-
-                  {(imageUploading || imageUploadProcessing) && (
-                    <div className="mt-3 space-y-2" aria-live="polite">
-                      {imageUploading && (
-                        <>
-                          <div className="flex justify-between text-xs text-gray-300">
-                            <span>Uploading image</span>
-                            <span>{imageUploadProgress}%</span>
-                          </div>
-                          <div
-                            className="w-full bg-gray-600 rounded-full h-2"
-                            role="progressbar"
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={imageUploadProgress}
-                          >
-                            <div
-                              className="bg-purple-500 h-2 rounded-full transition-all"
-                              style={{ width: `${imageUploadProgress}%` }}
-                            />
-                          </div>
-                        </>
-                      )}
-                      {imageUploadProcessing && (
-                        <div className="flex items-center gap-2 text-xs text-gray-200">
-                          <span className="inline-flex w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden="true" />
-                          <span>Processing images…</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="block text-sm text-gray-300 mb-1">Description</label>
-                <textarea name="description" value={formData.description} onChange={handleChange} rows="4" className="w-full px-4 py-2 bg-gray-700 text-white rounded" />
-              </div>
-
-              {error && (
-                <div
-                  className="md:col-span-2 p-3 bg-red-600/10 border border-red-600 text-red-400 rounded"
-                  role="alert"
-                  aria-live="assertive"
-                >
-                  {error}
-                </div>
-              )}
-
-              <div className="md:col-span-2 flex justify-end gap-2 mt-2">
-                <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded">Cancel</button>
-                <button type="submit" disabled={submitting} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded">{submitting ? 'Saving...' : 'Save Event'}</button>
-              </div>
+              <AdminStickyActionBar
+                primaryLabel={editing ? 'Save Event' : 'Create Event'}
+                savingLabel="Saving..."
+                isSaving={submitting}
+                primaryDisabled={submitting}
+                onCancel={() => setShowForm(false)}
+                message={error || 'Save stays visible while you move through the editor.'}
+                tone={error ? 'danger' : 'muted'}
+              />
             </form>
           </div>
         </div>

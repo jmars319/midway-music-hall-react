@@ -80,11 +80,13 @@ export default function TableComponent({
   labelFormatter = null,
   seatReasonResolver = null,
   seatStatusMap = null,
+  textRotation = 0,
 }) {
   const shape = tableShape || row.table_shape || row.seat_type || 'table-6';
   const normalizedShape = shapeAliases[shape] || shape;
   const surfaceLabel = resolveTableSurfaceLabel(row);
   const formatSeatLabel = (value) => (typeof labelFormatter === 'function' ? labelFormatter(value) : value);
+  const textRotationStyle = textRotation ? { transform: `rotate(${textRotation}deg)` } : null;
   
   const rowReservedList = useMemo(() => parseSelectedSeatList(row.selected_seats), [row.selected_seats]);
   const reservedSeatSet = useMemo(() => {
@@ -220,8 +222,17 @@ export default function TableComponent({
           title={titleText}
           aria-label={titleText}
         >
-          <span className="text-[9px] font-bold relative z-10" style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)' }}>{displayLabel}</span>
-          <span className="absolute -top-1 -right-1 rounded-full bg-black/65 px-1 text-[8px] font-bold text-white leading-tight" aria-hidden="true">
+          <span
+            className="text-[9px] font-bold relative z-10 inline-flex items-center justify-center"
+            style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)', ...(textRotationStyle || {}) }}
+          >
+            {displayLabel}
+          </span>
+          <span
+            className="absolute -top-1 -right-1 rounded-full bg-black/65 px-1 text-[8px] font-bold text-white leading-tight"
+            style={textRotationStyle || undefined}
+            aria-hidden="true"
+          >
             {cueText}
           </span>
         </button>
@@ -237,8 +248,17 @@ export default function TableComponent({
         data-seat-id={seatId}
         data-seat-state={visual.statusKey}
       >
-        <span className="text-[9px] font-bold" style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)' }}>{displayLabel}</span>
-        <span className="absolute -top-1 -right-1 rounded-full bg-black/65 px-1 text-[8px] font-bold text-white leading-tight" aria-hidden="true">
+        <span
+          className="text-[9px] font-bold inline-flex items-center justify-center"
+          style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)', ...(textRotationStyle || {}) }}
+        >
+          {displayLabel}
+        </span>
+        <span
+          className="absolute -top-1 -right-1 rounded-full bg-black/65 px-1 text-[8px] font-bold text-white leading-tight"
+          style={textRotationStyle || undefined}
+          aria-hidden="true"
+        >
           {cueText}
         </span>
       </div>
@@ -267,7 +287,7 @@ export default function TableComponent({
         pointerEvents: 'none',
         zIndex: 1,
       }}>
-        {labelText}
+        <span style={textRotationStyle ? { ...textRotationStyle, display: 'inline-block' } : undefined}>{labelText}</span>
       </div>
     );
   };

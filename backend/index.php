@@ -1001,6 +1001,25 @@ function event_series_meta_table_exists(PDO $pdo): bool
     return $hasTable;
 }
 
+function event_occurrences_table_exists(PDO $pdo): bool
+{
+    static $hasTable = null;
+    if ($hasTable !== null) {
+        return $hasTable;
+    }
+    try {
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?');
+        $stmt->execute(['event_occurrences']);
+        $hasTable = (int) $stmt->fetchColumn() > 0;
+    } catch (Throwable $error) {
+        $hasTable = false;
+        if (APP_DEBUG) {
+            error_log('event_occurrences_table_exists failure: ' . $error->getMessage());
+        }
+    }
+    return $hasTable;
+}
+
 function events_table_has_index(PDO $pdo, string $indexName): bool
 {
     static $cache = [];
@@ -1019,6 +1038,368 @@ function events_table_has_index(PDO $pdo, string $indexName): bool
         }
     }
     return $cache[$key];
+}
+
+function normalize_occurrence_date_input($value): ?string
+{
+    if ($value === null || $value === '' || $value === false) {
+        return null;
+    }
+    try {
+        return (new DateTimeImmutable((string) $value))->format('Y-m-d');
+    } catch (Throwable $error) {
+        return null;
+    }
+}
+
+function normalize_occurrence_time_input($value): ?string
+{
+    if ($value === null || $value === '' || $value === false) {
+        return null;
+    }
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return null;
+    }
+    try {
+        return (new DateTimeImmutable('2000-01-01 ' . $raw))->format('H:i:s');
+    } catch (Throwable $error) {
+        return null;
+    }
+}
+
+function extract_time_of_day_from_value($value, string $timezone = 'America/New_York'): ?string
+{
+    if ($value === null || $value === '' || $value === false) {
+        return null;
+    }
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return null;
+    }
+    $normalizedTime = normalize_occurrence_time_input($raw);
+    if ($normalizedTime !== null) {
+        return $normalizedTime;
+    }
+    try {
+        return (new DateTimeImmutable($raw, new DateTimeZone($timezone)))->format('H:i:s');
+    } catch (Throwable $error) {
+        return null;
+    }
+}
+
+function resolve_event_duration_seconds(array $event, int $fallbackHours = 4): int
+{
+    $start = resolve_event_start_datetime($event);
+    $end = resolve_event_end_datetime($event, $fallbackHours);
+    if ($start instanceof DateTimeInterface && $end instanceof DateTimeInterface) {
+        $seconds = $end->getTimestamp() - $start->getTimestamp();
+        if ($seconds > 0) {
+            return $seconds;
+        }
+    }
+    return max(1, $fallbackHours) * 3600;
+}
+
+function build_occurrence_door_datetime(string $occurrenceDate, ?string $doorTimeOfDay, string $timezone): ?string
+{
+    if (!$doorTimeOfDay) {
+        return null;
+    }
+    try {
+        return (new DateTimeImmutable($occurrenceDate . ' ' . $doorTimeOfDay, new DateTimeZone($timezone)))->format('Y-m-d H:i:s');
+    } catch (Throwable $error) {
+        return null;
+    }
+}
+
+function normalize_event_occurrence_rows(array $occurrences, string $timezone, ?string $doorTimeValue, int $durationSeconds, ?string &$error = null): array
+{
+    $doorTimeOfDay = extract_time_of_day_from_value($doorTimeValue, $timezone);
+    $normalized = [];
+    foreach (array_values($occurrences) as $index => $occurrence) {
+        if (!is_array($occurrence)) {
+            $error = 'Each occurrence must be an object with a date and start time.';
+            return [];
+        }
+        $occurrenceDate = normalize_occurrence_date_input($occurrence['occurrence_date'] ?? $occurrence['event_date'] ?? $occurrence['date'] ?? null);
+        $startTime = normalize_occurrence_time_input($occurrence['start_time'] ?? $occurrence['event_time'] ?? $occurrence['time'] ?? null);
+        if ($occurrenceDate === null || $startTime === null) {
+            $error = 'Each occurrence requires a valid date and start time.';
+            return [];
+        }
+        $startDt = build_event_start_datetime($occurrenceDate, $startTime, $timezone);
+        if (!$startDt) {
+            $error = 'One or more occurrences could not be parsed.';
+            return [];
+        }
+        $endDt = $startDt->modify('+' . max(1, $durationSeconds) . ' seconds');
+        $normalized[] = [
+            'occurrence_date' => $occurrenceDate,
+            'start_time' => $startTime,
+            'start_datetime' => $startDt->format('Y-m-d H:i:s'),
+            'end_datetime' => $endDt->format('Y-m-d H:i:s'),
+            'door_datetime' => build_occurrence_door_datetime($occurrenceDate, $doorTimeOfDay, $timezone),
+            'sort_order' => $index,
+        ];
+    }
+    usort($normalized, static function (array $left, array $right): int {
+        $leftStart = $left['start_datetime'] ?? '';
+        $rightStart = $right['start_datetime'] ?? '';
+        if ($leftStart === $rightStart) {
+            return ($left['sort_order'] ?? 0) <=> ($right['sort_order'] ?? 0);
+        }
+        return strcmp($leftStart, $rightStart);
+    });
+    foreach ($normalized as $index => &$occurrence) {
+        $occurrence['sort_order'] = $index;
+    }
+    unset($occurrence);
+    return $normalized;
+}
+
+function decorate_event_occurrence(array $occurrence, int $eventId, int $index, int $count): array
+{
+    $occurrenceId = isset($occurrence['id']) ? (int) $occurrence['id'] : 0;
+    $occurrenceKey = $eventId > 0
+        ? ($eventId . '-' . ($occurrenceId > 0 ? $occurrenceId : ($index + 1)))
+        : ('occurrence-' . ($occurrenceId > 0 ? $occurrenceId : ($index + 1)));
+    $doorTime = $occurrence['door_time'] ?? $occurrence['door_datetime'] ?? null;
+    return [
+        'id' => $occurrenceId > 0 ? $occurrenceId : null,
+        'event_id' => $eventId > 0 ? $eventId : (int) ($occurrence['event_id'] ?? 0),
+        'occurrence_date' => $occurrence['occurrence_date'] ?? null,
+        'start_time' => $occurrence['start_time'] ?? null,
+        'start_datetime' => $occurrence['start_datetime'] ?? null,
+        'end_datetime' => $occurrence['end_datetime'] ?? null,
+        'door_datetime' => $doorTime,
+        'door_time' => $doorTime,
+        'event_date' => $occurrence['occurrence_date'] ?? null,
+        'event_time' => $occurrence['start_time'] ?? null,
+        'sort_order' => (int) ($occurrence['sort_order'] ?? $index),
+        'occurrence_index' => $index,
+        'occurrence_count' => $count,
+        'occurrence_key' => $occurrenceKey,
+        'ics_url' => $eventId > 0
+            ? ('/api/events/' . $eventId . '.ics' . ($occurrenceId > 0 ? ('?occurrence_id=' . $occurrenceId) : ''))
+            : null,
+    ];
+}
+
+function fetch_event_occurrences(PDO $pdo, int $eventId): array
+{
+    if ($eventId <= 0 || !event_occurrences_table_exists($pdo)) {
+        return [];
+    }
+    $stmt = $pdo->prepare('SELECT id, event_id, occurrence_date, start_time, start_datetime, end_datetime, door_datetime, sort_order FROM event_occurrences WHERE event_id = ? ORDER BY start_datetime ASC, sort_order ASC, id ASC');
+    $stmt->execute([$eventId]);
+    $rows = $stmt->fetchAll() ?: [];
+    $count = count($rows);
+    return array_map(static function (array $row, int $index) use ($eventId, $count): array {
+        return decorate_event_occurrence($row, $eventId, $index, $count);
+    }, $rows, array_keys($rows));
+}
+
+function load_event_occurrences_map(PDO $pdo, array $eventIds): array
+{
+    $eventIds = array_values(array_unique(array_filter(array_map('intval', $eventIds), static function (int $value): bool {
+        return $value > 0;
+    })));
+    if (!$eventIds || !event_occurrences_table_exists($pdo)) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($eventIds), '?'));
+    $stmt = $pdo->prepare("SELECT id, event_id, occurrence_date, start_time, start_datetime, end_datetime, door_datetime, sort_order FROM event_occurrences WHERE event_id IN ({$placeholders}) ORDER BY event_id ASC, start_datetime ASC, sort_order ASC, id ASC");
+    $stmt->execute($eventIds);
+    $rows = $stmt->fetchAll() ?: [];
+    $grouped = [];
+    foreach ($rows as $row) {
+        $eventId = (int) ($row['event_id'] ?? 0);
+        if ($eventId <= 0) {
+            continue;
+        }
+        if (!isset($grouped[$eventId])) {
+            $grouped[$eventId] = [];
+        }
+        $grouped[$eventId][] = $row;
+    }
+    foreach ($grouped as $eventId => $occurrenceRows) {
+        $count = count($occurrenceRows);
+        $grouped[$eventId] = array_map(static function (array $row, int $index) use ($eventId, $count): array {
+            return decorate_event_occurrence($row, (int) $eventId, $index, $count);
+        }, $occurrenceRows, array_keys($occurrenceRows));
+    }
+    return $grouped;
+}
+
+function build_fallback_occurrence_from_event(array $event): ?array
+{
+    if (!event_has_schedule_metadata($event)) {
+        return null;
+    }
+    $start = resolve_event_start_datetime($event);
+    if (!$start) {
+        return null;
+    }
+    $end = resolve_event_end_datetime($event);
+    $doorTime = normalize_door_time_input($event['door_time'] ?? null);
+    return decorate_event_occurrence([
+        'id' => null,
+        'event_id' => $event['id'] ?? null,
+        'occurrence_date' => $start->format('Y-m-d'),
+        'start_time' => $start->format('H:i:s'),
+        'start_datetime' => $start->format('Y-m-d H:i:s'),
+        'end_datetime' => $end ? $end->format('Y-m-d H:i:s') : null,
+        'door_datetime' => $doorTime,
+        'sort_order' => 0,
+    ], (int) ($event['id'] ?? 0), 0, 1);
+}
+
+function resolve_event_occurrences_for_event(PDO $pdo, array $event): array
+{
+    $eventId = (int) ($event['id'] ?? 0);
+    $occurrences = $eventId > 0 ? fetch_event_occurrences($pdo, $eventId) : [];
+    if ($occurrences) {
+        return $occurrences;
+    }
+    $fallback = build_fallback_occurrence_from_event($event);
+    return $fallback ? [$fallback] : [];
+}
+
+function delete_event_occurrences(PDO $pdo, int $eventId): void
+{
+    if ($eventId <= 0 || !event_occurrences_table_exists($pdo)) {
+        return;
+    }
+    $stmt = $pdo->prepare('DELETE FROM event_occurrences WHERE event_id = ?');
+    $stmt->execute([$eventId]);
+}
+
+function sync_event_occurrences(PDO $pdo, int $eventId, array $occurrences, string $timezone, ?string $doorTimeValue, int $durationSeconds, ?string &$error = null): array
+{
+    if (!event_occurrences_table_exists($pdo)) {
+        $error = 'Run database/20251212_schema_upgrade.sql to enable multi-day events.';
+        return [];
+    }
+    $normalized = normalize_event_occurrence_rows($occurrences, $timezone, $doorTimeValue, $durationSeconds, $error);
+    if (!$normalized) {
+        if ($error === null) {
+            $error = 'At least one valid occurrence is required.';
+        }
+        return [];
+    }
+    delete_event_occurrences($pdo, $eventId);
+    $insert = $pdo->prepare('INSERT INTO event_occurrences (event_id, occurrence_date, start_time, start_datetime, end_datetime, door_datetime, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    foreach ($normalized as $occurrence) {
+        $insert->execute([
+            $eventId,
+            $occurrence['occurrence_date'],
+            $occurrence['start_time'],
+            $occurrence['start_datetime'],
+            $occurrence['end_datetime'],
+            $occurrence['door_datetime'],
+            $occurrence['sort_order'],
+        ]);
+    }
+    $stored = fetch_event_occurrences($pdo, $eventId);
+    $first = $stored[0] ?? null;
+    $last = $stored ? $stored[count($stored) - 1] : null;
+    return [
+        'occurrences' => $stored,
+        'occurrence_count' => count($stored),
+        'event_date' => $first['occurrence_date'] ?? null,
+        'event_time' => $first['start_time'] ?? null,
+        'start_datetime' => $first['start_datetime'] ?? null,
+        'door_time' => $first['door_datetime'] ?? null,
+        'end_datetime' => $last['end_datetime'] ?? null,
+    ];
+}
+
+function attach_occurrence_metadata_to_event(array $event, array $occurrences): array
+{
+    $normalizedOccurrences = array_values($occurrences);
+    $event['occurrences'] = $normalizedOccurrences;
+    $event['occurrence_count'] = count($normalizedOccurrences);
+    $event['is_multi_day'] = count($normalizedOccurrences) > 1 ? 1 : 0;
+    if (!empty($event['id'])) {
+        $event['ics_url'] = '/api/events/' . $event['id'] . '.ics';
+    }
+    if ($normalizedOccurrences) {
+        $event['run_start_datetime'] = $normalizedOccurrences[0]['start_datetime'] ?? ($event['start_datetime'] ?? null);
+        $event['run_end_datetime'] = $normalizedOccurrences[count($normalizedOccurrences) - 1]['end_datetime'] ?? ($event['end_datetime'] ?? null);
+    } else {
+        $event['run_start_datetime'] = $event['start_datetime'] ?? null;
+        $event['run_end_datetime'] = $event['end_datetime'] ?? null;
+    }
+    return $event;
+}
+
+function occurrence_falls_in_timeframe(array $occurrence, string $timeframe, DateTimeImmutable $now, string $timezone = 'America/New_York'): bool
+{
+    if ($timeframe !== 'upcoming' && $timeframe !== 'past') {
+        return true;
+    }
+    try {
+        $endRaw = $occurrence['end_datetime'] ?? null;
+        $startRaw = $occurrence['start_datetime'] ?? null;
+        $tz = new DateTimeZone($timezone);
+        $end = $endRaw ? new DateTimeImmutable($endRaw, $tz) : null;
+        $start = $startRaw ? new DateTimeImmutable($startRaw, $tz) : null;
+    } catch (Throwable $error) {
+        return true;
+    }
+    if (!$start) {
+        return true;
+    }
+    if (!$end) {
+        $end = $start->modify('+4 hours');
+    }
+    if ($timeframe === 'past') {
+        return $end < $now;
+    }
+    return $end >= $now;
+}
+
+function expand_public_event_rows(array $rows, string $timeframe): array
+{
+    $now = new DateTimeImmutable('now');
+    $expanded = [];
+    foreach ($rows as $row) {
+        $occurrences = is_array($row['occurrences'] ?? null) ? $row['occurrences'] : [];
+        if (empty($row['series_master_id']) && empty($row['is_series_master']) && count($occurrences) > 1) {
+            foreach ($occurrences as $occurrence) {
+                if (!occurrence_falls_in_timeframe($occurrence, $timeframe, $now, (string) ($row['timezone'] ?? 'America/New_York'))) {
+                    continue;
+                }
+                $expandedRow = $row;
+                $expandedRow['occurrence_id'] = $occurrence['id'] ?? null;
+                $expandedRow['occurrence_index'] = $occurrence['occurrence_index'] ?? 0;
+                $expandedRow['occurrence_count'] = $occurrence['occurrence_count'] ?? count($occurrences);
+                $expandedRow['occurrence_key'] = $occurrence['occurrence_key'] ?? null;
+                $expandedRow['ics_url'] = $occurrence['ics_url'] ?? null;
+                $expandedRow['event_date'] = $occurrence['event_date'] ?? $expandedRow['event_date'];
+                $expandedRow['event_time'] = $occurrence['event_time'] ?? $expandedRow['event_time'];
+                $expandedRow['start_datetime'] = $occurrence['start_datetime'] ?? $expandedRow['start_datetime'];
+                $expandedRow['end_datetime'] = $occurrence['end_datetime'] ?? $expandedRow['end_datetime'];
+                $expandedRow['door_time'] = $occurrence['door_time'] ?? $expandedRow['door_time'];
+                $expanded[] = $expandedRow;
+            }
+            continue;
+        }
+        $expanded[] = $row;
+    }
+    usort($expanded, static function (array $left, array $right) use ($timeframe): int {
+        $leftStart = trim((string) ($left['start_datetime'] ?? ''));
+        $rightStart = trim((string) ($right['start_datetime'] ?? ''));
+        if ($leftStart === $rightStart) {
+            return ((int) ($left['id'] ?? 0)) <=> ((int) ($right['id'] ?? 0));
+        }
+        if ($timeframe === 'past') {
+            return strcmp($rightStart, $leftStart);
+        }
+        return strcmp($leftStart, $rightStart);
+    });
+    return $expanded;
 }
 
 function normalize_series_meta_field($value): ?string
@@ -2287,8 +2668,48 @@ function format_datetime_eastern(?DateTimeInterface $dateTime): string
     return $dateTime->setTimezone(new DateTimeZone('America/New_York'))->format('l, F j, Y g:i A T');
 }
 
+function format_event_occurrence_summary(array $event, int $limit = 4): ?string
+{
+    $occurrences = [];
+    if (!empty($event['occurrences']) && is_array($event['occurrences'])) {
+        $occurrences = $event['occurrences'];
+    } elseif (!empty($event['id'])) {
+        try {
+            $occurrences = resolve_event_occurrences_for_event(Database::connection(), $event);
+        } catch (Throwable $error) {
+            $occurrences = [];
+        }
+    }
+    if (count($occurrences) <= 1) {
+        return null;
+    }
+    $labels = [];
+    $timeZone = new DateTimeZone('America/New_York');
+    foreach (array_slice($occurrences, 0, max(1, $limit)) as $occurrence) {
+        $occurrenceEvent = [
+            'start_datetime' => $occurrence['start_datetime'] ?? null,
+            'event_date' => $occurrence['event_date'] ?? $occurrence['occurrence_date'] ?? null,
+            'event_time' => $occurrence['event_time'] ?? $occurrence['start_time'] ?? null,
+            'timezone' => $event['timezone'] ?? 'America/New_York',
+        ];
+        $start = resolve_event_start_datetime($occurrenceEvent);
+        if ($start instanceof DateTimeInterface) {
+            $labels[] = $start->setTimezone($timeZone)->format('D, M j g:i A T');
+        }
+    }
+    if (!$labels) {
+        return null;
+    }
+    $suffix = count($occurrences) > count($labels) ? ' +' . (count($occurrences) - count($labels)) . ' more' : '';
+    return implode(' | ', $labels) . $suffix;
+}
+
 function format_event_datetime_for_email(array $event): string
 {
+    $occurrenceSummary = format_event_occurrence_summary($event, 4);
+    if ($occurrenceSummary !== null) {
+        return $occurrenceSummary;
+    }
     $start = resolve_event_start_datetime($event);
     if ($start instanceof DateTimeInterface) {
         return format_datetime_eastern($start);
@@ -3583,6 +4004,22 @@ function list_events(Request $request, ?string $scopeOverride = null): array
                 }
             }
         }
+        if ($rows) {
+            $eventIds = array_map(static function ($row): int {
+                return (int) ($row['id'] ?? 0);
+            }, $rows);
+            $occurrenceMap = load_event_occurrences_map($pdo, $eventIds);
+            foreach ($rows as &$row) {
+                $eventId = (int) ($row['id'] ?? 0);
+                $occurrences = $occurrenceMap[$eventId] ?? [];
+                if (!$occurrences) {
+                    $fallback = build_fallback_occurrence_from_event($row);
+                    $occurrences = $fallback ? [$fallback] : [];
+                }
+                $row = attach_occurrence_metadata_to_event($row, $occurrences);
+            }
+            unset($row);
+        }
         if ($scope !== 'public') {
             foreach ($rows as &$row) {
                 [$targetEmail, $targetSource] = determine_seat_request_recipient($row);
@@ -3607,6 +4044,8 @@ function list_events(Request $request, ?string $scopeOverride = null): array
                 $preview = implode(',', array_slice($missingIds, 0, 10));
                 error_log('[events] Admin scope returning events without schedule metadata; ids=' . $preview . (count($missingIds) > 10 ? '...' : ''));
             }
+        } else {
+            $rows = expand_public_event_rows($rows, $timeframe);
         }
         $rows = enrich_event_rows_with_images($rows);
         foreach ($rows as &$row) {
@@ -4071,6 +4510,7 @@ $router->add('POST', '/api/events/:id/restore', function (Request $request, $par
 });
 
 $router->add('GET', '/api/events/:id.ics', function ($request, $params) {
+    $pdo = Database::connection();
     $stmt = Database::run('SELECT * FROM events WHERE id = ? LIMIT 1', [$params['id']]);
     $event = $stmt->fetch();
     if (!$event) {
@@ -4079,40 +4519,72 @@ $router->add('GET', '/api/events/:id.ics', function ($request, $params) {
         echo 'Event not found';
         return;
     }
-    $start = resolve_event_start_datetime($event);
-    if (!$start) {
+    $occurrenceId = isset($request->query['occurrence_id']) ? (int) $request->query['occurrence_id'] : 0;
+    $occurrences = resolve_event_occurrences_for_event($pdo, $event);
+    if ($occurrenceId > 0) {
+        $occurrences = array_values(array_filter($occurrences, static function (array $occurrence) use ($occurrenceId): bool {
+            return (int) ($occurrence['id'] ?? 0) === $occurrenceId;
+        }));
+        if (!$occurrences) {
+            http_response_code(404);
+            header('Content-Type: text/plain');
+            echo 'Occurrence not found';
+            return;
+        }
+    } elseif (!$occurrences) {
+        $fallback = build_fallback_occurrence_from_event($event);
+        $occurrences = $fallback ? [$fallback] : [];
+    }
+    if (!$occurrences) {
         http_response_code(400);
         header('Content-Type: text/plain');
         echo 'Event start time unavailable';
         return;
     }
-    $end = resolve_event_end_datetime($event);
-    $dtStart = $start->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z');
-    $dtEnd = $end ? $end->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z') : $start->modify('+4 hours')->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z');
     $host = $_SERVER['HTTP_HOST'] ?? 'midwaymusichall.com';
-    $uid = sprintf('mmh-%d@%s', $event['id'], $host);
     $title = $event['artist_name'] ?: ($event['title'] ?? 'Midway Music Hall Event');
     $location = trim(($event['venue_section'] ?? '') . ' ' . ($event['venue_code'] ?? ''));
     if ($location === '') {
         $location = 'Midway Music Hall, 11141 Old US Hwy 52, Winston-Salem, NC 27107';
     }
     $description = trim(($event['description'] ?? '') . "\nContact: " . ($event['contact_name'] ?? 'Venue'));
+    if (count($occurrences) > 1 && $occurrenceId <= 0) {
+        $description = trim($description . "\nThis calendar file includes the full multi-day event run.");
+    }
     header('Content-Type: text/calendar; charset=utf-8');
     header('Content-Disposition: attachment; filename="event-' . $event['id'] . '.ics"');
     echo "BEGIN:VCALENDAR\r\n";
     echo "VERSION:2.0\r\n";
     echo "PRODID:-//Midway Music Hall//Events//EN\r\n";
-    echo "BEGIN:VEVENT\r\n";
-    echo "UID:$uid\r\n";
-    echo "DTSTAMP:" . gmdate('Ymd\THis\Z') . "\r\n";
-    echo "DTSTART:$dtStart\r\n";
-    echo "DTEND:$dtEnd\r\n";
-    echo "SUMMARY:" . addcslashes($title, ",;\\") . "\r\n";
-    echo "LOCATION:" . addcslashes($location, ",;\\") . "\r\n";
-    if ($description !== '') {
-        echo "DESCRIPTION:" . addcslashes($description, ",;\\n") . "\r\n";
+    foreach (array_values($occurrences) as $index => $occurrence) {
+        $occurrenceEvent = $event;
+        $occurrenceEvent['start_datetime'] = $occurrence['start_datetime'] ?? ($event['start_datetime'] ?? null);
+        $occurrenceEvent['end_datetime'] = $occurrence['end_datetime'] ?? ($event['end_datetime'] ?? null);
+        $occurrenceEvent['event_date'] = $occurrence['event_date'] ?? ($event['event_date'] ?? null);
+        $occurrenceEvent['event_time'] = $occurrence['event_time'] ?? ($event['event_time'] ?? null);
+        $start = resolve_event_start_datetime($occurrenceEvent);
+        if (!$start) {
+            continue;
+        }
+        $end = resolve_event_end_datetime($occurrenceEvent);
+        $dtStart = $start->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z');
+        $dtEnd = $end ? $end->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z') : $start->modify('+4 hours')->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z');
+        $uidSuffix = $occurrenceId > 0
+            ? ('-' . $occurrenceId)
+            : (count($occurrences) > 1 ? ('-' . ($occurrence['id'] ?? ($index + 1))) : '');
+        $uid = sprintf('mmh-%d%s@%s', $event['id'], $uidSuffix, $host);
+        echo "BEGIN:VEVENT\r\n";
+        echo "UID:$uid\r\n";
+        echo "DTSTAMP:" . gmdate('Ymd\THis\Z') . "\r\n";
+        echo "DTSTART:$dtStart\r\n";
+        echo "DTEND:$dtEnd\r\n";
+        echo "SUMMARY:" . addcslashes($title, ",;\\") . "\r\n";
+        echo "LOCATION:" . addcslashes($location, ",;\\") . "\r\n";
+        if ($description !== '') {
+            echo "DESCRIPTION:" . addcslashes($description, ",;\\n") . "\r\n";
+        }
+        echo "END:VEVENT\r\n";
     }
-    echo "END:VEVENT\r\n";
     echo "END:VCALENDAR\r\n";
 });
 
@@ -4215,6 +4687,8 @@ $router->add('GET', '/api/events/:id', function ($request, $params) {
         $event['seat_request_target_source'] = $targetSource;
         prepare_event_pricing_config_for_response($event);
         $event['payment_option'] = resolve_event_payment_option($event, $paymentLookup);
+        $event = attach_occurrence_metadata_to_event($event, resolve_event_occurrences_for_event($pdo, $event));
+        $event['ics_url'] = '/api/events/' . $event['id'] . '.ics';
         $enriched = enrich_event_rows_with_images([$event]);
         if (!empty($enriched[0])) {
             $event = $enriched[0];
@@ -4680,25 +5154,38 @@ $router->add('POST', '/api/events', function (Request $request) {
         }
         $title = trim((string)($payload['title'] ?? $artist));
         $timezone = $payload['timezone'] ?? 'America/New_York';
+        $hasOccurrencesTable = event_occurrences_table_exists($pdo);
+        $occurrencesInputProvided = array_key_exists('occurrences', $payload);
+        if ($occurrencesInputProvided && !is_array($payload['occurrences'])) {
+            return Response::error('occurrences must be an array', 422);
+        }
+        $occurrencesPayload = $occurrencesInputProvided ? array_values($payload['occurrences'] ?? []) : [];
+        if ($occurrencesPayload && !$hasOccurrencesTable) {
+            return Response::error('Run database/20251212_schema_upgrade.sql to enable multi-day events.', 422);
+        }
         $eventDate = isset($payload['event_date']) ? trim((string) $payload['event_date']) : null;
         $eventTime = isset($payload['event_time']) ? trim((string) $payload['event_time']) : null;
         $eventDate = $eventDate !== '' ? $eventDate : null;
         $eventTime = $eventTime !== '' ? $eventTime : null;
+        $doorTime = normalize_door_time_input($payload['door_time'] ?? null);
+        if ($doorTime === null) {
+            return Response::error('door_time is required and must include a valid date and time.', 422);
+        }
         $startInput = $payload['start_datetime'] ?? null;
         $startDt = null;
-        if ($eventDate && $eventTime) {
+        if (!$occurrencesPayload && $eventDate && $eventTime) {
             $startDt = build_event_start_datetime($eventDate, $eventTime, $timezone);
             if (!$startDt) {
                 return Response::error('Invalid event_date or event_time value', 422);
             }
-        } elseif ($startInput) {
+        } elseif (!$occurrencesPayload && $startInput) {
             try {
                 $startDt = new DateTimeImmutable($startInput, new DateTimeZone($timezone));
             } catch (Throwable $e) {
                 return Response::error('Invalid event_date or event_time value', 422);
             }
         }
-        if (!$startDt) {
+        if (!$startDt && !$occurrencesPayload) {
             return Response::error('event_date and event_time are required', 422);
         }
         $endInput = $payload['end_datetime'] ?? null;
@@ -4709,6 +5196,31 @@ $router->add('POST', '/api/events', function (Request $request) {
             } catch (Throwable $e) {
                 return Response::error('Invalid end_datetime value', 422);
             }
+        }
+        $durationSeconds = resolve_event_duration_seconds([
+            'start_datetime' => $startDt ? $startDt->format('Y-m-d H:i:s') : $startInput,
+            'end_datetime' => $endDt ? $endDt->format('Y-m-d H:i:s') : $endInput,
+            'event_date' => $eventDate,
+            'event_time' => $eventTime,
+            'timezone' => $timezone,
+        ]);
+        $occurrenceSyncPreview = null;
+        if ($occurrencesPayload) {
+            $occurrenceError = null;
+            $occurrenceRows = normalize_event_occurrence_rows($occurrencesPayload, $timezone, $doorTime, $durationSeconds, $occurrenceError);
+            if (!$occurrenceRows) {
+                return Response::error($occurrenceError ?: 'At least one valid occurrence is required.', 422);
+            }
+            $occurrenceSyncPreview = $occurrenceRows;
+            try {
+                $startDt = new DateTimeImmutable($occurrenceRows[0]['start_datetime'], new DateTimeZone($timezone));
+                $endDt = new DateTimeImmutable($occurrenceRows[count($occurrenceRows) - 1]['end_datetime'], new DateTimeZone($timezone));
+            } catch (Throwable $error) {
+                return Response::error('One or more occurrences could not be parsed.', 422);
+            }
+            $eventDate = $occurrenceRows[0]['occurrence_date'];
+            $eventTime = $occurrenceRows[0]['start_time'];
+            $doorTime = $occurrenceRows[0]['door_datetime'] ?? $doorTime;
         }
         $slugBase = slugify_string($payload['slug'] ?? ($title . ($startDt ? '-' . $startDt->format('Ymd') : '')));
         $slug = ensure_unique_slug($pdo, $slugBase);
@@ -4802,10 +5314,6 @@ $router->add('POST', '/api/events', function (Request $request) {
         $contactPhoneNormalized = normalize_phone_number($contactPhoneRaw);
         $startString = $startDt ? $startDt->format('Y-m-d H:i:s') : null;
         $endString = $endDt ? $endDt->format('Y-m-d H:i:s') : null;
-        $doorTime = normalize_door_time_input($payload['door_time'] ?? null);
-        if ($doorTime === null) {
-            return Response::error('door_time is required and must include a valid date and time.', 422);
-        }
         $publishAt = $payload['publish_at'] ?? ($status === 'published' && $startString ? $startString : null);
         $hasContactNotesColumn = events_table_has_column($pdo, 'contact_notes');
         $insertColumns = [
@@ -4864,9 +5372,23 @@ $router->add('POST', '/api/events', function (Request $request) {
         $insertColumns['updated_by'] = 'api';
         $placeholders = implode(', ', array_fill(0, count($insertColumns), '?'));
         $sql = 'INSERT INTO events (' . implode(', ', array_keys($insertColumns)) . ") VALUES ({$placeholders})";
+        $pdo->beginTransaction();
         $stmt = $pdo->prepare($sql);
         $stmt->execute(array_values($insertColumns));
         $id = (int)$pdo->lastInsertId();
+        save_event_series_meta($pdo, $id, $seriesScheduleLabel, $seriesSummary, $seriesFooter);
+        if ($hasOccurrencesTable && $startString !== null) {
+            $syncPayload = $occurrencesPayload ?: [[
+                'occurrence_date' => $eventDate,
+                'start_time' => $eventTime,
+            ]];
+            $syncError = null;
+            $syncResult = sync_event_occurrences($pdo, $id, $syncPayload, $timezone, $doorTime, $durationSeconds, $syncError);
+            if (!$syncResult) {
+                throw new RuntimeException($syncError ?: 'Unable to save event occurrences.');
+            }
+        }
+        $pdo->commit();
         record_audit('event.create', 'event', $id, [
             'slug' => $slug,
             'status' => $status,
@@ -4875,9 +5397,11 @@ $router->add('POST', '/api/events', function (Request $request) {
             'category_id' => $categoryId,
             'seating_enabled' => (bool) $seatingEnabled,
         ]);
-        save_event_series_meta($pdo, $id, $seriesScheduleLabel, $seriesSummary, $seriesFooter);
         Response::success(['id' => $id, 'slug' => $slug]);
     } catch (Throwable $e) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         if (APP_DEBUG) {
             error_log('POST /api/events error: ' . $e->getMessage());
         }
@@ -4902,8 +5426,19 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         }
         $existingMeta = fetch_event_series_meta($pdo, $eventId);
         $payload = read_json_body($request);
+        $hasOccurrencesTable = event_occurrences_table_exists($pdo);
+        $existingOccurrences = $hasOccurrencesTable ? fetch_event_occurrences($pdo, $eventId) : [];
+        $existingIsMultiDay = count($existingOccurrences) > 1;
+        $occurrencesInputProvided = array_key_exists('occurrences', $payload);
+        if ($occurrencesInputProvided && !is_array($payload['occurrences'])) {
+            return Response::error('occurrences must be an array', 422);
+        }
+        $occurrencesPayload = $occurrencesInputProvided ? array_values($payload['occurrences'] ?? []) : [];
+        if ($occurrencesPayload && !$hasOccurrencesTable) {
+            return Response::error('Run database/20251212_schema_upgrade.sql to enable multi-day events.', 422);
+        }
         $isSeriesMaster = !empty($existing['is_series_master']);
-        $hasExplicitScheduleInput = false;
+        $hasExplicitScheduleInput = $occurrencesInputProvided;
         foreach (['start_datetime', 'event_date', 'event_time', 'door_time', 'end_datetime'] as $scheduleField) {
             if (!array_key_exists($scheduleField, $payload)) {
                 continue;
@@ -4921,6 +5456,9 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
                 break;
             }
         }
+        $multiDayEnabled = array_key_exists('multi_day_enabled', $payload)
+            ? !empty($payload['multi_day_enabled'])
+            : ($existingIsMultiDay || count($occurrencesPayload) > 1);
         $allowMissingSchedule = $isSeriesMaster && !$hasExplicitScheduleInput;
         $artist = trim((string)($payload['artist_name'] ?? $existing['artist_name']));
         if ($artist === '') {
@@ -4933,12 +5471,13 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $eventDate = $eventDateInput !== null ? ($eventDateInput !== '' ? $eventDateInput : null) : ($existing['event_date'] ?? null);
         $eventTime = $eventTimeInput !== null ? ($eventTimeInput !== '' ? $eventTimeInput : null) : ($existing['event_time'] ?? null);
         $startInput = $payload['start_datetime'] ?? null;
-        $shouldRecomputeStart = array_key_exists('event_date', $payload)
+        $shouldRecomputeStart = $occurrencesInputProvided
+            || array_key_exists('event_date', $payload)
             || array_key_exists('event_time', $payload)
             || array_key_exists('timezone', $payload)
             || array_key_exists('start_datetime', $payload);
         $startDt = null;
-        if ($shouldRecomputeStart) {
+        if ($shouldRecomputeStart && !$occurrencesPayload) {
             if ($eventDate && $eventTime) {
                 $startDt = build_event_start_datetime($eventDate, $eventTime, $timezone);
                 if (!$startDt && !$allowMissingSchedule) {
@@ -4960,10 +5499,10 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
                 return Response::error('Invalid event_date or event_time value', 422);
             }
         }
-        if (!$startDt && $eventDate && $eventTime) {
+        if (!$startDt && !$occurrencesPayload && $eventDate && $eventTime) {
             $startDt = build_event_start_datetime($eventDate, $eventTime, $timezone);
         }
-        if (!$startDt && !$allowMissingSchedule) {
+        if (!$startDt && !$allowMissingSchedule && !$occurrencesPayload) {
             return Response::error('event_date and event_time are required', 422);
         }
         $endInput = $payload['end_datetime'] ?? null;
@@ -4976,6 +5515,41 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         }
         if (!$endInput && $startDt && $endDt && $endDt < $startDt && $shouldRecomputeStart) {
             $endDt = null;
+        }
+        $doorTimeInputProvided = array_key_exists('door_time', $payload);
+        $doorTimeInput = $doorTimeInputProvided ? $payload['door_time'] : ($existing['door_time'] ?? null);
+        if ($allowMissingSchedule && !$doorTimeInputProvided && !$occurrencesPayload) {
+            $doorTime = $existing['door_time'] ?? null;
+        } else {
+            $doorTime = normalize_door_time_input($doorTimeInput);
+            if ($doorTime === null && (!$allowMissingSchedule || $occurrencesPayload || $doorTimeInputProvided)) {
+                return Response::error('door_time is required and must include a valid date and time.', 422);
+            }
+        }
+        $durationSeconds = resolve_event_duration_seconds([
+            'start_datetime' => $startDt ? $startDt->format('Y-m-d H:i:s') : ($existing['start_datetime'] ?? null),
+            'end_datetime' => $endDt ? $endDt->format('Y-m-d H:i:s') : ($existing['end_datetime'] ?? null),
+            'event_date' => $eventDate,
+            'event_time' => $eventTime,
+            'timezone' => $timezone,
+        ]);
+        if ($occurrencesPayload) {
+            $occurrenceError = null;
+            $occurrenceRows = normalize_event_occurrence_rows($occurrencesPayload, $timezone, $doorTime, $durationSeconds, $occurrenceError);
+            if (!$occurrenceRows) {
+                return Response::error($occurrenceError ?: 'At least one valid occurrence is required.', 422);
+            }
+            try {
+                $startDt = new DateTimeImmutable($occurrenceRows[0]['start_datetime'], new DateTimeZone($timezone));
+                $endDt = new DateTimeImmutable($occurrenceRows[count($occurrenceRows) - 1]['end_datetime'], new DateTimeZone($timezone));
+            } catch (Throwable $error) {
+                return Response::error('One or more occurrences could not be parsed.', 422);
+            }
+            $eventDate = $occurrenceRows[0]['occurrence_date'];
+            $eventTime = $occurrenceRows[0]['start_time'];
+            $doorTime = $occurrenceRows[0]['door_datetime'] ?? $doorTime;
+        } elseif ($hasOccurrencesTable && $existingIsMultiDay && $multiDayEnabled && $hasExplicitScheduleInput) {
+            return Response::error('occurrences are required when updating a multi-day event schedule.', 422);
         }
         $slugInput = $payload['slug'] ?? $existing['slug'] ?? null;
         $slugBase = slugify_string($slugInput ?? ($title . ($startDt ? '-' . $startDt->format('Ymd') : '')));
@@ -5129,17 +5703,6 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $resolvedEventTime = $startDt ? $startDt->format('H:i:s') : ($eventTimeInput !== null ? $eventTime : ($existing['event_time'] ?? null));
         $endString = $endDt ? $endDt->format('Y-m-d H:i:s') : null;
 
-        $doorTimeInputProvided = array_key_exists('door_time', $payload);
-        $doorTimeInput = $doorTimeInputProvided ? $payload['door_time'] : $existing['door_time'];
-        if ($allowMissingSchedule && !$doorTimeInputProvided) {
-            $doorTime = $existing['door_time'];
-        } else {
-            $doorTime = normalize_door_time_input($doorTimeInput);
-            if ($doorTime === null) {
-                return Response::error('door_time is required and must include a valid date and time.', 422);
-            }
-        }
-
         $changeNoteInput = array_key_exists('change_note', $payload) ? trim((string) $payload['change_note']) : '';
         $changeNote = $changeNoteInput !== '' ? $changeNoteInput : 'updated via API';
         if ($layoutChanged && $snapshotMeta) {
@@ -5166,6 +5729,18 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $resolvedMaxTicketPrice = array_key_exists('max_ticket_price', $payload)
             ? normalize_nullable_decimal($payload['max_ticket_price'])
             : ($pricingMax ?? $valueOrExisting('max_ticket_price', 'normalize_nullable_decimal') ?? $resolvedDoorPrice ?? $resolvedTicketPrice);
+        $scheduleMetadataChanged = $hasExplicitScheduleInput || array_key_exists('timezone', $payload);
+        $syncOccurrencePayload = null;
+        if ($hasOccurrencesTable && !$allowMissingSchedule) {
+            if ($occurrencesPayload) {
+                $syncOccurrencePayload = $occurrencesPayload;
+            } elseif (($multiDayEnabled === false || !$existingIsMultiDay) && $scheduleMetadataChanged && $startDt) {
+                $syncOccurrencePayload = [[
+                    'occurrence_date' => $resolvedEventDate,
+                    'start_time' => $resolvedEventTime,
+                ]];
+            }
+        }
 
         $updateColumns = [
             'artist_name' => $artist,
@@ -5224,10 +5799,20 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             return "{$col} = ?";
         }, array_keys($updateColumns)));
         $sql = 'UPDATE events SET ' . $assignments . ' WHERE id = ?';
+        $pdo->beginTransaction();
         $stmt = $pdo->prepare($sql);
         $values = array_values($updateColumns);
         $values[] = $eventId;
         $stmt->execute($values);
+        save_event_series_meta($pdo, $eventId, $seriesScheduleLabel, $seriesSummary, $seriesFooter);
+        if ($syncOccurrencePayload !== null) {
+            $syncError = null;
+            $syncResult = sync_event_occurrences($pdo, $eventId, $syncOccurrencePayload, $timezone, $doorTime, $durationSeconds, $syncError);
+            if (!$syncResult) {
+                throw new RuntimeException($syncError ?: 'Unable to save event occurrences.');
+            }
+        }
+        $pdo->commit();
         record_audit('event.update', 'event', $eventId, [
             'slug' => $slug,
             'status' => $status,
@@ -5239,13 +5824,15 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             'layout_id' => $layoutId,
             'layout_version_id' => $layoutVersionId,
         ]);
-        save_event_series_meta($pdo, $eventId, $seriesScheduleLabel, $seriesSummary, $seriesFooter);
         Response::success([
             'id' => $eventId,
             'slug' => $slug,
             'seating_snapshot_id' => $snapshotMeta['id'] ?? null,
         ]);
     } catch (Throwable $e) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         if (APP_DEBUG) {
             error_log('PUT /api/events/:id error: ' . $e->getMessage());
         }
@@ -5860,6 +6447,8 @@ $router->add('GET', '/api/seat-requests', function (Request $request) {
         expire_stale_holds($pdo);
         $filters = [];
         $values = [];
+        $eventStartExpr = event_start_expression('e');
+        $eventEndExpr = event_end_expression('e');
         $hasEventIdFilter = !empty($request->query['event_id']);
         if ($hasEventIdFilter) {
             $filters[] = 'sr.event_id = ?';
@@ -5868,7 +6457,7 @@ $router->add('GET', '/api/seat-requests', function (Request $request) {
         $includePastRaw = strtolower(trim((string) ($request->query['include_past'] ?? '0')));
         $includePast = in_array($includePastRaw, ['1', 'true', 'yes', 'on'], true);
         if (!$hasEventIdFilter && !$includePast) {
-            $filters[] = "(COALESCE(e.start_datetime, CASE WHEN e.event_date IS NOT NULL THEN TIMESTAMP(e.event_date, COALESCE(e.event_time, '00:00:00')) ELSE NULL END) IS NULL OR COALESCE(e.start_datetime, CASE WHEN e.event_date IS NOT NULL THEN TIMESTAMP(e.event_date, COALESCE(e.event_time, '00:00:00')) ELSE NULL END) >= NOW())";
+            $filters[] = "($eventEndExpr IS NULL OR $eventEndExpr >= NOW())";
         }
         $statusFilter = strtolower(trim((string) ($request->query['status'] ?? '')));
         if ($statusFilter !== '' && $statusFilter !== 'all') {
@@ -5894,6 +6483,12 @@ SELECT
     e.artist_name AS event_artist_name,
     COALESCE(NULLIF(TRIM(e.artist_name), ''), NULLIF(TRIM(e.title), '')) AS event_display_name,
     e.start_datetime,
+    e.end_datetime,
+    e.event_date,
+    e.event_time,
+    e.timezone,
+    {$eventStartExpr} AS event_run_start_datetime,
+    {$eventEndExpr} AS event_run_end_datetime,
     e.seat_request_email_override,
     ec.slug AS category_slug,
     ec.name AS category_name,
@@ -5906,8 +6501,13 @@ ORDER BY sr.created_at DESC
 SQL;
         $stmt = $pdo->prepare($sql);
         $stmt->execute($values);
+        $rows = $stmt->fetchAll() ?: [];
+        $eventIds = array_values(array_unique(array_filter(array_map(static function (array $row): int {
+            return (int) ($row['event_id'] ?? 0);
+        }, $rows))));
+        $occurrenceMap = load_event_occurrences_map($pdo, $eventIds);
         $requests = [];
-        while ($row = $stmt->fetch()) {
+        foreach ($rows as $row) {
             if (!empty($row['selected_seats']) && is_string($row['selected_seats'])) {
                 $row['selected_seats'] = json_decode($row['selected_seats'], true) ?: [];
             }
@@ -5930,6 +6530,28 @@ SQL;
             [$targetEmail, $targetSource] = determine_seat_request_recipient($row);
             $row['seat_request_target_email'] = $targetEmail;
             $row['seat_request_target_source'] = $targetSource;
+            $eventId = (int) ($row['event_id'] ?? 0);
+            $eventSummary = [
+                'id' => $eventId,
+                'title' => $row['event_title'] ?? null,
+                'artist_name' => $row['event_artist_name'] ?? null,
+                'start_datetime' => $row['event_run_start_datetime'] ?? ($row['start_datetime'] ?? null),
+                'end_datetime' => $row['event_run_end_datetime'] ?? ($row['end_datetime'] ?? null),
+                'event_date' => $row['event_date'] ?? null,
+                'event_time' => $row['event_time'] ?? null,
+                'timezone' => $row['timezone'] ?? 'America/New_York',
+            ];
+            $occurrences = $occurrenceMap[$eventId] ?? [];
+            if (!$occurrences) {
+                $fallback = build_fallback_occurrence_from_event($eventSummary);
+                $occurrences = $fallback ? [$fallback] : [];
+            }
+            $eventSummary = attach_occurrence_metadata_to_event($eventSummary, $occurrences);
+            $row['event_occurrence_count'] = (int) ($eventSummary['occurrence_count'] ?? 0);
+            $row['event_is_multi_day'] = (int) ($eventSummary['is_multi_day'] ?? 0);
+            $row['event_run_start_datetime'] = $eventSummary['run_start_datetime'] ?? ($row['event_run_start_datetime'] ?? null);
+            $row['event_run_end_datetime'] = $eventSummary['run_end_datetime'] ?? ($row['event_run_end_datetime'] ?? null);
+            $row['event_run_summary'] = format_event_occurrence_summary($eventSummary, 2);
             $row['seat_display_labels'] = build_display_seat_list($row);
             $requests[] = $row;
         }

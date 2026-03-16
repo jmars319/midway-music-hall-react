@@ -15,7 +15,7 @@ import MapSection from '../components/MapSection';
 import Footer from '../components/Footer';
 import BackToTopButton from '../components/BackToTopButton';
 import { API_BASE } from '../apiConfig';
-import { getEventStartDate, getEventEndDate } from '../utils/eventFormat';
+import { getEventAnchorId, getEventEndDate, getEventStartDate } from '../utils/eventFormat';
 import { getEventMinimumPrice } from '../utils/eventPricing';
 import { resolveEventImageUrl } from '../utils/imageVariants';
 
@@ -106,6 +106,18 @@ const isBeachSeriesEvent = (event = {}) => {
 
 const getEventDateValue = (event) => getEventStartDate(event);
 
+const dedupeEventsByParent = (events = []) => {
+  const seen = new Set();
+  return events.filter((event) => {
+    const key = String(event?.id || event?.slug || event?.artist_name || event?.title || '').trim();
+    if (!key || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
 const sameWeek = (date, now) => {
   if (!date) return false;
   const copy = new Date(now);
@@ -155,7 +167,7 @@ const resolveEventOffer = (event, baseUrl, startDate) => {
     priceCurrency: 'USD',
     price: (minPrice !== null ? minPrice : 0).toFixed(2),
     availability: 'https://schema.org/InStock',
-    url: event.id ? `${baseUrl}/#event-${event.id}` : baseUrl,
+    url: event.id ? `${baseUrl}/#${getEventAnchorId(event) || `event-${event.id}`}` : baseUrl,
     validFrom: startDate ? startDate.toISOString() : undefined,
   };
 };
@@ -362,9 +374,9 @@ const transformEvents = (events) => {
       return (aDate?.getTime() || 0) - (bDate?.getTime() || 0);
     });
 
-  const featuredEvents = sortedSingles.slice(0, 3);
+  const featuredEvents = dedupeEventsByParent(sortedSingles).slice(0, 3);
   const beachEligibleEvents = decoratedSingles.filter((event) => event.isBeachSeries);
-  const beachEvents = sortedSingles.filter((event) => event.isBeachSeries);
+  const beachEvents = dedupeEventsByParent(sortedSingles.filter((event) => event.isBeachSeries));
 
   if (DEV_MODE && !recurringSeries.length && !hasLoggedRecurringWarning && events.length) {
     hasLoggedRecurringWarning = true;
@@ -487,7 +499,7 @@ export default function HomePage({ onAdminClick, onNavigate }) {
         name: event.artist_name || event.title || 'Midway Music Hall Event',
         startDate: start.toISOString(),
         endDate: end ? end.toISOString() : undefined,
-        url: event.id ? `${baseUrl}/#event-${event.id}` : baseUrl,
+        url: event.id ? `${baseUrl}/#${getEventAnchorId(event) || `event-${event.id}`}` : baseUrl,
         image: imageUrl,
         description,
         eventStatus: resolveEventStatus(event),

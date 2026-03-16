@@ -611,7 +611,12 @@ export default function SeatingChart({
                         opacity,
                       }}
                     >
-                      <span className="text-center px-1">{label}</span>
+                      <span
+                        className="text-center px-1"
+                        style={rotation ? { transform: `rotate(${-rotation}deg)` } : undefined}
+                      >
+                        {label}
+                      </span>
                     </div>
                   </div>
                 );
@@ -681,6 +686,7 @@ export default function SeatingChart({
                             })
                           }
                           interactive={interactive}
+                          textRotation={-(rotation || 0)}
                         />
                       </div>
                     </div>
