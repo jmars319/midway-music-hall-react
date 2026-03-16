@@ -124,7 +124,7 @@ export default function DashboardModule({ onNavigate = () => {} }){
         <div className="p-4 bg-red-600/10 border border-red-600 text-red-400 rounded">{error}</div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard title="Upcoming Events" value={stats.upcoming_events} color="purple" Icon={Calendar} />
+          <StatCard title="Upcoming / Active Events" value={stats.upcoming_events} color="purple" Icon={Calendar} />
           <StatCard title="Pending Seat Requests" value={stats.pending_requests} color="blue" Icon={Mail} />
           <StatCard title="Pending Suggestions" value={stats.pending_suggestions} color="green" Icon={Music} />
           <StatCard title="Events This Month" value={stats.events_this_month} color="orange" Icon={Activity} />

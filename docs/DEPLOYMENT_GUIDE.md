@@ -71,7 +71,10 @@ ADMIN_SESSION_COOKIE_SECURE=true
    1. `database/20250326_payment_settings.sql`
    2. `database/20251212_schema_upgrade.sql`
 
-Important: the full seed dumps do not provision `event_occurrences`. Always run `database/20251212_schema_upgrade.sql` after any seed import before testing or using multi-day events.
+The full seed dumps now include `event_occurrences`, but you should still run the canonical migrations after any seed import so older columns, indexes, and compatibility changes stay aligned.
+
+Optional legacy backfill:
+- If you want every pre-existing single-day event on production to have one normalized occurrence row, run `database/20260316_event_occurrences_backfill.sql` once after `database/20251212_schema_upgrade.sql`.
 
 Verification queries:
 ```sql

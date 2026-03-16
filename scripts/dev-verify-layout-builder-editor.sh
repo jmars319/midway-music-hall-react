@@ -42,6 +42,14 @@ if ! rg -n "textRotation = 0" "$ROOT_DIR/frontend/src/components/TableComponent.
   log_error "[layout-builder] TableComponent does not accept textRotation"
   exit 1
 fi
+if ! rg -n -F 'textRotationStyle = textRotation ? { transform: `rotate(${textRotation}deg)` } : null' "$ROOT_DIR/frontend/src/components/TableComponent.js" >/dev/null; then
+  log_error "[layout-builder] TableComponent is missing the shared counter-rotation style"
+  exit 1
+fi
+if ! rg -n "textRotationStyle \\|\\| undefined" "$ROOT_DIR/frontend/src/components/TableComponent.js" >/dev/null; then
+  log_error "[layout-builder] TableComponent is not applying counter-rotation to seat status badges"
+  exit 1
+fi
 if ! rg -n "textRotation=\\{-\\(draggingRow\\.rotation \\|\\| 0\\)\\}" "$ROOT_DIR/frontend/src/admin/LayoutsModule.js" >/dev/null; then
   log_error "[layout-builder] ghost table preview is not counter-rotating text"
   exit 1
@@ -56,3 +64,16 @@ if ! rg -n -F 'rotate(${-rotation}deg)' "$ROOT_DIR/frontend/src/admin/LayoutsMod
 fi
 
 log_success "[layout-builder] selected-object bindings and upright label safeguards are present"
+
+cat <<'CHECKLIST'
+[layout-builder] MANUAL CHECKLIST
+1. Open Admin > Layouts and select a rotated table or row object.
+2. Edit Section, Row Label, and at least one Seat Label in the sidebar.
+   Pass: the selected object stays selected while typing and each field remains editable.
+3. Save the layout and reload the editor.
+   Pass: the updated Section, Row Label, and Seat Labels persist after reload.
+4. Rotate the same object to 90, 180, and 270 degrees.
+   Pass: seat labels and row/table labels stay upright and readable.
+5. Drag the object after editing and rotate it again.
+   Pass: drag/rotate/placement behavior is unchanged after the label edits.
+CHECKLIST

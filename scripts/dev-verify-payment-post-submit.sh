@@ -6,6 +6,25 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT_DIR/scripts/dev-common.sh"
 
 API_BASE="$(backend_url)/api"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mmh-payment-post-submit.XXXXXX")"
+ADMIN_COOKIE_JAR="${TMP_DIR}/admin-cookies.txt"
+ADMIN_ORIGIN="$(frontend_url)"
+ADMIN_LOGIN_ID="${MMH_VERIFY_LOGIN_EMAIL:-${MMH_VERIFY_ADMIN_EMAIL:-admin}}"
+ADMIN_LOGIN_PASSWORD="${MMH_VERIFY_LOGIN_PASSWORD:-${MMH_VERIFY_ADMIN_PASSWORD:-admin123}}"
+KEEP_FIXTURES="${MMH_VERIFY_KEEP_FIXTURES:-0}"
+created_event_id=""
+
+cleanup() {
+  if [ "$KEEP_FIXTURES" != "1" ] && [ -n "$created_event_id" ]; then
+    curl -fsS -X DELETE \
+      -b "$ADMIN_COOKIE_JAR" \
+      -H "Origin: ${ADMIN_ORIGIN}" \
+      -H 'Accept: application/json' \
+      "${API_BASE}/events/${created_event_id}" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
 
 require_backend_health_once || {
   log_error "backend is not running; start dev stack via scripts/dev-start.sh"
@@ -26,29 +45,125 @@ if ! rg -n "Amount due" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js"
   exit 1
 fi
 
-log_step "[payment-post-submit] locating a seating-enabled event"
-event_payload="$(curl -fsS -H 'Accept: application/json' "${API_BASE}/events?scope=public")"
-seating_event_id="$(EVENTS_JSON="$event_payload" python3 - <<'PY'
+json_field() {
+  local json="$1"
+  local field="$2"
+  JSON_INPUT="$json" python3 - "$field" <<'PY'
 import json
 import os
+import sys
 
-data = json.loads(os.environ.get('EVENTS_JSON', '{}'))
-for event in data.get('events', []):
-    if int(event.get('seating_enabled') or 0) != 1:
-        continue
-    if not event.get('layout_id') and not event.get('layout_version_id'):
-        continue
-    print(event.get('id'))
-    break
+value = json.loads(os.environ.get('JSON_INPUT', '{}'))
+for part in sys.argv[1].split('.'):
+    if isinstance(value, list):
+        value = value[int(part)]
+    elif isinstance(value, dict):
+        value = value.get(part)
+    else:
+        value = None
+        break
+if value is None:
+    print('null')
+elif isinstance(value, bool):
+    print('true' if value else 'false')
+else:
+    print(value)
 PY
-)"
+}
 
-if [ -z "$seating_event_id" ]; then
-  log_error "no seating-enabled event found via /api/events?scope=public"
+admin_post_json() {
+  local method="$1"
+  local path="$2"
+  local body="$3"
+  curl -fsS -X "$method" \
+    -b "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$body" \
+    "${API_BASE}${path}"
+}
+
+admin_login() {
+  local login_payload
+  login_payload=$(python3 - "$ADMIN_LOGIN_ID" "$ADMIN_LOGIN_PASSWORD" <<'PY'
+import json
+import sys
+print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))
+PY
+)
+  local login_response
+  login_response=$(curl -fsS \
+    -c "$ADMIN_COOKIE_JAR" \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$login_payload" \
+    "${API_BASE}/login")
+  local ok
+  ok=$(LOGIN_JSON="$login_response" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ.get('LOGIN_JSON', '{}'))
+print('1' if payload.get('success') else '0')
+PY
+)
+  if [ "$ok" != "1" ]; then
+    log_error "admin login failed in payment post-submit verification"
+    exit 1
+  fi
+}
+
+layout_id="$(php -r "
+if (!isset(\$_SERVER['REQUEST_METHOD'])) { \$_SERVER['REQUEST_METHOD'] = 'CLI'; }
+require '$ROOT_DIR/backend/bootstrap.php';
+\$pdo = \\Midway\\Backend\\Database::connection();
+\$id = (int) \$pdo->query('SELECT id FROM seating_layouts ORDER BY id ASC LIMIT 1')->fetchColumn();
+echo \$id;
+")"
+if [ -z "$layout_id" ] || [ "$layout_id" = "0" ]; then
+  log_error "no seating layout found for payment post-submit verification"
   exit 1
 fi
 
-seating_payload="$(curl -fsS -H 'Accept: application/json' "${API_BASE}/seating/event/${seating_event_id}")"
+admin_login
+
+event_date="$(python3 - <<'PY'
+from datetime import datetime, timedelta, timezone
+print((datetime.now(timezone.utc).date() + timedelta(days=3)).isoformat())
+PY
+)"
+verify_label="Verify Payment Post-Submit $(date -u +%s)"
+event_payload="$(cat <<JSON
+{
+  "artist_name": "${verify_label}",
+  "title": "${verify_label}",
+  "event_date": "${event_date}",
+  "event_time": "20:00:00",
+  "door_time": "${event_date} 18:00:00",
+  "timezone": "America/New_York",
+  "status": "published",
+  "visibility": "public",
+  "ticket_type": "reserved_seating",
+  "layout_id": ${layout_id},
+  "seating_enabled": true,
+  "payment_enabled": true
+}
+JSON
+)"
+create_response="$(admin_post_json "POST" "/events" "$event_payload")"
+create_success="$(json_field "$create_response" success)"
+if [ "$create_success" != "true" ]; then
+  log_error "failed to create payment post-submit verification event: $create_response"
+  exit 1
+fi
+created_event_id="$(json_field "$create_response" id)"
+if [ "$created_event_id" = "null" ] || [ -z "$created_event_id" ]; then
+  log_error "payment post-submit verification event missing id: $create_response"
+  exit 1
+fi
+
+seating_payload="$(curl -fsS -H 'Accept: application/json' "${API_BASE}/seating/event/${created_event_id}")"
 seating_ok="$(SEATING_JSON="$seating_payload" python3 - <<'PY'
 import json
 import os
@@ -58,14 +173,14 @@ print('1' if data.get('success') else '0')
 PY
 )"
 if [ "$seating_ok" != "1" ]; then
-  log_error "seating endpoint failed for event ${seating_event_id}"
+  log_error "seating endpoint failed for event ${created_event_id}"
   exit 1
 fi
 
 log_success "[payment-post-submit] API and source gates look valid"
 cat <<'CHECKLIST'
 [payment-post-submit] MANUAL CHECKLIST
-1. Open a payment-enabled, seating-enabled event on the public site.
+1. Open the verification event created by this script on the public site.
 2. Select seats and continue to contact form.
 3. Confirm no actionable payment button is visible before submitting.
 4. Submit the seat request.
@@ -73,3 +188,6 @@ cat <<'CHECKLIST'
 6. Confirm "Amount due" appears when total_amount is present in the response.
 7. Confirm over-limit copy still appears when seat count exceeds configured payment limit.
 CHECKLIST
+if [ "$KEEP_FIXTURES" != "1" ]; then
+  log_info "[payment-post-submit] temporary verification event will be deleted on exit; rerun with MMH_VERIFY_KEEP_FIXTURES=1 for manual walkthroughs"
+fi

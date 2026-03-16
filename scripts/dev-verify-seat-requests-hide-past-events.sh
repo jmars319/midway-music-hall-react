@@ -141,6 +141,12 @@ PY
 }
 
 admin_login
+baseline_stats="$(admin_get_json "/dashboard-stats")"
+baseline_upcoming_events="$(json_field "$baseline_stats" "stats.upcoming_events")"
+if [ "$baseline_upcoming_events" = "null" ] || [ -z "$baseline_upcoming_events" ]; then
+  log_error "failed to read baseline dashboard upcoming_events count"
+  exit 1
+fi
 
 log_step "[seat-requests-hide-past] creating test seating layout"
 layout_payload="$(cat <<JSON
@@ -320,6 +326,15 @@ JSON
 past_event_id="$(create_event "Past Event Verify $(date -u +%s)" "$past_start")"
 future_event_id="$(create_event "Future Event Verify $(date -u +%s)" "$future_start")"
 active_multi_day_event_id="$(create_multi_day_event "Active Multi-Day Verify $(date -u +%s)" "$past_start" "$future_start")"
+
+log_step "[seat-requests-hide-past] verifying dashboard stats count active multi-day runs until the final occurrence ends"
+updated_stats="$(admin_get_json "/dashboard-stats")"
+updated_upcoming_events="$(json_field "$updated_stats" "stats.upcoming_events")"
+expected_upcoming_events="$((baseline_upcoming_events + 2))"
+if [ "$updated_upcoming_events" != "$expected_upcoming_events" ]; then
+  log_error "dashboard upcoming_events mismatch after creating one future single-day event and one active multi-day run (expected ${expected_upcoming_events}, got ${updated_upcoming_events})"
+  exit 1
+fi
 
 create_request() {
   local event_id="$1"

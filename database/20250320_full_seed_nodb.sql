@@ -378,6 +378,32 @@ INSERT INTO `events` VALUES (180,'Friday Night Dance with DJ Dancin\' Dan','Even
 UNLOCK TABLES;
 
 --
+-- Table structure for table `event_occurrences`
+--
+
+DROP TABLE IF EXISTS `event_occurrences`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `event_occurrences` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `event_id` int NOT NULL,
+  `occurrence_date` date NOT NULL,
+  `start_time` time NOT NULL,
+  `start_datetime` datetime NOT NULL,
+  `end_datetime` datetime DEFAULT NULL,
+  `door_datetime` datetime DEFAULT NULL,
+  `sort_order` int NOT NULL DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_event_occurrence_start` (`event_id`,`start_datetime`),
+  KEY `idx_event_occurrences_event_start` (`event_id`,`start_datetime`),
+  KEY `idx_event_occurrences_start` (`start_datetime`),
+  CONSTRAINT `fk_event_occurrences_event` FOREIGN KEY (`event_id`) REFERENCES `events` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `events_backup_1761127051762`
 --
 

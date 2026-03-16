@@ -7214,10 +7214,19 @@ $router->add('GET', '/api/dashboard-stats', function () {
             $pdo->prepare('SET time_zone = ?')->execute([$tzOffset]);
         }
 
-        $visibilityFilter = "status = 'published' AND visibility = 'public' AND deleted_at IS NULL";
+        $visibilityFilter = "e.status = 'published' AND e.visibility = 'public' AND e.deleted_at IS NULL";
+        $eventStartExpr = event_start_expression('e');
+        $eventEndExpr = event_end_expression('e');
+        $eventHasScheduleExpr = event_has_schedule_expression('e');
+        $currentMonthStartExpr = "TIMESTAMP(DATE_FORMAT(CURDATE(), '%Y-%m-01 00:00:00'))";
+        $nextMonthStartExpr = "TIMESTAMP(DATE_FORMAT(DATE_ADD(CURDATE(), INTERVAL 1 MONTH), '%Y-%m-01 00:00:00'))";
 
         $upcoming = (int) $pdo->query(
-            "SELECT COUNT(*) FROM events WHERE {$visibilityFilter} AND start_datetime >= NOW() AND start_datetime < DATE_ADD(NOW(), INTERVAL 2 MONTH)"
+            "SELECT COUNT(*) FROM events e
+             WHERE {$visibilityFilter}
+               AND {$eventHasScheduleExpr}
+               AND {$eventEndExpr} >= NOW()
+               AND {$eventStartExpr} < DATE_ADD(NOW(), INTERVAL 2 MONTH)"
         )->fetchColumn();
 
         $pendingStatuses = ['pending','hold','new','contacted','waiting'];
@@ -7237,7 +7246,11 @@ $router->add('GET', '/api/dashboard-stats', function () {
         }
 
         $eventsThisMonth = (int) $pdo->query(
-            "SELECT COUNT(*) FROM events WHERE {$visibilityFilter} AND YEAR(start_datetime) = YEAR(CURDATE()) AND MONTH(start_datetime) = MONTH(CURDATE())"
+            "SELECT COUNT(*) FROM events e
+             WHERE {$visibilityFilter}
+               AND {$eventHasScheduleExpr}
+               AND {$eventEndExpr} >= {$currentMonthStartExpr}
+               AND {$eventStartExpr} < {$nextMonthStartExpr}"
         )->fetchColumn();
 
         Response::success([
