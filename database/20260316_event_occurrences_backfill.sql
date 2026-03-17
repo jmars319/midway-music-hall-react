@@ -3,7 +3,24 @@
 -- This seeds one occurrence row for any non-deleted event that still relies only on
 -- the legacy scalar schedule fields.
 
-WITH legacy_events AS (
+INSERT INTO event_occurrences (
+  event_id,
+  occurrence_date,
+  start_time,
+  start_datetime,
+  end_datetime,
+  door_datetime,
+  sort_order
+)
+SELECT
+  le.id,
+  COALESCE(le.event_date, DATE(COALESCE(le.canonical_start, le.end_datetime))),
+  COALESCE(le.event_time, TIME(COALESCE(le.canonical_start, le.end_datetime)), '18:00:00'),
+  le.canonical_start,
+  COALESCE(le.end_datetime, DATE_ADD(le.canonical_start, INTERVAL 4 HOUR)),
+  le.door_time,
+  0
+FROM (
   SELECT
     e.id,
     e.event_date,
@@ -22,25 +39,7 @@ WITH legacy_events AS (
     ) AS canonical_start
   FROM events e
   WHERE e.deleted_at IS NULL
-)
-INSERT INTO event_occurrences (
-  event_id,
-  occurrence_date,
-  start_time,
-  start_datetime,
-  end_datetime,
-  door_datetime,
-  sort_order
-)
-SELECT
-  le.id,
-  COALESCE(le.event_date, DATE(COALESCE(le.canonical_start, le.end_datetime))),
-  COALESCE(le.event_time, TIME(COALESCE(le.canonical_start, le.end_datetime)), '18:00:00'),
-  le.canonical_start,
-  COALESCE(le.end_datetime, DATE_ADD(le.canonical_start, INTERVAL 4 HOUR)),
-  le.door_time,
-  0
-FROM legacy_events le
+) AS le
 LEFT JOIN event_occurrences eo
   ON eo.event_id = le.id
  AND eo.start_datetime = le.canonical_start
