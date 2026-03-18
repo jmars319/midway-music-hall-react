@@ -10,7 +10,8 @@ import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
 import { loadPayPalHostedButtonsSdk } from '../utils/paypalHostedButtons';
 import { formatEventDateTimeLabel, formatEventPriceDisplay, formatEventRunSummary, isMultiDayEvent } from '../utils/eventFormat';
-import { buildEventPricingLegend, resolveSeatPricingTier } from '../utils/eventPricing';
+import { buildEventPricingLegend, resolveRowPricingTier, resolveSeatPricingTier } from '../utils/eventPricing';
+import { buildTierBodyStyle, buildTierGroupStyle, buildTierSwatchStyle, withAlpha } from '../utils/seatingTierTheme';
 import ReservationBanner from './ReservationBanner';
 
 const ALWAYS_USE_SEAT_CHART_OVERLAY = true;
@@ -26,6 +27,10 @@ const formatCurrencyAmount = (value, currency = 'USD') => {
     maximumFractionDigits: 2,
   }).format(numeric);
 };
+
+const getLandmarkLabel = (row = {}) => (
+  row.label || row.marker_label || row.section_name || row.row_label || 'Landmark'
+);
 
 export default function EventSeatingModal({ event, onClose }) {
   const [seatingConfig, setSeatingConfig] = useState([]);
@@ -137,58 +142,75 @@ export default function EventSeatingModal({ event, onClose }) {
   useFocusTrap(dialogRef, { onClose: handleModalClose, enabled: true, initialFocusRef: closeButtonRef });
 
   const activeRows = useMemo(
-    () => seatingConfig.filter((row) => row.is_active !== false && isSeatRow(row)),
+    () => seatingConfig.filter((row) => row.is_active !== false),
     [seatingConfig]
   );
+  const seatRows = useMemo(() => activeRows.filter((row) => isSeatRow(row)), [activeRows]);
+  const decorRows = useMemo(() => activeRows.filter((row) => !isSeatRow(row)), [activeRows]);
   const pricingLegendItems = useMemo(
-    () => buildEventPricingLegend(event, activeRows),
-    [activeRows, event]
+    () => buildEventPricingLegend(event, seatRows),
+    [event, seatRows]
   );
+  const pricingTierDisplayMap = useMemo(
+    () => new Map(
+      pricingLegendItems.map((tier, index) => [
+        tier.id,
+        {
+          ...tier,
+          tierIndex: index,
+          swatchStyle: buildTierSwatchStyle(tier, index),
+          rowStyle: buildTierGroupStyle(tier, index),
+          surfaceStyle: buildTierBodyStyle(tier, index),
+        },
+      ])
+    ),
+    [pricingLegendItems]
+  );
+  const seatLabelMap = useMemo(() => buildSeatLookupMap(seatRows), [seatRows]);
+  const seatLabelFor = (seatId) => formatSeatLabel(seatLabelMap[seatId] || seatId, { mode: 'seat' });
   const selectedSeatPricing = useMemo(() => {
     if (!selectedSeats.length || !pricingLegendItems.length) {
-      return { breakdown: [], total: null };
+      return { lineItems: [], total: null };
     }
-    const breakdownMap = new Map();
+    const lineItems = [];
     let total = 0;
     selectedSeats.forEach((seatId) => {
-      const tier = resolveSeatPricingTier(event, activeRows, seatId);
+      const tier = resolveSeatPricingTier(event, seatRows, seatId);
       if (!tier) return;
       const price = normalizeFiniteNumber(tier.price);
       if (price === null) return;
+      const tierDisplay = pricingTierDisplayMap.get(tier.id) || tier;
       total += price;
-      const current = breakdownMap.get(tier.id) || {
-        id: tier.id,
-        label: tier.label,
-        color: tier.color,
-        quantity: 0,
-        subtotal: 0,
-      };
-      current.quantity += 1;
-      current.subtotal += price;
-      breakdownMap.set(tier.id, current);
+      lineItems.push({
+        seatId,
+        seatLabel: describeSeatSelection(seatId, formatSeatLabel(seatLabelMap[seatId] || seatId, { mode: 'seat' })),
+        tierId: tier.id,
+        tierLabel: tierDisplay.label,
+        tierColor: tierDisplay.color,
+        patternId: tierDisplay.patternId,
+        patternLabel: tierDisplay.patternLabel,
+        swatchStyle: tierDisplay.swatchStyle,
+        price,
+        priceLabel: formatCurrencyAmount(price),
+      });
     });
     return {
-      breakdown: Array.from(breakdownMap.values()).map((item) => ({
-        ...item,
-        subtotal: Number(item.subtotal.toFixed(2)),
-      })),
-      total: breakdownMap.size ? Number(total.toFixed(2)) : null,
+      lineItems,
+      total: lineItems.length ? Number(total.toFixed(2)) : null,
     };
-  }, [activeRows, event, pricingLegendItems.length, selectedSeats]);
-  const seatLabelMap = useMemo(() => buildSeatLookupMap(activeRows), [activeRows]);
-  const seatLabelFor = (seatId) => formatSeatLabel(seatLabelMap[seatId] || seatId, { mode: 'seat' });
+  }, [event, pricingLegendItems.length, pricingTierDisplayMap, seatLabelMap, seatRows, selectedSeats]);
   const canvasWidth = canvasSettings?.width || 1200;
   const canvasHeight = canvasSettings?.height || 800;
   const hasPositions = useMemo(
     () =>
-      activeRows.some(
+      seatRows.some(
         (r) =>
           r.pos_x !== null &&
           r.pos_y !== null &&
           r.pos_x !== undefined &&
           r.pos_y !== undefined
       ),
-    [activeRows]
+    [seatRows]
   );
   const isSeatSelectionView = !loading && !showContactForm && hasPositions;
   const isMobileSeatMode = isSeatSelectionView && isMobileViewport;
@@ -366,11 +388,12 @@ export default function EventSeatingModal({ event, onClose }) {
 
   const openLargeMapOverlay = useCallback(() => {
     setShowLargeMap(true);
+    setShowLargeMapLegend(!isMobileViewport);
     mapFitRequestedRef.current = true;
     requestAnimationFrame(() => {
       fitSeatsToViewport('default');
     });
-  }, [fitSeatsToViewport]);
+  }, [fitSeatsToViewport, isMobileViewport]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -400,14 +423,21 @@ export default function EventSeatingModal({ event, onClose }) {
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return undefined;
-    const widthQuery = window.matchMedia('(max-width: 640px)');
-    const coarseQuery = window.matchMedia('(pointer: coarse)');
-    const hoverNoneQuery = window.matchMedia('(hover: none)');
-    const finePointerQuery = window.matchMedia('(pointer: fine)');
+    const buildFallbackQuery = () => ({
+      matches: false,
+      addEventListener: null,
+      removeEventListener: null,
+      addListener: null,
+      removeListener: null,
+    });
+    const widthQuery = window.matchMedia('(max-width: 640px)') || buildFallbackQuery();
+    const coarseQuery = window.matchMedia('(pointer: coarse)') || buildFallbackQuery();
+    const hoverNoneQuery = window.matchMedia('(hover: none)') || buildFallbackQuery();
+    const finePointerQuery = window.matchMedia('(pointer: fine)') || buildFallbackQuery();
     const getMobileViewport = () => {
-      const isNarrow = widthQuery.matches;
-      const isCoarsePointer = coarseQuery.matches || (hoverNoneQuery.matches && !finePointerQuery.matches);
-      const isNarrowTouch = isNarrow && !finePointerQuery.matches;
+      const isNarrow = Boolean(widthQuery.matches);
+      const isCoarsePointer = Boolean(coarseQuery.matches) || (Boolean(hoverNoneQuery.matches) && !Boolean(finePointerQuery.matches));
+      const isNarrowTouch = isNarrow && !Boolean(finePointerQuery.matches);
       return isNarrowTouch || isCoarsePointer;
     };
     const handleChange = () => {
@@ -415,7 +445,7 @@ export default function EventSeatingModal({ event, onClose }) {
       scheduleFitToViewport();
     };
     setIsMobileViewport(getMobileViewport());
-    if (widthQuery.addEventListener) {
+    if (typeof widthQuery.addEventListener === 'function') {
       widthQuery.addEventListener('change', handleChange);
       coarseQuery.addEventListener('change', handleChange);
       hoverNoneQuery.addEventListener('change', handleChange);
@@ -427,15 +457,25 @@ export default function EventSeatingModal({ event, onClose }) {
         finePointerQuery.removeEventListener('change', handleChange);
       };
     }
-    widthQuery.addListener(handleChange);
-    coarseQuery.addListener(handleChange);
-    hoverNoneQuery.addListener(handleChange);
-    finePointerQuery.addListener(handleChange);
+    if (
+      typeof widthQuery.addListener === 'function' &&
+      typeof coarseQuery.addListener === 'function' &&
+      typeof hoverNoneQuery.addListener === 'function' &&
+      typeof finePointerQuery.addListener === 'function'
+    ) {
+      widthQuery.addListener(handleChange);
+      coarseQuery.addListener(handleChange);
+      hoverNoneQuery.addListener(handleChange);
+      finePointerQuery.addListener(handleChange);
+      return () => {
+        widthQuery.removeListener(handleChange);
+        coarseQuery.removeListener(handleChange);
+        hoverNoneQuery.removeListener(handleChange);
+        finePointerQuery.removeListener(handleChange);
+      };
+    }
     return () => {
-      widthQuery.removeListener(handleChange);
-      coarseQuery.removeListener(handleChange);
-      hoverNoneQuery.removeListener(handleChange);
-      finePointerQuery.removeListener(handleChange);
+      // No-op when matchMedia does not support listeners in the current environment.
     };
   }, [scheduleFitToViewport]);
 
@@ -809,6 +849,51 @@ export default function EventSeatingModal({ event, onClose }) {
     };
   }, [paymentOption, paymentOverLimit, paymentProviderType, paypalContainerId, showPaymentPanel]);
 
+  const renderLandmark = (row = {}) => {
+    const landmarkKey = row.id || `${row.element_type || 'marker'}-${row.pos_x}-${row.pos_y}`;
+    const landmarkType = (row.element_type || 'marker').toLowerCase();
+    const isArea = landmarkType === 'area';
+    const rotation = row.rotation || 0;
+    const width = row.width || (isArea ? 260 : 140);
+    const height = row.height || (isArea ? 160 : 70);
+    const label = getLandmarkLabel(row);
+    const tone = row.color || (isArea ? '#F97316' : '#60A5FA');
+
+    return (
+      <div
+        key={landmarkKey}
+        data-landmark-id={row.id || landmarkKey}
+        data-landmark-type={landmarkType}
+        className="absolute"
+        style={{
+          left: `${row.pos_x}%`,
+          top: `${row.pos_y}%`,
+          transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+          zIndex: isArea ? 2 : 3,
+          pointerEvents: 'none',
+        }}
+      >
+        <div
+          className={`${isArea ? 'rounded-[28px]' : 'rounded-2xl'} flex items-center justify-center px-3 py-2 text-center shadow-lg`}
+          style={{
+            width,
+            height,
+            backgroundColor: withAlpha(tone, isArea ? 0.2 : 0.3),
+            border: `1px dashed ${withAlpha(tone, 0.74)}`,
+            boxShadow: `inset 0 0 0 1px ${withAlpha(tone, 0.14)}, 0 14px 24px rgba(15, 23, 42, 0.16)`,
+          }}
+        >
+          <span
+            className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/90"
+            style={rotation ? { transform: `rotate(${-rotation}deg)` } : undefined}
+          >
+            {label}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
   const legendList = (
     <div className="space-y-4">
       {pricingLegendItems.length > 0 && (
@@ -817,11 +902,25 @@ export default function EventSeatingModal({ event, onClose }) {
           <div className="space-y-3">
             {pricingLegendItems.map((tier) => (
               <div key={tier.id} className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-1">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="h-3.5 w-3.5 rounded-full border border-white/20 shrink-0" style={{ backgroundColor: tier.color }} />
-                  <span className="text-sm font-semibold text-white break-words">
-                    {tier.label} {tier.priceLabel}
-                  </span>
+                <div className="flex items-start gap-3 min-w-0">
+                  <span
+                    aria-hidden="true"
+                    className="mt-0.5 h-8 w-8 rounded-md shrink-0"
+                    style={pricingTierDisplayMap.get(tier.id)?.swatchStyle || undefined}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="text-sm font-semibold text-white break-words">
+                        {tier.label}
+                      </span>
+                      <span className="text-sm font-semibold text-amber-100 whitespace-nowrap">
+                        {tier.priceLabel}
+                      </span>
+                    </div>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-amber-100/80 mt-1">
+                      {tier.patternLabel}
+                    </p>
+                  </div>
                 </div>
                 {tier.note && (
                   <p className="text-xs text-amber-100/90">{tier.note}</p>
@@ -831,6 +930,31 @@ export default function EventSeatingModal({ event, onClose }) {
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+      {selectedSeatPricing.lineItems.length > 0 && (
+        <div className="space-y-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-200">Selected pricing</div>
+          <div className="rounded-lg border border-indigo-400/30 bg-indigo-500/10 overflow-hidden">
+            <div className="max-h-48 overflow-y-auto divide-y divide-indigo-400/15">
+              {selectedSeatPricing.lineItems.map((item) => (
+                <div key={item.seatId} className="flex items-center gap-3 px-3 py-2 text-sm">
+                  <span aria-hidden="true" className="h-3.5 w-3.5 rounded-sm shrink-0" style={item.swatchStyle || undefined} />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-white truncate">{item.seatLabel}</div>
+                    <div className="text-xs text-gray-300 truncate">{item.tierLabel}</div>
+                  </div>
+                  <span className="text-sm font-semibold text-amber-100 whitespace-nowrap">{item.priceLabel}</span>
+                </div>
+              ))}
+            </div>
+            {selectedSeatPricing.total !== null && (
+              <div className="flex items-center justify-between gap-3 border-t border-indigo-400/15 px-3 py-2 text-sm font-semibold text-white bg-gray-950/40">
+                <span>Running total</span>
+                <span className="text-amber-100">{formatCurrencyAmount(selectedSeatPricing.total)}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -885,49 +1009,74 @@ export default function EventSeatingModal({ event, onClose }) {
               STAGE
             </div>
 
-            {activeRows.map((row) => {
-              if (row.pos_x === null || row.pos_y === null || row.pos_x === undefined || row.pos_y === undefined) return null;
-              return (
-                <div
-                  key={row.id}
-                  className="absolute"
-                  style={{
-                    left: `${row.pos_x}%`,
-                    top: `${row.pos_y}%`,
-                    transform: 'translate(-50%, -50%)',
-                    padding: '20px',
-                    minWidth: `${row.width || 120}px`,
-                    minHeight: `${row.height || 120}px`,
-                    pointerEvents: 'none'
-                  }}
-                >
-                  <div className="flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
-                    <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
-                      <TableComponent
-                        row={row}
-                        tableShape={row.table_shape || 'table-6'}
-                        selectedSeats={selectedSeats}
-                        pendingSeats={pendingSeats}
-                        holdSeats={holdSeats}
-                        reservedSeats={reservedSeats}
-                        seatStatusMap={seatStatusMap}
-                        onToggleSeat={(seatId, meta = {}) =>
-                          handleSeatInteraction(seatId, {
-                            ...meta,
-                            tableId: row?.id || `${row.section_name}-${row.row_label}`,
-                            rowLabel: row.row_label,
-                            section: row.section_name || row.section,
-                          })
-                        }
-                        interactive
-                        labelFormatter={(rawLabel) => formatSeatLabel(rawLabel, { mode: 'seat' })}
-                        textRotation={-(row.rotation || 0)}
+            {decorRows
+              .filter((row) => row.pos_x !== null && row.pos_y !== null && row.pos_x !== undefined && row.pos_y !== undefined)
+              .map((row) => renderLandmark(row))}
+
+            {seatRows
+              .filter((row) => row.pos_x !== null && row.pos_y !== null && row.pos_x !== undefined && row.pos_y !== undefined)
+              .map((row) => {
+                const rowKey = row.id || `${row.section_name}-${row.row_label}`;
+                const tier = resolveRowPricingTier(event, row);
+                const tierVisual = tier ? pricingTierDisplayMap.get(tier.id) || null : null;
+
+                return (
+                  <div
+                    key={rowKey}
+                    className="absolute"
+                    style={{
+                      left: `${row.pos_x}%`,
+                      top: `${row.pos_y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      padding: '20px',
+                      minWidth: `${row.width || 120}px`,
+                      minHeight: `${row.height || 120}px`,
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    {tierVisual && (
+                      <div
+                        aria-hidden="true"
+                        data-tier-row={rowKey}
+                        data-tier-pattern={tierVisual.patternId}
+                        data-tier-color={tierVisual.color}
+                        className="absolute inset-[6px] rounded-[28px]"
+                        style={tierVisual.rowStyle}
                       />
+                    )}
+                    <div className="relative flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
+                      <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
+                        <TableComponent
+                          row={row}
+                          tableShape={row.table_shape || 'table-6'}
+                          selectedSeats={selectedSeats}
+                          pendingSeats={pendingSeats}
+                          holdSeats={holdSeats}
+                          reservedSeats={reservedSeats}
+                          seatStatusMap={seatStatusMap}
+                          tierVisual={tierVisual ? {
+                            id: tierVisual.id,
+                            color: tierVisual.color,
+                            patternId: tierVisual.patternId,
+                            surfaceStyle: tierVisual.surfaceStyle,
+                          } : null}
+                          onToggleSeat={(seatId, meta = {}) =>
+                            handleSeatInteraction(seatId, {
+                              ...meta,
+                              tableId: rowKey,
+                              rowLabel: row.row_label,
+                              section: row.section_name || row.section,
+                            })
+                          }
+                          interactive
+                          labelFormatter={(rawLabel) => formatSeatLabel(rawLabel, { mode: 'seat' })}
+                          textRotation={-(row.rotation || 0)}
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         </div>
         {!seatingEnabled && (
@@ -1009,9 +1158,21 @@ export default function EventSeatingModal({ event, onClose }) {
               <div className="pointer-events-auto absolute left-1/2 -translate-x-1/2 bottom-4">
                 <div className="rounded-xl border border-indigo-400/60 bg-gray-950/90 px-3 py-2 flex items-center gap-3 shadow-xl">
                   <div className="hidden sm:flex flex-wrap gap-2 max-w-[50vw]">
-                    {selectedSeats.slice(0, 4).map((seat) => (
-                      <span key={seat} className="px-2 py-1 bg-purple-600/80 text-white rounded-full text-xs font-medium">
-                        {describeSeatSelection(seat, seatLabelFor(seat))}
+                    {(selectedSeatPricing.lineItems.length ? selectedSeatPricing.lineItems : selectedSeats.map((seat) => ({
+                      seatId: seat,
+                      seatLabel: describeSeatSelection(seat, seatLabelFor(seat)),
+                    }))).slice(0, 4).map((item) => (
+                      <span key={item.seatId} className="inline-flex items-center gap-2 px-2 py-1 bg-purple-600/80 text-white rounded-full text-xs font-medium">
+                        {item.swatchStyle && (
+                          <span aria-hidden="true" className="h-2.5 w-2.5 rounded-sm shrink-0" style={item.swatchStyle} />
+                        )}
+                        <span>{item.seatLabel}</span>
+                        {item.tierLabel && (
+                          <span className="text-indigo-100/85">{item.tierLabel}</span>
+                        )}
+                        {item.priceLabel && (
+                          <span className="text-amber-100">{item.priceLabel}</span>
+                        )}
                       </span>
                     ))}
                     {selectedSeats.length > 4 && (
@@ -1020,6 +1181,11 @@ export default function EventSeatingModal({ event, onClose }) {
                       </span>
                     )}
                   </div>
+                  {selectedSeatPricing.total !== null && (
+                    <span className="rounded-full border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100 whitespace-nowrap">
+                      Total {formatCurrencyAmount(selectedSeatPricing.total)}
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={handleConfirmSeats}
@@ -1365,31 +1531,40 @@ export default function EventSeatingModal({ event, onClose }) {
                   <p id={selectedSeatsId} className="block text-white mb-2 font-medium">
                     Selected Seats ({selectedSeats.length})
                   </p>
-                  <div
-                    className="flex flex-wrap gap-2 p-4 bg-gray-800 rounded-lg border border-gray-700 min-h-[60px]"
-                    role="list"
-                    aria-labelledby={selectedSeatsId}
-                  >
-                    {selectedSeats.map((seatId) => (
-                      <div key={seatId} className="px-3 py-1 bg-purple-600 text-white rounded-full text-sm font-medium" role="listitem">
-                        {describeSeatSelection(seatId, seatLabelFor(seatId))}
-                      </div>
-                    ))}
-                  </div>
-                  {selectedSeatPricing.total !== null && (
-                    <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
-                      <p className="text-sm font-semibold text-amber-100">
-                        Estimated total: {formatCurrencyAmount(selectedSeatPricing.total)}
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedSeatPricing.breakdown.map((item) => (
-                          <span key={item.id} className="inline-flex items-center gap-2 rounded-full border border-amber-400/30 bg-gray-900/50 px-3 py-1 text-xs text-amber-50">
-                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                            <span>{item.label} x{item.quantity}</span>
-                            <span>{formatCurrencyAmount(item.subtotal)}</span>
-                          </span>
+                  {selectedSeatPricing.lineItems.length > 0 ? (
+                    <div className="rounded-lg border border-amber-500/30 bg-gray-900/60 overflow-hidden" role="list" aria-labelledby={selectedSeatsId}>
+                      <div className="max-h-56 overflow-y-auto divide-y divide-amber-400/15">
+                        {selectedSeatPricing.lineItems.map((item) => (
+                          <div key={item.seatId} className="flex items-center gap-3 px-4 py-3 text-sm" role="listitem">
+                            <span aria-hidden="true" className="h-4 w-4 rounded-sm shrink-0" style={item.swatchStyle || undefined} />
+                            <div className="min-w-0 flex-1">
+                              <div className="font-semibold text-white truncate">{item.seatLabel}</div>
+                              <div className="text-xs text-gray-300 truncate">{item.tierLabel}</div>
+                            </div>
+                            <span className="font-semibold text-amber-100 whitespace-nowrap">{item.priceLabel}</span>
+                          </div>
                         ))}
                       </div>
+                      {selectedSeatPricing.total !== null && (
+                        <div className="flex items-center justify-between gap-3 border-t border-amber-400/15 bg-amber-500/10 px-4 py-3">
+                          <span className="text-sm font-semibold text-white">Running total</span>
+                          <span className="text-sm font-semibold text-amber-100">
+                            {formatCurrencyAmount(selectedSeatPricing.total)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div
+                      className="flex flex-wrap gap-2 p-4 bg-gray-800 rounded-lg border border-gray-700 min-h-[60px]"
+                      role="list"
+                      aria-labelledby={selectedSeatsId}
+                    >
+                      {selectedSeats.map((seatId) => (
+                        <div key={seatId} className="px-3 py-1 bg-purple-600 text-white rounded-full text-sm font-medium" role="listitem">
+                          {describeSeatSelection(seatId, seatLabelFor(seatId))}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1494,27 +1669,44 @@ export default function EventSeatingModal({ event, onClose }) {
               {paymentAvailableNotice && selectedSeats.length === 0 && (
                 <p className="mt-2 text-xs text-indigo-200">Online payment available after submitting your seat request.</p>
               )}
-                  {selectedSeats.length > 0 ? (
-                    <>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {selectedSeats.slice(0, 6).map((seat) => (
-                          <span key={seat} className="px-3 py-1 bg-purple-600/80 text-white rounded-full text-sm font-medium">
-                            {describeSeatSelection(seat, seatLabelFor(seat))}
-                          </span>
+              {selectedSeats.length > 0 ? (
+                <>
+                  {selectedSeatPricing.lineItems.length > 0 ? (
+                    <div className="mt-3 rounded-xl border border-amber-500/25 bg-gray-950/35 overflow-hidden">
+                      <div className="max-h-40 overflow-y-auto divide-y divide-amber-400/10">
+                        {selectedSeatPricing.lineItems.map((item) => (
+                          <div key={item.seatId} className="flex items-center gap-3 px-3 py-2 text-sm">
+                            <span aria-hidden="true" className="h-3.5 w-3.5 rounded-sm shrink-0" style={item.swatchStyle || undefined} />
+                            <div className="min-w-0 flex-1">
+                              <div className="font-semibold text-white truncate">{item.seatLabel}</div>
+                              <div className="text-xs text-gray-300 truncate">{item.tierLabel}</div>
+                            </div>
+                            <span className="font-semibold text-amber-100 whitespace-nowrap">{item.priceLabel}</span>
+                          </div>
                         ))}
-                        {selectedSeats.length > 6 && (
-                          <span className="text-gray-400 text-sm">+{selectedSeats.length - 6} more</span>
-                        )}
                       </div>
-                      {selectedSeatPricing.total !== null && (
-                        <p className="mt-2 text-sm text-amber-200">
-                          Estimated total {formatCurrencyAmount(selectedSeatPricing.total)}
-                        </p>
-                      )}
-                    </>
+                    </div>
                   ) : (
-                    <p className="mt-2 text-gray-200">
-                      {seatingEnabled ? 'Pick seats on the map to continue.' : 'Seat selection is disabled right now, but you can still review the map.'}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selectedSeats.slice(0, 6).map((seat) => (
+                        <span key={seat} className="px-3 py-1 bg-purple-600/80 text-white rounded-full text-sm font-medium">
+                          {describeSeatSelection(seat, seatLabelFor(seat))}
+                        </span>
+                      ))}
+                      {selectedSeats.length > 6 && (
+                        <span className="text-gray-400 text-sm">+{selectedSeats.length - 6} more</span>
+                      )}
+                    </div>
+                  )}
+                  {selectedSeatPricing.total !== null && (
+                    <p className="mt-3 text-sm font-semibold text-amber-200">
+                      Running total {formatCurrencyAmount(selectedSeatPricing.total)}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="mt-2 text-gray-200">
+                  {seatingEnabled ? 'Pick seats on the map to continue.' : 'Seat selection is disabled right now, but you can still review the map.'}
                 </p>
               )}
             </div>

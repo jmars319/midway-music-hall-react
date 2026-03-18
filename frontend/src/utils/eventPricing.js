@@ -11,6 +11,15 @@ const DEFAULT_TIER_COLORS = [
   '#22C55E',
 ];
 
+const TIER_PATTERN_SEQUENCE = [
+  { id: 'diagonal', label: 'Diagonal stripe' },
+  { id: 'dots', label: 'Dot grid' },
+  { id: 'grid', label: 'Grid' },
+  { id: 'crosshatch', label: 'Crosshatch' },
+  { id: 'vertical', label: 'Vertical stripe' },
+  { id: 'horizontal', label: 'Horizontal stripe' },
+];
+
 const normalizePriceNumber = (value) => {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
@@ -164,15 +173,28 @@ const buildEventPricingLegend = (event = {}, rows = []) => {
   const config = getEventPricingConfig(event);
   if (!config) return [];
   const locationsByTier = buildTierLocations(rows, config.assignments || {});
-  return config.tiers.map((tier) => {
+  return config.tiers.map((tier, index) => {
+    const patternMeta = TIER_PATTERN_SEQUENCE[index % TIER_PATTERN_SEQUENCE.length];
     const locationLabels = locationsByTier.get(tier.id) || [];
     return {
       ...tier,
+      patternId: patternMeta.id,
+      patternLabel: patternMeta.label,
       priceLabel: formatPrice(tier.price),
       locationLabels,
       locationSummary: summarizeLocations(locationLabels),
     };
   });
+};
+
+const resolveRowPricingTier = (event = {}, row = {}) => {
+  const config = getEventPricingConfig(event);
+  if (!config || !row) return null;
+  const rowKey = buildPricingRowKey(row);
+  if (!rowKey) return null;
+  const tierId = (config.assignments || {})[rowKey];
+  if (!tierId) return null;
+  return config.tiers.find((tier) => tier.id === tierId) || null;
 };
 
 const resolveSeatPricingTier = (event = {}, rows = [], seatId = '') => {
@@ -203,5 +225,6 @@ export {
   getTieredPriceRange,
   getTieredPriceSummary,
   normalizePricingConfig,
+  resolveRowPricingTier,
   resolveSeatPricingTier,
 };

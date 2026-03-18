@@ -81,6 +81,7 @@ export default function TableComponent({
   seatReasonResolver = null,
   seatStatusMap = null,
   textRotation = 0,
+  tierVisual = null,
 }) {
   const shape = tableShape || row.table_shape || row.seat_type || 'table-6';
   const normalizedShape = shapeAliases[shape] || shape;
@@ -269,24 +270,30 @@ export default function TableComponent({
   const renderTableCenter = (width, height, label = 'Table', isRound = false) => {
     const labelText = label === 'Table' ? surfaceLabel : label;
     return (
-      <div style={{
-        position: 'absolute',
-        left: '50%',
-        top: '50%',
-        transform: 'translate(-50%, -50%)',
-        width,
-        height,
-        borderRadius: isRound ? '50%' : 6,
-        background: '#4b5563',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: '#fff',
-        fontSize: 12,
-        fontWeight: 500,
-        pointerEvents: 'none',
-        zIndex: 1,
-      }}>
+      <div
+        data-tier-surface={tierVisual?.id || undefined}
+        data-tier-pattern={tierVisual?.patternId || undefined}
+        data-tier-color={tierVisual?.color || undefined}
+        style={{
+          position: 'absolute',
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          width,
+          height,
+          borderRadius: isRound ? '50%' : 6,
+          background: '#4b5563',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#fff',
+          fontSize: 12,
+          fontWeight: 500,
+          pointerEvents: 'none',
+          zIndex: 1,
+          ...(tierVisual?.surfaceStyle || {}),
+        }}
+      >
         <span style={textRotationStyle ? { ...textRotationStyle, display: 'inline-block' } : undefined}>{labelText}</span>
       </div>
     );
@@ -456,22 +463,28 @@ export default function TableComponent({
 
     return (
       <div style={{ width: size * 2, height: size, position: 'relative' }}>
-        <div style={{
-          position: 'absolute',
-          left: '50%',
-          top: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: size * 1.8,
-          height: size * 0.25,
-          background: '#6b4423',
-          borderRadius: 4,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#fff',
-          fontSize: 12,
-          pointerEvents: 'none'
-        }}>
+        <div
+          data-tier-surface={tierVisual?.id || undefined}
+          data-tier-pattern={tierVisual?.patternId || undefined}
+          data-tier-color={tierVisual?.color || undefined}
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: size * 1.8,
+            height: size * 0.25,
+            background: '#6b4423',
+            borderRadius: 4,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            fontSize: 12,
+            pointerEvents: 'none',
+            ...(tierVisual?.surfaceStyle || {}),
+          }}
+        >
           {surfaceLabel || 'Bar'}
         </div>
         {[0, 1, 2, 3, 4, 5].map(i => renderSeat(i + 1, startX + i * (seatSize + gap), y, seatSize))}
@@ -510,7 +523,20 @@ export default function TableComponent({
     const standingLabel = surfaceLabel || `Standing (${count})`;
 
     return (
-      <div style={{ width: size, height: size, position: 'relative', background: '#10b981', borderRadius: 8, border: '2px dashed #059669' }}>
+      <div
+        data-tier-surface={tierVisual?.id || undefined}
+        data-tier-pattern={tierVisual?.patternId || undefined}
+        data-tier-color={tierVisual?.color || undefined}
+        style={{
+          width: size,
+          height: size,
+          position: 'relative',
+          background: '#10b981',
+          borderRadius: 8,
+          border: '2px dashed #059669',
+          ...(tierVisual?.surfaceStyle || {}),
+        }}
+      >
         <div style={{ position: 'absolute', top: 4, left: 4, fontSize: 10, color: '#fff', fontWeight: 'bold', pointerEvents: 'none' }}>
           {standingLabel}
         </div>

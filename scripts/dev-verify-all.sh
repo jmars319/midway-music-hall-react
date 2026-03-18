@@ -36,6 +36,7 @@ scripts=(
   ./scripts/dev-verify-payment-orders-scaffold.sh
   ./scripts/dev-verify-seat-request-amount.sh
   ./scripts/dev-verify-tiered-event-pricing.sh
+  ./scripts/dev-verify-seating-tier-visibility.sh
   ./scripts/dev-verify-confirmation-email-send-once.sh
   ./scripts/dev-verify-event-create-defaults.sh
   ./scripts/dev-verify-admin-event-datetime-input.sh
