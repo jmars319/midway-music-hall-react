@@ -47,22 +47,24 @@ File: `public_html/midwaymusichall.net/api/.env`
 
 ```
 APP_ENV=production
-APP_KEY=generate_a_secret_key
-APP_URL=https://midwaymusichall.net
+APP_DEBUG=false
 
 DB_HOST=127.0.0.1
 DB_NAME=midway_live
 DB_USER=midway_user
-DB_PASS=strong-password
+DB_PASSWORD=strong-password
 
 SENDGRID_API_KEY=SG.xxxxxx
 SEND_EMAILS=false
 STAFF_EMAIL_TO=midwayeventcenter@gmail.com
 ALERTS_EMAIL_TO=support@jamarq.digital
 
-CORS_ALLOW_ORIGIN=https://midwaymusichall.net
+CORS_ALLOW_ORIGINS=https://midwaymusichall.net
 ADMIN_SESSION_COOKIE_SECURE=true
+PAYPAL_SDK_CLIENT_ID=your-paypal-client-id-if-used
 ```
+
+Use `backend/.env.production.example` as the canonical key list. Older names like `DB_PASS` are not read by the backend.
 
 ## Database setup (phpMyAdmin)
 1. Create DB + user in cPanel and grant All Privileges.
