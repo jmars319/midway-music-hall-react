@@ -52,6 +52,7 @@ const MAX_COMPARISON_SEATS = 20;
 const SESSION_TIMEZONE = 'America/New_York';
 const DATE_INPUT_ERROR = 'Use MM/DD/YYYY';
 const TIME_INPUT_ERROR = 'Use h:mm AM/PM (example: 7:00 PM)';
+const OCCURRENCE_DOOR_TIME_ERROR = 'Set a doors-open time here or use the default below.';
 const SCHEDULE_VALIDATION_SUMMARY = 'Please fix the highlighted fields.';
 const MIN_MULTI_DAY_OCCURRENCES = 2;
 
@@ -152,6 +153,19 @@ const formatTimeDisplay = (event) => {
 };
 
 const formatDoorTime = (event) => {
+  const occurrenceRows = Array.isArray(event?.occurrences) ? event.occurrences : [];
+  if (Number(event?.is_multi_day) === 1 || occurrenceRows.length > 1 || Number(event?.occurrence_count) > 1) {
+    const labels = occurrenceRows
+      .map((occurrence) => formatEventTimeForInput(occurrence?.door_time || occurrence?.door_datetime || ''))
+      .filter(Boolean);
+    const unique = Array.from(new Set(labels));
+    if (unique.length > 1) {
+      return 'Varies by date';
+    }
+    if (unique.length === 1) {
+      return unique[0];
+    }
+  }
   if (!event.door_time) return 'TBD';
   const normalized = event.door_time.includes('T') ? event.door_time : event.door_time.replace(' ', 'T');
   const date = new Date(normalized);
@@ -179,6 +193,7 @@ const normalizeOccurrenceRowsForComparison = (rows = []) => (
   getNonEmptyOccurrenceRows(rows).map((row) => ({
     event_date: String(row.event_date || '').trim(),
     event_time: String(row.event_time || '').trim(),
+    door_time: String(row.door_time || '').trim(),
   }))
 );
 
@@ -376,10 +391,15 @@ const normalizeVenueKey = (venueCode) => {
   return VENUE_LABELS[key] ? key : 'MMH';
 };
 
-const buildOccurrenceRow = (eventDate = '', eventTime = '', sourceId = null) => ({
+const buildOccurrenceDoorInput = (occurrence = {}, fallbackDoorTime = '') => (
+  formatEventTimeForInput(occurrence?.door_time || occurrence?.door_datetime || fallbackDoorTime)
+);
+
+const buildOccurrenceRow = (eventDate = '', eventTime = '', sourceId = null, doorTime = '') => ({
   row_id: sourceId ? `occ-${sourceId}` : `occ-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   event_date: eventDate,
   event_time: eventTime,
+  door_time: doorTime,
 });
 
 const buildOccurrenceRowsFromEvent = (event = {}) => {
@@ -389,11 +409,13 @@ const buildOccurrenceRowsFromEvent = (event = {}) => {
         id: 'single',
         event_date: event.event_date,
         event_time: event.event_time,
+        door_time: event.door_time,
       }];
   return rawOccurrences.map((occurrence, index) => buildOccurrenceRow(
     formatEventDateForInput(occurrence.event_date || occurrence.occurrence_date || (index === 0 ? event.event_date : '')),
     formatEventTimeForInput(occurrence.event_time || occurrence.start_time || (index === 0 ? event.event_time : '')),
     occurrence.id || occurrence.occurrence_key || index + 1,
+    buildOccurrenceDoorInput(occurrence, index === 0 ? event.door_time : ''),
   ));
 };
 
@@ -404,6 +426,35 @@ const getNonEmptyOccurrenceRows = (rows = []) => (
     return date || time;
   })
 );
+
+const getSharedOccurrenceDoorTime = (rows = []) => {
+  const doorTimes = getNonEmptyOccurrenceRows(rows)
+    .map((row) => String(row?.door_time || '').trim())
+    .filter(Boolean);
+  if (!doorTimes.length) return '';
+  return doorTimes.every((value) => value === doorTimes[0]) ? doorTimes[0] : '';
+};
+
+const buildOccurrenceEditorState = (event = {}) => {
+  const occurrenceRows = buildOccurrenceRowsFromEvent(event);
+  const sharedDoorTime = getSharedOccurrenceDoorTime(occurrenceRows);
+  return {
+    sharedDoorTime,
+    occurrenceRows: sharedDoorTime
+      ? occurrenceRows.map((row) => ({ ...row, door_time: '' }))
+      : occurrenceRows,
+  };
+};
+
+const summarizeOccurrenceDoorTimes = (rows = [], sharedDoorTime = '') => {
+  const effectiveDoorTimes = getNonEmptyOccurrenceRows(rows)
+    .map((row) => String(row?.door_time || '').trim() || String(sharedDoorTime || '').trim())
+    .filter(Boolean);
+  if (!effectiveDoorTimes.length) return null;
+  return effectiveDoorTimes.every((value) => value === effectiveDoorTimes[0])
+    ? `Doors ${effectiveDoorTimes[0]}`
+    : 'Doors vary';
+};
 
 const initialForm = {
   artist_name: '',
@@ -490,7 +541,7 @@ const summarizeOccurrenceSchedule = (formData) => {
   return [
     `Multi-day run • ${rows.length} date${rows.length === 1 ? '' : 's'}`,
     labels.join(' | ') + suffix,
-    formData.door_time ? `Doors ${formData.door_time}` : null,
+    summarizeOccurrenceDoorTimes(rows, formData.door_time),
   ].filter(Boolean).join(' • ');
 };
 
@@ -1859,7 +1910,8 @@ export default function EventsModule(){
 
   const openEdit = (event) => {
     const pricingState = normalizePricingFormState(event);
-    const occurrenceRows = buildOccurrenceRowsFromEvent(event);
+    const occurrenceEditorState = buildOccurrenceEditorState(event);
+    const occurrenceRows = occurrenceEditorState.occurrenceRows;
     const isMultiDay = Number(event.is_multi_day) === 1
       || Number(event.occurrence_count) > 1
       || occurrenceRows.length > 1;
@@ -1878,7 +1930,7 @@ export default function EventsModule(){
       artist_name: event.artist_name || '',
       event_date: primaryOccurrence.event_date || formatEventDateForInput(event.event_date),
       event_time: primaryOccurrence.event_time || formatEventTimeForInput(event.event_time),
-      door_time: formatEventTimeForInput(event.door_time),
+      door_time: isMultiDay ? occurrenceEditorState.sharedDoorTime : formatEventTimeForInput(event.door_time),
       multi_day_enabled: isMultiDay,
       occurrence_rows: occurrenceRows.length ? occurrenceRows : [buildOccurrenceRow()],
       genre: event.genre || '',
@@ -2101,7 +2153,7 @@ export default function EventsModule(){
       const existingRows = getNonEmptyOccurrenceRows(prev.occurrence_rows || []);
       const seedRows = existingRows.length
         ? existingRows.map((row) => ({ ...row }))
-        : [buildOccurrenceRow(prev.event_date, prev.event_time)];
+        : [buildOccurrenceRow(prev.event_date, prev.event_time, null, '')];
       const nextRows = enabled && seedRows.length < MIN_MULTI_DAY_OCCURRENCES
         ? [...seedRows, buildOccurrenceRow('', '')]
         : seedRows;
@@ -2112,6 +2164,7 @@ export default function EventsModule(){
         occurrence_rows: nextRows,
         event_date: enabled ? prev.event_date : (firstRow.event_date || prev.event_date),
         event_time: enabled ? prev.event_time : (firstRow.event_time || prev.event_time),
+        door_time: enabled ? prev.door_time : (firstRow.door_time || prev.door_time),
       };
     });
     setFieldErrors((prev) => {
@@ -2653,10 +2706,17 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       const eventDateValue = String(payload.event_date || '').trim();
       const eventTimeValue = String(payload.event_time || '').trim();
       const doorTimeValue = String(payload.door_time || '').trim();
+      const originalOccurrenceState = editing ? buildOccurrenceEditorState(editing) : { occurrenceRows: [], sharedDoorTime: '' };
       const originalEventDate = formatEventDateForInput(editing?.event_date);
       const originalEventTime = formatEventTimeForInput(editing?.event_time);
-      const originalDoorTimeValue = formatEventTimeForInput(editing?.door_time);
-      const originalOccurrenceRows = editing ? buildOccurrenceRowsFromEvent(editing) : [];
+      const originalDoorTimeValue = editing
+        ? (
+            (Number(editing.is_multi_day) === 1 || Number(editing.occurrence_count) > 1 || originalOccurrenceState.occurrenceRows.length > 1)
+              ? originalOccurrenceState.sharedDoorTime
+              : formatEventTimeForInput(editing?.door_time)
+          )
+        : '';
+      const originalOccurrenceRows = originalOccurrenceState.occurrenceRows;
       const originalMultiDay = Boolean(editing && (
         Number(editing.is_multi_day) === 1
         || Number(editing.occurrence_count) > 1
@@ -2673,9 +2733,9 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
         : Boolean(eventDateValue || eventTimeValue || doorTimeValue || startOrEndProvided);
       const mustRequireSchedule = editorFlags.requireScheduleFields || scheduleFieldsChanged;
       if (mustRequireSchedule) {
-        const parsedDoorTime = parseFriendlyEventTime(doorTimeValue);
+        const parsedDoorTime = doorTimeValue ? parseFriendlyEventTime(doorTimeValue) : null;
         const nextFieldErrors = {};
-        if (!parsedDoorTime) {
+        if (doorTimeValue && !parsedDoorTime) {
           nextFieldErrors.door_time = TIME_INPUT_ERROR;
         }
         let scheduleErrorMessage = SCHEDULE_VALIDATION_SUMMARY;
@@ -2686,12 +2746,14 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
           (formData.occurrence_rows || []).forEach((row, index) => {
             const rawDate = String(row?.event_date || '').trim();
             const rawTime = String(row?.event_time || '').trim();
+            const rawDoorTime = String(row?.door_time || '').trim();
             const hasAnyValue = Boolean(rawDate || rawTime);
             if (!hasAnyValue) {
               return;
             }
             const parsedDate = parseFriendlyEventDate(rawDate);
             const parsedTime = parseFriendlyEventTime(rawTime);
+            const parsedOccurrenceDoorTime = rawDoorTime ? parseFriendlyEventTime(rawDoorTime) : null;
             if (!parsedDate) {
               occurrenceErrors[index] = {
                 ...(occurrenceErrors[index] || {}),
@@ -2706,10 +2768,26 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
               };
               firstInvalidKey = firstInvalidKey || `occurrence_${index}_event_time`;
             }
-            if (parsedDate && parsedTime) {
+            if (rawDoorTime && !parsedOccurrenceDoorTime) {
+              occurrenceErrors[index] = {
+                ...(occurrenceErrors[index] || {}),
+                door_time: TIME_INPUT_ERROR,
+              };
+              firstInvalidKey = firstInvalidKey || `occurrence_${index}_door_time`;
+            }
+            const resolvedDoorTime = parsedOccurrenceDoorTime || parsedDoorTime;
+            if (!resolvedDoorTime) {
+              occurrenceErrors[index] = {
+                ...(occurrenceErrors[index] || {}),
+                door_time: OCCURRENCE_DOOR_TIME_ERROR,
+              };
+              firstInvalidKey = firstInvalidKey || `occurrence_${index}_door_time`;
+            }
+            if (parsedDate && parsedTime && resolvedDoorTime) {
               normalizedOccurrences.push({
                 event_date: parsedDate,
                 event_time: parsedTime,
+                door_time: resolvedDoorTime,
               });
             }
           });
@@ -2749,8 +2827,17 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
           }
           payload.event_date = normalizedOccurrences[0].event_date;
           payload.event_time = normalizedOccurrences[0].event_time;
-          payload.door_time = `${normalizedOccurrences[0].event_date} ${parsedDoorTime}`;
-          payload.occurrences = normalizedOccurrences;
+          payload.door_time = parsedDoorTime ? `${normalizedOccurrences[0].event_date} ${parsedDoorTime}` : null;
+          payload.occurrences = normalizedOccurrences.map((occurrence) => {
+            const nextOccurrence = {
+              event_date: occurrence.event_date,
+              event_time: occurrence.event_time,
+            };
+            if (!parsedDoorTime || occurrence.door_time !== parsedDoorTime) {
+              nextOccurrence.door_time = occurrence.door_time;
+            }
+            return nextOccurrence;
+          });
         } else {
           const parsedEventDate = parseFriendlyEventDate(eventDateValue);
           const parsedEventTime = parseFriendlyEventTime(eventTimeValue);
@@ -2980,7 +3067,9 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
 
   const duplicateEvent = async (event) => {
     const baseName = event.artist_name || event.title || 'Untitled Event';
-    const occurrenceRows = buildOccurrenceRowsFromEvent(event);
+    const occurrenceEditorState = buildOccurrenceEditorState(event);
+    const occurrenceRows = occurrenceEditorState.occurrenceRows;
+    const sharedDoorTime = occurrenceEditorState.sharedDoorTime;
     const activeOccurrences = getNonEmptyOccurrenceRows(occurrenceRows);
     const isMultiDay = Number(event.is_multi_day) === 1
       || Number(event.occurrence_count) > 1
@@ -2991,12 +3080,18 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
     const fallbackTime = startParts[1] ? startParts[1].slice(0, 5) : '';
     const eventDate = firstOccurrence?.event_date || event.event_date || fallbackDate;
     const eventTime = firstOccurrence?.event_time || event.event_time || fallbackTime;
+    const parsedEventDate = parseFriendlyEventDate(eventDate) || eventDate;
+    const parsedSharedDoorTime = parseFriendlyEventTime(sharedDoorTime);
     if (!eventDate || !eventTime) {
       alert('Please set a date and time before duplicating this event.');
       return;
     }
-    if (!event.door_time) {
+    if (!isMultiDay && !event.door_time) {
       alert('Please set a Doors Open time before duplicating this event.');
+      return;
+    }
+    if (isMultiDay && !sharedDoorTime && activeOccurrences.some((occurrence) => !String(occurrence.door_time || '').trim())) {
+      alert('Please set doors-open times before duplicating this multi-day event.');
       return;
     }
     const payload = {
@@ -3007,13 +3102,22 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
       genre: event.genre || '',
       event_date: eventDate,
       event_time: eventTime,
-      door_time: event.door_time,
+      door_time: isMultiDay
+        ? (parsedSharedDoorTime ? `${parsedEventDate} ${parsedSharedDoorTime}` : null)
+        : event.door_time,
       multi_day_enabled: isMultiDay,
       occurrences: isMultiDay
-        ? activeOccurrences.map((occurrence) => ({
-            event_date: parseFriendlyEventDate(occurrence.event_date) || occurrence.event_date,
-            event_time: parseFriendlyEventTime(occurrence.event_time) || occurrence.event_time,
-          }))
+        ? activeOccurrences.map((occurrence) => {
+            const nextOccurrence = {
+              event_date: parseFriendlyEventDate(occurrence.event_date) || occurrence.event_date,
+              event_time: parseFriendlyEventTime(occurrence.event_time) || occurrence.event_time,
+            };
+            const parsedOccurrenceDoorTime = parseFriendlyEventTime(occurrence.door_time);
+            if (parsedOccurrenceDoorTime) {
+              nextOccurrence.door_time = parsedOccurrenceDoorTime;
+            }
+            return nextOccurrence;
+          })
         : undefined,
       ticket_price: event.ticket_price || '',
       door_price: event.door_price || '',
@@ -3605,7 +3709,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                                     Remove
                                   </button>
                                 </div>
-                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                                   <div>
                                     <label className="block text-sm text-gray-300 mb-1">Date*</label>
                                     <input
@@ -3656,6 +3760,36 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                                       </p>
                                     )}
                                   </div>
+                                  <div>
+                                    <label className="block text-sm text-gray-300 mb-1">Doors Open*</label>
+                                    <input
+                                      type="text"
+                                      value={row.door_time || ''}
+                                      onChange={(e) => handleOccurrenceRowChange(index, 'door_time', e.target.value)}
+                                      onBlur={() => handleOccurrenceBlur(index, 'door_time')}
+                                      placeholder={formData.door_time ? `Default ${formData.door_time}` : 'h:mm AM/PM'}
+                                      inputMode="text"
+                                      autoComplete="off"
+                                      aria-required={scheduleInputsRequired && !formData.door_time}
+                                      aria-invalid={occurrenceErrors.door_time ? 'true' : 'false'}
+                                      ref={(node) => { scheduleInputRefs.current[`occurrence_${index}_door_time`] = node; }}
+                                      className={`w-full rounded border px-4 py-2 text-white ${
+                                        occurrenceErrors.door_time
+                                          ? 'border-red-500 bg-red-900/25 focus:border-red-500 focus:ring-2 focus:ring-red-500'
+                                          : 'border-gray-600 bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500'
+                                      }`}
+                                    />
+                                    <p className="mt-1 text-xs text-gray-400">
+                                      {formData.door_time
+                                        ? 'Leave blank to use the shared default.'
+                                        : 'Set this date’s doors-open time or add a default below.'}
+                                    </p>
+                                    {occurrenceErrors.door_time && (
+                                      <p className="mt-1 text-xs text-red-300">
+                                        {occurrenceErrors.door_time}
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -3666,7 +3800,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
 
                     <div className="md:col-span-2">
                       <label className="block text-sm text-gray-300 mb-1">
-                        {formData.multi_day_enabled ? 'Doors Open Time (applies to each date)*' : 'Doors Open Time*'}
+                        {formData.multi_day_enabled ? 'Default Doors Open Time' : 'Doors Open Time*'}
                       </label>
                       <input
                         type="text"
@@ -3689,7 +3823,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                       />
                       <p id="door-time-help" className="mt-1 text-xs text-gray-400">
                         {formData.multi_day_enabled
-                          ? 'This shared doors-open time is applied to each configured date in the run.'
+                          ? 'Optional shared default. Leave an occurrence blank to use this time, or set an occurrence-specific doors-open time above.'
                           : 'This feeds the “Doors Open” line on the public schedule.'}
                       </p>
                       {fieldErrors.door_time && (

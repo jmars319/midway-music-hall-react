@@ -177,6 +177,24 @@ export const formatEventDateTimeLabel = (event = {}) => {
 };
 
 export const formatDoorsLabel = (event = {}) => {
+  const occurrences = normalizeEventOccurrences(event);
+  if (occurrences.length > 1) {
+    const labels = occurrences
+      .map((occurrence) => getEventDoorDate({
+        ...event,
+        door_time: occurrence?.door_time || occurrence?.door_datetime || event?.door_time,
+        event_date: occurrence?.event_date || occurrence?.occurrence_date || event?.event_date,
+      }))
+      .filter(Boolean)
+      .map((door) => timeFormatter.format(door));
+    const unique = Array.from(new Set(labels));
+    if (unique.length > 1) {
+      return 'Varies';
+    }
+    if (unique.length === 1) {
+      return unique[0];
+    }
+  }
   const door = getEventDoorDate(event);
   if (!door) return null;
   return timeFormatter.format(door);

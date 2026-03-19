@@ -32,10 +32,14 @@ const assertNull = (label, actual) => {
 
 assertEqual('parseFriendlyEventDate 03/19/2026', helper.parseFriendlyEventDate('03/19/2026'), '2026-03-19');
 assertEqual('parseFriendlyEventDate 3/19/2026', helper.parseFriendlyEventDate('3/19/2026'), '2026-03-19');
+assertEqual('parseFriendlyEventDate 03/25/26', helper.parseFriendlyEventDate('03/25/26'), '2026-03-25');
+assertEqual('formatEventDateForInput 032526', helper.formatEventDateForInput('032526'), '03/25/2026');
 assertNull('parseFriendlyEventDate 13/40/2026', helper.parseFriendlyEventDate('13/40/2026'));
 
 assertEqual('parseFriendlyEventTime 7:00 PM', helper.parseFriendlyEventTime('7:00 PM'), '19:00:00');
 assertEqual('parseFriendlyEventTime 7:00pm', helper.parseFriendlyEventTime('7:00pm'), '19:00:00');
+assertEqual('parseFriendlyEventTime 7p', helper.parseFriendlyEventTime('7p'), '19:00:00');
+assertEqual('formatEventTimeForInput 1730', helper.formatEventTimeForInput('1730'), '5:30 PM');
 assertNull('parseFriendlyEventTime 7:61 PM', helper.parseFriendlyEventTime('7:61 PM'));
 assertNull('parseFriendlyEventTime 13:00 PM', helper.parseFriendlyEventTime('13:00 PM'));
 

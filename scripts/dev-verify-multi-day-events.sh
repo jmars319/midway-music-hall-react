@@ -201,6 +201,35 @@ if len(keys) != len(set(keys)):
 PY
 }
 
+assert_public_door_times() {
+  local json="$1"
+  local event_id="$2"
+  local expected_csv="$3"
+  JSON_INPUT="$json" TARGET_EVENT_ID="$event_id" EXPECTED_DOOR_TIMES="$expected_csv" python3 - <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ.get('JSON_INPUT', '{}'))
+target = int(os.environ.get('TARGET_EVENT_ID', '0'))
+expected = [token for token in os.environ.get('EXPECTED_DOOR_TIMES', '').split(',') if token]
+rows = [row for row in payload.get('events', []) if int(row.get('id', 0) or 0) == target]
+rows.sort(key=lambda row: str(row.get('start_datetime') or row.get('event_date') or ''))
+actual = []
+for row in rows:
+    raw = str(row.get('door_time') or '').strip()
+    if 'T' in raw:
+        actual.append(raw.split('T', 1)[1])
+    elif ' ' in raw:
+        actual.append(raw.rsplit(' ', 1)[-1])
+    else:
+        actual.append(raw)
+if actual != expected:
+    print(f"Expected door_time sequence {expected}, got {actual}", file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 find_request_event_id() {
   local json="$1"
   local request_id="$2"
@@ -328,8 +357,8 @@ direct_payload="$(cat <<JSON
   "multi_day_enabled": true,
   "occurrences": [
     { "event_date": "${DAY_ONE}", "event_time": "19:00:00" },
-    { "event_date": "${DAY_TWO}", "event_time": "19:30:00" },
-    { "event_date": "${DAY_THREE}", "event_time": "20:00:00" }
+    { "event_date": "${DAY_TWO}", "event_time": "19:30:00", "door_time": "18:00:00" },
+    { "event_date": "${DAY_THREE}", "event_time": "20:00:00", "door_time": "18:30:00" }
   ]
 }
 JSON
@@ -349,6 +378,10 @@ if [ "$direct_public_count" != "3" ]; then
 fi
 assert_public_rows_distinct "$public_upcoming_json" "$direct_event_id" || {
   log_error "direct multi-day event ${direct_event_id} does not expose distinct occurrence keys"
+  exit 1
+}
+assert_public_door_times "$public_upcoming_json" "$direct_event_id" "17:30:00,18:00:00,18:30:00" || {
+  log_error "direct multi-day event ${direct_event_id} did not preserve per-occurrence door times"
   exit 1
 }
 
@@ -415,5 +448,8 @@ if ! rg -n "formatEventRunSummary|isMultiDayEvent|Multi-day run" "$ROOT_DIR/fron
   log_error "BeachSeriesShowcase is missing the multi-day promo summary wiring"
   exit 1
 fi
+
+log_step "[multi-day] verifying varying door-time helper behavior"
+( cd "$ROOT_DIR/frontend" && CI=1 npm test -- --watch=false --runInBand --runTestsByPath src/utils/__tests__/eventFormat.doors.test.js )
 
 log_success "[multi-day] create, convert, schedule expansion, shared reservation context, and pricing behavior verified"

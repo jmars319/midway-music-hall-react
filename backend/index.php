@@ -1113,9 +1113,19 @@ function build_occurrence_door_datetime(string $occurrenceDate, ?string $doorTim
     }
 }
 
+function resolve_occurrence_door_time_of_day(array $occurrence, ?string $sharedDoorTimeOfDay, string $timezone): ?string
+{
+    $occurrenceDoorValue = $occurrence['door_time']
+        ?? $occurrence['door_datetime']
+        ?? $occurrence['doors_open_time']
+        ?? null;
+    $occurrenceDoorTimeOfDay = extract_time_of_day_from_value($occurrenceDoorValue, $timezone);
+    return $occurrenceDoorTimeOfDay ?? $sharedDoorTimeOfDay;
+}
+
 function normalize_event_occurrence_rows(array $occurrences, string $timezone, ?string $doorTimeValue, int $durationSeconds, ?string &$error = null): array
 {
-    $doorTimeOfDay = extract_time_of_day_from_value($doorTimeValue, $timezone);
+    $sharedDoorTimeOfDay = extract_time_of_day_from_value($doorTimeValue, $timezone);
     $normalized = [];
     foreach (array_values($occurrences) as $index => $occurrence) {
         if (!is_array($occurrence)) {
@@ -1131,6 +1141,11 @@ function normalize_event_occurrence_rows(array $occurrences, string $timezone, ?
         $startDt = build_event_start_datetime($occurrenceDate, $startTime, $timezone);
         if (!$startDt) {
             $error = 'One or more occurrences could not be parsed.';
+            return [];
+        }
+        $doorTimeOfDay = resolve_occurrence_door_time_of_day($occurrence, $sharedDoorTimeOfDay, $timezone);
+        if ($doorTimeOfDay === null) {
+            $error = 'Each occurrence requires a valid doors-open time or a shared default doors-open time.';
             return [];
         }
         $endDt = $startDt->modify('+' . max(1, $durationSeconds) . ' seconds');
@@ -5167,9 +5182,13 @@ $router->add('POST', '/api/events', function (Request $request) {
         $eventTime = isset($payload['event_time']) ? trim((string) $payload['event_time']) : null;
         $eventDate = $eventDate !== '' ? $eventDate : null;
         $eventTime = $eventTime !== '' ? $eventTime : null;
-        $doorTime = normalize_door_time_input($payload['door_time'] ?? null);
-        if ($doorTime === null) {
+        $doorTimeRaw = $payload['door_time'] ?? null;
+        $doorTime = normalize_door_time_input($doorTimeRaw);
+        if (!$occurrencesPayload && $doorTime === null) {
             return Response::error('door_time is required and must include a valid date and time.', 422);
+        }
+        if ($occurrencesPayload && $doorTime === null && $doorTimeRaw !== null && trim((string) $doorTimeRaw) !== '') {
+            return Response::error('door_time must include a valid date and time when provided.', 422);
         }
         $startInput = $payload['start_datetime'] ?? null;
         $startDt = null;
@@ -5517,13 +5536,19 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             $endDt = null;
         }
         $doorTimeInputProvided = array_key_exists('door_time', $payload);
-        $doorTimeInput = $doorTimeInputProvided ? $payload['door_time'] : ($existing['door_time'] ?? null);
+        $doorTimeInput = $doorTimeInputProvided
+            ? $payload['door_time']
+            : ($occurrencesPayload ? null : ($existing['door_time'] ?? null));
         if ($allowMissingSchedule && !$doorTimeInputProvided && !$occurrencesPayload) {
             $doorTime = $existing['door_time'] ?? null;
         } else {
             $doorTime = normalize_door_time_input($doorTimeInput);
-            if ($doorTime === null && (!$allowMissingSchedule || $occurrencesPayload || $doorTimeInputProvided)) {
+            $doorTimeValueProvided = $doorTimeInputProvided && trim((string) $doorTimeInput) !== '';
+            if ($doorTime === null && !$occurrencesPayload && (!$allowMissingSchedule || $doorTimeInputProvided)) {
                 return Response::error('door_time is required and must include a valid date and time.', 422);
+            }
+            if ($doorTime === null && $occurrencesPayload && $doorTimeValueProvided) {
+                return Response::error('door_time must include a valid date and time when provided.', 422);
             }
         }
         $durationSeconds = resolve_event_duration_seconds([

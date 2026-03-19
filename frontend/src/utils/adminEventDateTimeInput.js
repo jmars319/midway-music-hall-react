@@ -1,5 +1,14 @@
 const padTwo = (value) => String(value).padStart(2, '0');
 
+const expandFriendlyYear = (value) => {
+  const raw = String(value || '').trim();
+  if (!/^\d{2}(\d{2})?$/.test(raw)) return null;
+  if (raw.length === 4) {
+    return Number(raw);
+  }
+  return 2000 + Number(raw);
+};
+
 const parseIsoDateToken = (value) => {
   const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return null;
@@ -86,9 +95,12 @@ export const parseFriendlyEventDate = (value) => {
     return `${parsedIso.year}-${padTwo(parsedIso.month)}-${padTwo(parsedIso.day)}`;
   }
 
-  const slashMatch = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  const slashMatch = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2}|\d{4})$/);
   if (slashMatch) {
-    return toCanonicalDate(Number(slashMatch[3]), Number(slashMatch[1]), Number(slashMatch[2]));
+    const year = expandFriendlyYear(slashMatch[3]);
+    if (year !== null) {
+      return toCanonicalDate(year, Number(slashMatch[1]), Number(slashMatch[2]));
+    }
   }
 
   const digits = raw.replace(/\D+/g, '');
@@ -100,15 +112,21 @@ export const parseFriendlyEventDate = (value) => {
   } else if (digits.length === 7) {
     candidateSplits.push([1, 2, 4], [2, 1, 4]); // MDDYYYY or MMDYYYY
   } else if (digits.length === 6) {
-    candidateSplits.push([1, 1, 4]); // MDYYYY
+    candidateSplits.push([2, 2, 2], [1, 1, 4]); // MMDDYY or MDYYYY
+  } else if (digits.length === 5) {
+    candidateSplits.push([1, 2, 2], [2, 1, 2]); // MDDYY or MMDYY
+  } else if (digits.length === 4) {
+    candidateSplits.push([1, 1, 2]); // MDYY
   }
 
   for (const [monthLen, dayLen, yearLen] of candidateSplits) {
     const monthToken = digits.slice(0, monthLen);
     const dayToken = digits.slice(monthLen, monthLen + dayLen);
     const yearToken = digits.slice(monthLen + dayLen, monthLen + dayLen + yearLen);
-    if (yearToken.length !== 4) continue;
-    const normalized = toCanonicalDate(Number(yearToken), Number(monthToken), Number(dayToken));
+    if (yearToken.length !== yearLen) continue;
+    const year = expandFriendlyYear(yearToken);
+    if (year === null) continue;
+    const normalized = toCanonicalDate(year, Number(monthToken), Number(dayToken));
     if (normalized) return normalized;
   }
 
@@ -147,12 +165,13 @@ export const parseFriendlyEventTime = (value) => {
     return `${padTwo(canonical.hour)}:${padTwo(canonical.minute)}:00`;
   }
 
-  // 12-hour with AM/PM, supports 7:30pm, 730pm, 0730 PM, 7pm
-  const twelveHourMatch = raw.match(/^(\d{1,2})(?::?(\d{2}))?\s*([aApP][mM])$/);
+  // 12-hour shorthand, supports 7:30pm, 730pm, 0730 PM, 7pm, 7p, 7.30 pm
+  const twelveHourToken = raw.toLowerCase().replace(/\./g, '').replace(/\s+/g, '');
+  const twelveHourMatch = twelveHourToken.match(/^(\d{1,2})(?::?(\d{2}))?([ap])m?$/);
   if (twelveHourMatch) {
     let hour = Number(twelveHourMatch[1]);
     const minute = Number(twelveHourMatch[2] ?? '0');
-    const suffix = twelveHourMatch[3].toUpperCase();
+    const suffix = twelveHourMatch[3].toUpperCase() === 'A' ? 'AM' : 'PM';
     if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null;
     if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
     if (suffix === 'AM' && hour === 12) {
