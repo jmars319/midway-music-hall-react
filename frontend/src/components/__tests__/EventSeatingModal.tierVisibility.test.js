@@ -73,8 +73,8 @@ const buildTieredSeatingResponse = () => ({
       element_type: 'table',
       section_name: 'Main Floor',
       row_label: 'Table 2',
-      total_seats: 2,
-      table_shape: 'table-2',
+      total_seats: 6,
+      table_shape: 'table-6',
       pos_x: 50,
       pos_y: 40,
       rotation: 0,
@@ -84,8 +84,8 @@ const buildTieredSeatingResponse = () => ({
       element_type: 'table',
       section_name: 'Main Floor',
       row_label: 'Table 3',
-      total_seats: 2,
-      table_shape: 'table-2',
+      total_seats: 8,
+      table_shape: 'table-8',
       pos_x: 78,
       pos_y: 40,
       rotation: 0,
@@ -237,14 +237,22 @@ describe('EventSeatingModal tier visibility', () => {
     expect(danceFloorLandmark).not.toBeNull();
     expect(doorLandmark.closest('button')).toBeNull();
 
-    const vipRowSurface = document.querySelector('[data-tier-row="vip-row"]');
-    const vipTableBody = document.querySelector('[data-tier-surface="vip"]');
-    expect(vipRowSurface).not.toBeNull();
-    expect(vipRowSurface.style.border).not.toBe('');
-    expect(vipRowSurface.style.backgroundColor).not.toBe('');
-    expect(vipTableBody).not.toBeNull();
-    expect(vipTableBody.style.border).not.toBe('');
-    expect(vipTableBody.style.backgroundColor).not.toBe('');
+	    const vipRowSurface = document.querySelector('[data-tier-row="vip-row"]');
+	    const vipTableBody = document.querySelector('[data-tier-surface="vip"]');
+	    const standardRowSurface = document.querySelector('[data-tier-row="standard-row"]');
+	    const standardTableBody = document.querySelector('[data-tier-surface="standard"]');
+	    expect(vipRowSurface).not.toBeNull();
+	    expect(vipRowSurface.style.border).not.toBe('');
+	    expect(vipRowSurface.style.backgroundColor).not.toBe('');
+	    expect(vipRowSurface.style.width).toBe('60px');
+	    expect(vipRowSurface.style.height).toBe('60px');
+	    expect(vipTableBody).not.toBeNull();
+	    expect(vipTableBody.style.border).not.toBe('');
+	    expect(vipTableBody.style.backgroundColor).not.toBe('');
+	    expect(standardRowSurface).toBeNull();
+	    expect(standardTableBody).not.toBeNull();
+	    expect(standardTableBody.style.border).not.toBe('');
+	    expect(standardTableBody.style.backgroundColor).not.toBe('');
 
     const reservedSeat = document.querySelector('button[data-seat-id="Main Floor-Table 2-1"]');
     expect(reservedSeat).not.toBeNull();

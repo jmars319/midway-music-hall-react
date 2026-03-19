@@ -32,6 +32,34 @@ const getLandmarkLabel = (row = {}) => (
   row.label || row.marker_label || row.section_name || row.row_label || 'Landmark'
 );
 
+const COMPACT_TIER_ROW_SHAPES = new Set(['chair', 'table-2', 'high-top-2']);
+
+const normalizeTierRowShape = (row = {}) => {
+  const raw = String(row?.table_shape || row?.seat_type || row?.element_type || '').trim().toLowerCase();
+  if (raw === 'table-8-rect') return 'table-8';
+  return raw;
+};
+
+const shouldRenderTierRowSurface = (row = {}) => {
+  const shape = normalizeTierRowShape(row);
+  if (COMPACT_TIER_ROW_SHAPES.has(shape)) return true;
+  const totalSeats = Number(row?.total_seats || row?.totalSeats || 0);
+  return !shape && totalSeats > 0 && totalSeats <= 2;
+};
+
+const resolveCompactTierRowSurfaceFrame = (row = {}) => {
+  const shape = normalizeTierRowShape(row);
+  const isChairShape = shape === 'chair' || String(row?.element_type || '').trim().toLowerCase() === 'chair';
+  const fallbackWidth = isChairShape ? 56 : 120;
+  const fallbackHeight = isChairShape ? 56 : 120;
+  const baseWidth = Number(row?.width) || fallbackWidth;
+  const baseHeight = Number(row?.height) || fallbackHeight;
+  const width = Math.max(isChairShape ? 30 : 48, Math.round(baseWidth * 0.5));
+  const height = Math.max(isChairShape ? 30 : 48, Math.round(baseHeight * 0.5));
+  const radius = Math.max(isChairShape ? 12 : 16, Math.round(Math.min(width, height) * 0.28));
+  return { width, height, radius };
+};
+
 export default function EventSeatingModal({ event, onClose }) {
   const [seatingConfig, setSeatingConfig] = useState([]);
   const [reservedSeats, setReservedSeats] = useState([]);
@@ -1013,37 +1041,48 @@ export default function EventSeatingModal({ event, onClose }) {
               .filter((row) => row.pos_x !== null && row.pos_y !== null && row.pos_x !== undefined && row.pos_y !== undefined)
               .map((row) => renderLandmark(row))}
 
-            {seatRows
-              .filter((row) => row.pos_x !== null && row.pos_y !== null && row.pos_x !== undefined && row.pos_y !== undefined)
-              .map((row) => {
-                const rowKey = row.id || `${row.section_name}-${row.row_label}`;
-                const tier = resolveRowPricingTier(event, row);
-                const tierVisual = tier ? pricingTierDisplayMap.get(tier.id) || null : null;
+	            {seatRows
+	              .filter((row) => row.pos_x !== null && row.pos_y !== null && row.pos_x !== undefined && row.pos_y !== undefined)
+	              .map((row) => {
+	                const rowKey = row.id || `${row.section_name}-${row.row_label}`;
+	                const tier = resolveRowPricingTier(event, row);
+	                const tierVisual = tier ? pricingTierDisplayMap.get(tier.id) || null : null;
+	                const showTierRowSurface = tierVisual && shouldRenderTierRowSurface(row);
+	                const tierRowSurfaceFrame = showTierRowSurface ? resolveCompactTierRowSurfaceFrame(row) : null;
+	                const tierRowPadding = showTierRowSurface ? 10 : 0;
 
-                return (
-                  <div
-                    key={rowKey}
-                    className="absolute"
+	                return (
+	                  <div
+	                    key={rowKey}
+	                    className="absolute"
                     style={{
-                      left: `${row.pos_x}%`,
-                      top: `${row.pos_y}%`,
-                      transform: 'translate(-50%, -50%)',
-                      padding: '20px',
-                      minWidth: `${row.width || 120}px`,
-                      minHeight: `${row.height || 120}px`,
-                      pointerEvents: 'none',
-                    }}
-                  >
-                    {tierVisual && (
-                      <div
-                        aria-hidden="true"
-                        data-tier-row={rowKey}
-                        data-tier-pattern={tierVisual.patternId}
-                        data-tier-color={tierVisual.color}
-                        className="absolute inset-[6px] rounded-[28px]"
-                        style={tierVisual.rowStyle}
-                      />
-                    )}
+	                      left: `${row.pos_x}%`,
+	                      top: `${row.pos_y}%`,
+	                      transform: 'translate(-50%, -50%)',
+	                      padding: `${tierRowPadding}px`,
+	                      minWidth: `${row.width || 120}px`,
+	                      minHeight: `${row.height || 120}px`,
+	                      pointerEvents: 'none',
+	                    }}
+	                  >
+	                    {showTierRowSurface && (
+	                      <div
+	                        aria-hidden="true"
+	                        data-tier-row={rowKey}
+	                        data-tier-pattern={tierVisual.patternId}
+	                        data-tier-color={tierVisual.color}
+	                        className="absolute"
+	                        style={{
+	                          left: '50%',
+	                          top: '50%',
+	                          transform: 'translate(-50%, -50%)',
+	                          width: `${tierRowSurfaceFrame.width}px`,
+	                          height: `${tierRowSurfaceFrame.height}px`,
+	                          borderRadius: `${tierRowSurfaceFrame.radius}px`,
+	                          ...tierVisual.rowStyle,
+	                        }}
+	                      />
+	                    )}
                     <div className="relative flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
                       <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
                         <TableComponent
