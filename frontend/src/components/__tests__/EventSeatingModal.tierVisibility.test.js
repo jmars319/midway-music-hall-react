@@ -281,7 +281,7 @@ describe('EventSeatingModal tier visibility', () => {
     expect(document.body.textContent).toContain('$50.00');
   });
 
-  test('keeps flat-priced events free of tier surfaces and tier pricing panels', async () => {
+  test('keeps flat-priced events free of tier surfaces while still showing live totals', async () => {
     await renderModal({
       event: buildFlatEvent(),
       response: buildFlatSeatingResponse(),
@@ -298,14 +298,21 @@ describe('EventSeatingModal tier visibility', () => {
     expect(document.body.textContent).not.toContain('Selected pricing');
     expect(document.body.textContent).not.toContain('Running total');
 
-    const flatSeat = document.querySelector('button[data-seat-id="Main Floor-Table 1-1"]');
-    expect(flatSeat).not.toBeNull();
+    const flatSeatA = document.querySelector('button[data-seat-id="Main Floor-Table 1-1"]');
+    const flatSeatB = document.querySelector('button[data-seat-id="Main Floor-Table 1-2"]');
+    expect(flatSeatA).not.toBeNull();
+    expect(flatSeatB).not.toBeNull();
 
-    await click(flatSeat);
+    await click(flatSeatA);
+    await click(flatSeatB);
 
     const selectedFlatSeat = document.querySelector('button[data-seat-id="Main Floor-Table 1-1"]');
     expect(selectedFlatSeat.dataset.seatState).toBe('selected');
     expect(document.body.textContent).toContain('1A');
-    expect(document.body.textContent).not.toContain('Selected pricing');
+    expect(document.body.textContent).toContain('1B');
+    expect(document.body.textContent).toContain('Selected pricing');
+    expect(document.body.textContent).toContain('$18.00');
+    expect(document.body.textContent).toContain('Running total');
+    expect(document.body.textContent).toContain('$36.00');
   });
 });

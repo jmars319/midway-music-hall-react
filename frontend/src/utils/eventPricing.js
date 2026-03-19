@@ -169,6 +169,21 @@ const getEventMinimumPrice = (event = {}) => {
   return fallbackPrices.length ? Math.min(...fallbackPrices) : null;
 };
 
+const getFlatSeatPrice = (event = {}) => {
+  const priceCandidates = [
+    normalizePriceNumber(event?.ticket_price),
+    normalizePriceNumber(event?.min_ticket_price),
+    normalizePriceNumber(event?.door_price),
+    normalizePriceNumber(event?.max_ticket_price),
+  ];
+  for (const candidate of priceCandidates) {
+    if (candidate !== null) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
 const buildEventPricingLegend = (event = {}, rows = []) => {
   const config = getEventPricingConfig(event);
   if (!config) return [];
@@ -219,6 +234,7 @@ export {
   buildPricingRowKey,
   eventHasTieredPricing,
   formatPrice as formatEventPricingValue,
+  getFlatSeatPrice,
   getEventMinimumPrice,
   getEventPricingConfig,
   getEventPricingTiers,

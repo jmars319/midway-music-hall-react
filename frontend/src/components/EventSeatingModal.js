@@ -10,7 +10,7 @@ import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
 import { loadPayPalHostedButtonsSdk } from '../utils/paypalHostedButtons';
 import { formatEventDateTimeLabel, formatEventPriceDisplay, formatEventRunSummary, isMultiDayEvent } from '../utils/eventFormat';
-import { buildEventPricingLegend, resolveRowPricingTier, resolveSeatPricingTier } from '../utils/eventPricing';
+import { buildEventPricingLegend, getFlatSeatPrice, resolveRowPricingTier, resolveSeatPricingTier } from '../utils/eventPricing';
 import { buildTierBodyStyle, buildTierGroupStyle, buildTierSwatchStyle, withAlpha } from '../utils/seatingTierTheme';
 import ReservationBanner from './ReservationBanner';
 
@@ -196,12 +196,31 @@ export default function EventSeatingModal({ event, onClose }) {
   );
   const seatLabelMap = useMemo(() => buildSeatLookupMap(seatRows), [seatRows]);
   const seatLabelFor = (seatId) => formatSeatLabel(seatLabelMap[seatId] || seatId, { mode: 'seat' });
+  const flatSeatPrice = useMemo(() => getFlatSeatPrice(event), [event]);
   const selectedSeatPricing = useMemo(() => {
-    if (!selectedSeats.length || !pricingLegendItems.length) {
+    if (!selectedSeats.length) {
+      return { lineItems: [], total: null };
+    }
+    if (!pricingLegendItems.length && flatSeatPrice === null) {
       return { lineItems: [], total: null };
     }
     const lineItems = [];
     let total = 0;
+    if (!pricingLegendItems.length) {
+      selectedSeats.forEach((seatId) => {
+        total += flatSeatPrice;
+        lineItems.push({
+          seatId,
+          seatLabel: describeSeatSelection(seatId, formatSeatLabel(seatLabelMap[seatId] || seatId, { mode: 'seat' })),
+          price: flatSeatPrice,
+          priceLabel: formatCurrencyAmount(flatSeatPrice),
+        });
+      });
+      return {
+        lineItems,
+        total: lineItems.length ? Number(total.toFixed(2)) : null,
+      };
+    }
     selectedSeats.forEach((seatId) => {
       const tier = resolveSeatPricingTier(event, seatRows, seatId);
       if (!tier) return;
@@ -226,7 +245,7 @@ export default function EventSeatingModal({ event, onClose }) {
       lineItems,
       total: lineItems.length ? Number(total.toFixed(2)) : null,
     };
-  }, [event, pricingLegendItems.length, pricingTierDisplayMap, seatLabelMap, seatRows, selectedSeats]);
+  }, [event, flatSeatPrice, pricingLegendItems.length, pricingTierDisplayMap, seatLabelMap, seatRows, selectedSeats]);
   const canvasWidth = canvasSettings?.width || 1200;
   const canvasHeight = canvasSettings?.height || 800;
   const hasPositions = useMemo(
@@ -968,10 +987,14 @@ export default function EventSeatingModal({ event, onClose }) {
             <div className="max-h-48 overflow-y-auto divide-y divide-indigo-400/15">
               {selectedSeatPricing.lineItems.map((item) => (
                 <div key={item.seatId} className="flex items-center gap-3 px-3 py-2 text-sm">
-                  <span aria-hidden="true" className="h-3.5 w-3.5 rounded-sm shrink-0" style={item.swatchStyle || undefined} />
+                  {item.swatchStyle && (
+                    <span aria-hidden="true" className="h-3.5 w-3.5 rounded-sm shrink-0" style={item.swatchStyle} />
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold text-white truncate">{item.seatLabel}</div>
-                    <div className="text-xs text-gray-300 truncate">{item.tierLabel}</div>
+                    {item.tierLabel && (
+                      <div className="text-xs text-gray-300 truncate">{item.tierLabel}</div>
+                    )}
                   </div>
                   <span className="text-sm font-semibold text-amber-100 whitespace-nowrap">{item.priceLabel}</span>
                 </div>
@@ -1575,10 +1598,14 @@ export default function EventSeatingModal({ event, onClose }) {
                       <div className="max-h-56 overflow-y-auto divide-y divide-amber-400/15">
                         {selectedSeatPricing.lineItems.map((item) => (
                           <div key={item.seatId} className="flex items-center gap-3 px-4 py-3 text-sm" role="listitem">
-                            <span aria-hidden="true" className="h-4 w-4 rounded-sm shrink-0" style={item.swatchStyle || undefined} />
+                            {item.swatchStyle && (
+                              <span aria-hidden="true" className="h-4 w-4 rounded-sm shrink-0" style={item.swatchStyle} />
+                            )}
                             <div className="min-w-0 flex-1">
                               <div className="font-semibold text-white truncate">{item.seatLabel}</div>
-                              <div className="text-xs text-gray-300 truncate">{item.tierLabel}</div>
+                              {item.tierLabel && (
+                                <div className="text-xs text-gray-300 truncate">{item.tierLabel}</div>
+                              )}
                             </div>
                             <span className="font-semibold text-amber-100 whitespace-nowrap">{item.priceLabel}</span>
                           </div>
@@ -1715,10 +1742,14 @@ export default function EventSeatingModal({ event, onClose }) {
                       <div className="max-h-40 overflow-y-auto divide-y divide-amber-400/10">
                         {selectedSeatPricing.lineItems.map((item) => (
                           <div key={item.seatId} className="flex items-center gap-3 px-3 py-2 text-sm">
-                            <span aria-hidden="true" className="h-3.5 w-3.5 rounded-sm shrink-0" style={item.swatchStyle || undefined} />
+                            {item.swatchStyle && (
+                              <span aria-hidden="true" className="h-3.5 w-3.5 rounded-sm shrink-0" style={item.swatchStyle} />
+                            )}
                             <div className="min-w-0 flex-1">
                               <div className="font-semibold text-white truncate">{item.seatLabel}</div>
-                              <div className="text-xs text-gray-300 truncate">{item.tierLabel}</div>
+                              {item.tierLabel && (
+                                <div className="text-xs text-gray-300 truncate">{item.tierLabel}</div>
+                              )}
                             </div>
                             <span className="font-semibold text-amber-100 whitespace-nowrap">{item.priceLabel}</span>
                           </div>
