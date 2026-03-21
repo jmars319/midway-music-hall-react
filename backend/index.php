@@ -6416,12 +6416,17 @@ $router->add('POST', '/api/seating-layouts', function (Request $request) {
     if ($isDefault) {
         Database::run('UPDATE seating_layouts SET is_default = 0');
     }
-    Database::run('INSERT INTO seating_layouts (name, description, is_default, layout_data, canvas_settings) VALUES (?, ?, ?, ?, ?)', [
+    $stagePosition = isset($payload['stage_position']) ? json_encode($payload['stage_position']) : null;
+    $stageSize = isset($payload['stage_size']) ? json_encode($payload['stage_size']) : null;
+    $canvasSettings = isset($payload['canvas_settings']) ? json_encode($payload['canvas_settings']) : null;
+    Database::run('INSERT INTO seating_layouts (name, description, is_default, layout_data, stage_position, stage_size, canvas_settings) VALUES (?, ?, ?, ?, ?, ?, ?)', [
         $rawName,
         $payload['description'] ?? '',
         $isDefault ? 1 : 0,
         json_encode($layoutData),
-        isset($payload['canvas_settings']) ? json_encode($payload['canvas_settings']) : null
+        $stagePosition,
+        $stageSize,
+        $canvasSettings
     ]);
     $id = (int) Database::connection()->lastInsertId();
     Response::success(['id' => $id]);

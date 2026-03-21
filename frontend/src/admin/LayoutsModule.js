@@ -12,6 +12,22 @@ const DEFAULT_STAGE_POSITION = { x: 50, y: 10 };
 const DEFAULT_STAGE_SIZE = { width: 200, height: 80 };
 const DEFAULT_CANVAS = { preset: 'standard', width: 1200, height: 800 };
 
+const normalizeStagePosition = (stagePosition) => ({
+  x: typeof stagePosition?.x === 'number' ? stagePosition.x : DEFAULT_STAGE_POSITION.x,
+  y: typeof stagePosition?.y === 'number' ? stagePosition.y : DEFAULT_STAGE_POSITION.y,
+});
+
+const normalizeStageSize = (stageSize) => ({
+  width: typeof stageSize?.width === 'number' ? stageSize.width : DEFAULT_STAGE_SIZE.width,
+  height: typeof stageSize?.height === 'number' ? stageSize.height : DEFAULT_STAGE_SIZE.height,
+});
+
+const normalizeCanvasSettings = (canvasSettings) => ({
+  preset: canvasSettings?.preset || DEFAULT_CANVAS.preset,
+  width: typeof canvasSettings?.width === 'number' ? canvasSettings.width : DEFAULT_CANVAS.width,
+  height: typeof canvasSettings?.height === 'number' ? canvasSettings.height : DEFAULT_CANVAS.height,
+});
+
 const buildEmptyLayoutRow = () => ({
   id: `placeholder-${Math.random().toString(36).slice(2, 8)}`,
   element_type: 'marker',
@@ -32,11 +48,15 @@ const buildEmptyLayoutRow = () => ({
 
 const buildEmptyLayoutData = () => [buildEmptyLayoutRow()];
 
-const createInitialFormState = () => ({
+const createInitialFormState = (overrides = {}) => ({
   name: '',
   description: '',
   is_default: false,
   layout_data: buildEmptyLayoutData(),
+  stage_position: normalizeStagePosition(),
+  stage_size: normalizeStageSize(),
+  canvas_settings: normalizeCanvasSettings(),
+  ...overrides,
 });
 
 const seatTypes = ['general', 'premium', 'vip', 'accessible'];
@@ -232,19 +252,9 @@ export default function LayoutsModule() {
       name: layout.name || '',
       description: layout.description || '',
     });
-    const incomingStagePosition = layout.stage_position ? layout.stage_position : { x: 50, y: 10 };
-    const incomingStageSize = layout.stage_size ? layout.stage_size : { width: 200, height: 80 };
-    setStagePosition(incomingStagePosition);
-    setStageSize(incomingStageSize);
-    setCanvasSettings(layout.canvas_settings ? {
-      preset: layout.canvas_settings.preset || canvasPresets[0].key,
-      width: layout.canvas_settings.width || canvasPresets[0].width,
-      height: layout.canvas_settings.height || canvasPresets[0].height
-    } : {
-      preset: canvasPresets[0].key,
-      width: canvasPresets[0].width,
-      height: canvasPresets[0].height
-    });
+    setStagePosition(normalizeStagePosition(layout.stage_position));
+    setStageSize(normalizeStageSize(layout.stage_size));
+    setCanvasSettings(normalizeCanvasSettings(layout.canvas_settings));
     setZoom(1);
     setPan({ x: 0, y: 0 });
     setSelectedRowId(null);
@@ -253,14 +263,20 @@ export default function LayoutsModule() {
 
   const openDuplicate = (layout) => {
     setEditing(null);
-    setFormData({
+    setFormData(createInitialFormState({
       name: `${layout.name} (Copy)`,
       description: layout.description || '',
       is_default: false,
       layout_data: Array.isArray(layout.layout_data) && layout.layout_data.length
-        ? layout.layout_data
+        ? layout.layout_data.map((row) => ({
+            ...row,
+            seat_labels: normalizeSeatLabels(row.seat_labels || row.seatLabels || null)
+          }))
         : buildEmptyLayoutData(),
-    });
+      stage_position: normalizeStagePosition(layout.stage_position),
+      stage_size: normalizeStageSize(layout.stage_size),
+      canvas_settings: normalizeCanvasSettings(layout.canvas_settings),
+    }));
     setShowForm(true);
     setError('');
   };
@@ -294,9 +310,9 @@ export default function LayoutsModule() {
         layout_data: Array.isArray(formData.layout_data) && formData.layout_data.length
           ? formData.layout_data
           : buildEmptyLayoutData(),
-        stage_position: editing?.stage_position || DEFAULT_STAGE_POSITION,
-        stage_size: editing?.stage_size || DEFAULT_STAGE_SIZE,
-        canvas_settings: editing?.canvas_settings || DEFAULT_CANVAS
+        stage_position: normalizeStagePosition(formData.stage_position),
+        stage_size: normalizeStageSize(formData.stage_size),
+        canvas_settings: normalizeCanvasSettings(formData.canvas_settings)
       };
 
       const res = await fetch(url, {

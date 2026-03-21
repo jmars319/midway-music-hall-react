@@ -44,19 +44,30 @@ require_backend_health_once || {
 json_field() {
   local json="$1"
   local field="$2"
-  printf '%s' "$json" | python3 -c 'import json, sys
+  JSON_INPUT="$json" python3 - "$field" <<'PYCODE'
+import json
+import os
+import sys
+
 field = sys.argv[1]
 try:
-    data = json.load(sys.stdin)
+    data = json.loads(os.environ.get("JSON_INPUT", ""))
 except Exception as exc:
     raise SystemExit(f"invalid json: {exc}")
-if field not in data:
-    raise SystemExit(f"missing field: {field}")
-value = data[field]
-if isinstance(value, bool):
-    print("true" if value else "false")
+
+for part in field.split('.'):
+    if isinstance(data, dict) and part in data:
+        data = data[part]
+    else:
+        raise SystemExit(f"missing field: {field}")
+
+if isinstance(data, bool):
+    print("true" if data else "false")
+elif data is None:
+    print("null")
 else:
-    print(value)' "$field"
+    print(data)
+PYCODE
 }
 
 post_json() {
@@ -126,6 +137,8 @@ layout_payload=$(cat <<JSON
       "seat_labels": {}
     }
   ],
+  "stage_position": { "x": 24, "y": 16 },
+  "stage_size": { "width": 210, "height": 95 },
   "canvas_settings": { "preset": "standard", "width": 1200, "height": 800 }
 }
 JSON
@@ -135,6 +148,22 @@ log_step "[admin-api] creating seating layout"
 layout_response=$(post_json "POST" "/seating-layouts" "$layout_payload")
 created_layout_id="$(json_field "$layout_response" id)"
 log_success "[admin-api] created layout ${created_layout_id}"
+
+log_step "[admin-api] verifying created layout metadata persisted"
+created_layout_response="$(curl -fsS \
+  -b "$ADMIN_COOKIE_JAR" \
+  -H "Origin: ${ADMIN_ORIGIN}" \
+  -H 'Accept: application/json' \
+  "${API_BASE}/seating-layouts/${created_layout_id}")"
+if [ "$(json_field "$created_layout_response" 'layout.stage_position.x')" != "24" ] || \
+   [ "$(json_field "$created_layout_response" 'layout.stage_position.y')" != "16" ] || \
+   [ "$(json_field "$created_layout_response" 'layout.stage_size.width')" != "210" ] || \
+   [ "$(json_field "$created_layout_response" 'layout.stage_size.height')" != "95" ] || \
+   [ "$(json_field "$created_layout_response" 'layout.canvas_settings.width')" != "1200" ] || \
+   [ "$(json_field "$created_layout_response" 'layout.canvas_settings.height')" != "800" ]; then
+  log_error "[admin-api] created layout did not persist stage/canvas metadata"
+  exit 1
+fi
 
 log_step "[admin-api] updating layout metadata"
 update_layout_payload=$(cat <<JSON
@@ -158,6 +187,8 @@ update_layout_payload=$(cat <<JSON
       "seat_labels": {}
     }
   ],
+  "stage_position": { "x": 30, "y": 18 },
+  "stage_size": { "width": 180, "height": 88 },
   "canvas_settings": { "preset": "standard", "width": 1200, "height": 800 }
 }
 JSON
