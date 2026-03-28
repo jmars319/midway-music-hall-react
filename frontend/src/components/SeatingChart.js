@@ -6,6 +6,7 @@ import { buildSeatLookupMap, describeSeatSelection, isSeatRow, seatIdsForRow, re
 import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { buildSeatLegendItems, buildSeatStatusMap } from '../utils/seatingTheme';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
+import { getSeatRowFrame, resolveTableShapeForRow } from '../utils/tableLayoutGeometry';
 
 const DEFAULT_STAGE_POSITION = { x: 50, y: 8 };
 const DEFAULT_STAGE_SIZE = { width: 200, height: 80 };
@@ -626,13 +627,10 @@ export default function SeatingChart({
                 const rowKey = row.id || `${row.section_name}-${row.row_label}`;
                 const rotation = row.rotation || 0;
                 const elementType = (row.element_type || 'table').toLowerCase();
-                const baseWidth = row.width || (elementType === 'chair' ? 56 : 140);
-                const baseHeight = row.height || (elementType === 'chair' ? 56 : 120);
-                const minDimension = elementType === 'chair' ? 48 : 100;
-                const width = Math.max(baseWidth, minDimension);
-                const height = Math.max(baseHeight, minDimension);
+                const seatFrame = getSeatRowFrame({ ...row, element_type: elementType }, { size: 60 });
+                const width = seatFrame.width;
+                const height = seatFrame.height;
                 const labels = resolveRowHeaderLabels(row);
-                const paddingValue = elementType === 'chair' ? '8px 6px' : '14px 10px';
                 const showFloatingLabel = !interactive && (labels.sectionLabel || labels.rowLabel);
 
                 return (
@@ -643,9 +641,8 @@ export default function SeatingChart({
                       left: `${row.pos_x}%`,
                       top: `${row.pos_y}%`,
                       transform: 'translate(-50%, -50%)',
-                      minWidth: `${width}px`,
-                      minHeight: `${height}px`,
-                      padding: paddingValue,
+                      width: `${width}px`,
+                      height: `${height}px`,
                       pointerEvents: 'none',
                       zIndex: 10,
                     }}
@@ -665,13 +662,13 @@ export default function SeatingChart({
                       </div>
                     )}
                     <div
-                      className="flex items-center justify-center"
-                      style={{ minHeight: `${height - 20}px`, pointerEvents: 'auto' }}
+                      className="flex h-full w-full items-center justify-center"
+                      style={{ pointerEvents: 'auto' }}
                     >
                       <div style={{ transform: `rotate(${rotation}deg)` }}>
                         <TableComponent
                           row={row}
-                          tableShape={row.table_shape || row.seat_type || 'table-6'}
+                          tableShape={resolveTableShapeForRow(row)}
                           selectedSeats={selectedSeats}
                           pendingSeats={pendingSeatIds}
                           holdSeats={holdSeatIds}

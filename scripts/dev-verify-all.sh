@@ -21,7 +21,9 @@ scripts=(
   ./scripts/dev-verify-payment-settings.sh
   ./scripts/dev-verify-paypal-hosted-buttons-api.sh
   ./scripts/dev-verify-seating-guardrails.sh
+  ./scripts/dev-verify-table-layout-geometry.sh
   ./scripts/dev-verify-recurring-events-api.sh
+  ./scripts/dev-verify-recurring-backcompat.sh
   ./scripts/dev-verify-event-images.sh
   ./scripts/dev-verify-clearable-fields.sh
   ./scripts/dev-verify-event-reschedule.sh

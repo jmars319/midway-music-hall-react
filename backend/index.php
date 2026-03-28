@@ -1472,6 +1472,1345 @@ function fetch_event_series_meta(PDO $pdo, int $eventId): array
     ];
 }
 
+function recurrence_weekday_map(): array
+{
+    return [
+        'SU' => 0,
+        'SUN' => 0,
+        'SUNDAY' => 0,
+        'MO' => 1,
+        'MON' => 1,
+        'MONDAY' => 1,
+        'TU' => 2,
+        'TUE' => 2,
+        'TUESDAY' => 2,
+        'WE' => 3,
+        'WED' => 3,
+        'WEDNESDAY' => 3,
+        'TH' => 4,
+        'THU' => 4,
+        'THURSDAY' => 4,
+        'FR' => 5,
+        'FRI' => 5,
+        'FRIDAY' => 5,
+        'SA' => 6,
+        'SAT' => 6,
+        'SATURDAY' => 6,
+        '0' => 0,
+        '1' => 1,
+        '2' => 2,
+        '3' => 3,
+        '4' => 4,
+        '5' => 5,
+        '6' => 6,
+    ];
+}
+
+function recurrence_weekday_tokens(): array
+{
+    return ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+}
+
+function normalize_recurrence_weekday_token($value): ?string
+{
+    if ($value === null || $value === '' || $value === false) {
+        return null;
+    }
+    $candidate = strtoupper(trim((string) $value));
+    if ($candidate === '') {
+        return null;
+    }
+    $map = recurrence_weekday_map();
+    if (!array_key_exists($candidate, $map)) {
+        return null;
+    }
+    $tokens = recurrence_weekday_tokens();
+    return $tokens[$map[$candidate]] ?? null;
+}
+
+function normalize_recurrence_weekday_tokens($value): array
+{
+    if ($value === null || $value === '' || $value === false) {
+        return [];
+    }
+
+    $queue = is_array($value) ? array_values($value) : [$value];
+    $normalized = [];
+
+    while ($queue) {
+        $candidate = array_shift($queue);
+        if ($candidate === null || $candidate === '' || $candidate === false) {
+            continue;
+        }
+        if (is_array($candidate)) {
+            foreach ($candidate as $nested) {
+                $queue[] = $nested;
+            }
+            continue;
+        }
+
+        $raw = trim((string) $candidate);
+        if ($raw === '') {
+            continue;
+        }
+
+        if ($raw[0] === '[') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                foreach ($decoded as $nested) {
+                    $queue[] = $nested;
+                }
+                continue;
+            }
+        }
+
+        if (preg_match('/[\s,]/', $raw)) {
+            foreach (preg_split('/[\s,]+/', $raw) ?: [] as $part) {
+                if ($part !== '') {
+                    $queue[] = $part;
+                }
+            }
+            continue;
+        }
+
+        $token = normalize_recurrence_weekday_token($raw);
+        if ($token !== null) {
+            $normalized[$token] = recurrence_weekday_index($token);
+        }
+    }
+
+    $tokens = array_keys($normalized);
+    usort($tokens, static function (string $left, string $right): int {
+        return recurrence_weekday_index($left) <=> recurrence_weekday_index($right);
+    });
+    return array_values($tokens);
+}
+
+function recurrence_weekday_csv($value): ?string
+{
+    $tokens = normalize_recurrence_weekday_tokens($value);
+    if (!$tokens) {
+        return null;
+    }
+    return implode(',', $tokens);
+}
+
+function recurrence_weekday_index(string $weekday): int
+{
+    $token = normalize_recurrence_weekday_token($weekday) ?? 'SU';
+    $tokens = recurrence_weekday_tokens();
+    $index = array_search($token, $tokens, true);
+    return $index === false ? 0 : (int) $index;
+}
+
+function recurrence_setpos_order(): array
+{
+    return [1, 2, 3, 4, 5, -1];
+}
+
+function normalize_recurrence_monthday_values($value): array
+{
+    if ($value === null || $value === '' || $value === false) {
+        return [];
+    }
+
+    $queue = is_array($value) ? array_values($value) : [$value];
+    $normalized = [];
+
+    while ($queue) {
+        $candidate = array_shift($queue);
+        if ($candidate === null || $candidate === '' || $candidate === false) {
+            continue;
+        }
+        if (is_array($candidate)) {
+            foreach ($candidate as $nested) {
+                $queue[] = $nested;
+            }
+            continue;
+        }
+
+        $raw = trim((string) $candidate);
+        if ($raw === '') {
+            continue;
+        }
+
+        if ($raw[0] === '[') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                foreach ($decoded as $nested) {
+                    $queue[] = $nested;
+                }
+                continue;
+            }
+        }
+
+        if (preg_match('/[\s,]+/', $raw)) {
+            foreach (preg_split('/[\s,]+/', $raw) ?: [] as $part) {
+                if ($part !== '') {
+                    $queue[] = $part;
+                }
+            }
+            continue;
+        }
+
+        if (!preg_match('/^-?\d+$/', $raw)) {
+            continue;
+        }
+
+        $monthDay = (int) $raw;
+        if ($monthDay < 1 || $monthDay > 31) {
+            continue;
+        }
+        $normalized[$monthDay] = true;
+    }
+
+    $tokens = array_map('intval', array_keys($normalized));
+    sort($tokens, SORT_NUMERIC);
+    return array_values($tokens);
+}
+
+function recurrence_monthday_csv($value): ?string
+{
+    $tokens = normalize_recurrence_monthday_values($value);
+    if (!$tokens) {
+        return null;
+    }
+    return implode(',', $tokens);
+}
+
+function normalize_recurrence_setpos_values($value): array
+{
+    if ($value === null || $value === '' || $value === false) {
+        return [];
+    }
+
+    $queue = is_array($value) ? array_values($value) : [$value];
+    $normalized = [];
+    $aliases = [
+        'FIRST' => 1,
+        '1ST' => 1,
+        'SECOND' => 2,
+        '2ND' => 2,
+        'THIRD' => 3,
+        '3RD' => 3,
+        'FOURTH' => 4,
+        '4TH' => 4,
+        'FIFTH' => 5,
+        '5TH' => 5,
+        'LAST' => -1,
+    ];
+
+    while ($queue) {
+        $candidate = array_shift($queue);
+        if ($candidate === null || $candidate === '' || $candidate === false) {
+            continue;
+        }
+        if (is_array($candidate)) {
+            foreach ($candidate as $nested) {
+                $queue[] = $nested;
+            }
+            continue;
+        }
+
+        $raw = trim((string) $candidate);
+        if ($raw === '') {
+            continue;
+        }
+
+        if ($raw[0] === '[') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                foreach ($decoded as $nested) {
+                    $queue[] = $nested;
+                }
+                continue;
+            }
+        }
+
+        if (preg_match('/[\s,]+/', $raw)) {
+            foreach (preg_split('/[\s,]+/', $raw) ?: [] as $part) {
+                if ($part !== '') {
+                    $queue[] = $part;
+                }
+            }
+            continue;
+        }
+
+        $candidateUpper = strtoupper($raw);
+        if (array_key_exists($candidateUpper, $aliases)) {
+            $normalized[$aliases[$candidateUpper]] = true;
+            continue;
+        }
+        if (!preg_match('/^-?\d+$/', $raw)) {
+            continue;
+        }
+        $setpos = (int) $raw;
+        if (!in_array($setpos, recurrence_setpos_order(), true)) {
+            continue;
+        }
+        $normalized[$setpos] = true;
+    }
+
+    $tokens = array_map('intval', array_keys($normalized));
+    $orderLookup = array_flip(recurrence_setpos_order());
+    usort($tokens, static function (int $left, int $right) use ($orderLookup): int {
+        return ($orderLookup[$left] ?? PHP_INT_MAX) <=> ($orderLookup[$right] ?? PHP_INT_MAX);
+    });
+    return array_values($tokens);
+}
+
+function recurrence_setpos_csv($value): ?string
+{
+    $tokens = normalize_recurrence_setpos_values($value);
+    if (!$tokens) {
+        return null;
+    }
+    return implode(',', $tokens);
+}
+
+function normalize_recurrence_exception_rows($value, ?string &$error = null): array
+{
+    $error = null;
+    if ($value === null || $value === '' || $value === false) {
+        return [];
+    }
+    if (is_string($value)) {
+        $decoded = json_decode($value, true);
+        if (!is_array($decoded)) {
+            $error = 'recurrence.exceptions must be a JSON array.';
+            return [];
+        }
+        $value = $decoded;
+    }
+    if (!is_array($value)) {
+        $error = 'recurrence.exceptions must be an array.';
+        return [];
+    }
+
+    $normalized = [];
+    $seenDates = [];
+
+    foreach (array_values($value) as $index => $row) {
+        if (!is_array($row)) {
+            $error = 'Each recurrence exception must be an object.';
+            return [];
+        }
+        $exceptionDate = normalize_occurrence_date_input($row['exception_date'] ?? null);
+        if ($exceptionDate === null) {
+            $error = 'Each recurrence exception needs a valid exception_date.';
+            return [];
+        }
+        if (isset($seenDates[$exceptionDate])) {
+            $error = 'Each recurrence exception date may only appear once.';
+            return [];
+        }
+        $overrideDate = normalize_occurrence_date_input(
+            $row['override_date']
+                ?? ($row['override_payload']['override_date'] ?? null)
+        );
+        $notes = array_key_exists('notes', $row) ? trim((string) ($row['notes'] ?? '')) : null;
+        $type = $overrideDate !== null ? 'override' : 'skip';
+        if (isset($row['exception_type']) && $row['exception_type'] === 'override' && $overrideDate === null) {
+            $error = 'Override exceptions require an override date.';
+            return [];
+        }
+        $normalized[] = [
+            'id' => isset($row['id']) ? (int) $row['id'] : ($index + 1),
+            'exception_date' => $exceptionDate,
+            'exception_type' => $type,
+            'override_date' => $overrideDate,
+            'override_payload' => $overrideDate !== null ? ['override_date' => $overrideDate] : null,
+            'notes' => $notes !== '' ? $notes : null,
+        ];
+        $seenDates[$exceptionDate] = true;
+    }
+
+    usort($normalized, static function (array $left, array $right): int {
+        return strcmp((string) ($left['exception_date'] ?? ''), (string) ($right['exception_date'] ?? ''));
+    });
+
+    return $normalized;
+}
+
+function normalize_recurrence_request_payload($value, ?string &$error = null): ?array
+{
+    $error = null;
+    if ($value === null || $value === '' || $value === false) {
+        return null;
+    }
+    if (is_string($value)) {
+        $decoded = json_decode($value, true);
+        if (!is_array($decoded)) {
+            $error = 'recurrence must be a JSON object.';
+            return null;
+        }
+        $value = $decoded;
+    }
+    if (!is_array($value)) {
+        $error = 'recurrence must be an object.';
+        return null;
+    }
+
+    $enabled = array_key_exists('enabled', $value) ? !empty($value['enabled']) : true;
+    $startsOn = normalize_occurrence_date_input($value['starts_on'] ?? $value['start_date'] ?? null);
+    $endsOn = normalize_occurrence_date_input($value['ends_on'] ?? $value['end_date'] ?? null);
+    $frequency = strtolower(trim((string) ($value['frequency'] ?? 'weekly')));
+    if ($frequency === '') {
+        $frequency = 'weekly';
+    }
+    if (!in_array($frequency, ['weekly', 'monthly'], true)) {
+        $error = 'recurrence.frequency must be either weekly or monthly.';
+        return null;
+    }
+    $weekdayInput = null;
+    foreach (['byweekday', 'byweekdays', 'weekday', 'weekdays'] as $key) {
+        if (array_key_exists($key, $value)) {
+            $weekdayInput = $value[$key];
+            break;
+        }
+    }
+    $byweekdaySet = normalize_recurrence_weekday_tokens($weekdayInput);
+    $byweekday = $byweekdaySet ? implode(',', $byweekdaySet) : null;
+    $bymonthdayInput = null;
+    foreach (['bymonthday', 'monthday', 'monthdays', 'day_of_month'] as $key) {
+        if (array_key_exists($key, $value)) {
+            $bymonthdayInput = $value[$key];
+            break;
+        }
+    }
+    $bymonthdaySet = normalize_recurrence_monthday_values($bymonthdayInput);
+    $bymonthday = $bymonthdaySet ? implode(',', $bymonthdaySet) : null;
+    $bysetposInput = null;
+    foreach (['bysetpos', 'setpos', 'set_position', 'set_positions', 'positions'] as $key) {
+        if (array_key_exists($key, $value)) {
+            $bysetposInput = $value[$key];
+            break;
+        }
+    }
+    $bysetposSet = normalize_recurrence_setpos_values($bysetposInput);
+    $bysetpos = $bysetposSet ? implode(',', $bysetposSet) : null;
+    $monthlyMode = strtolower(trim((string) ($value['monthly_mode'] ?? '')));
+    if ($monthlyMode === '') {
+        $monthlyMode = $bymonthday !== null ? 'day_of_month' : 'nth_weekday';
+    }
+    if (!in_array($monthlyMode, ['day_of_month', 'nth_weekday'], true)) {
+        $error = 'recurrence.monthly_mode must be either day_of_month or nth_weekday.';
+        return null;
+    }
+    $interval = max(1, (int) ($value['interval'] ?? 1));
+    $exceptionsProvided = array_key_exists('exceptions', $value);
+    $exceptionsError = null;
+    $exceptions = normalize_recurrence_exception_rows($value['exceptions'] ?? null, $exceptionsError);
+    if ($exceptionsError !== null) {
+        $error = $exceptionsError;
+        return null;
+    }
+
+    if ($enabled) {
+        if ($startsOn === null) {
+            $error = 'recurrence.starts_on is required.';
+            return null;
+        }
+        if ($frequency === 'weekly') {
+            if ($byweekday === null) {
+                $error = 'recurrence.byweekday is required.';
+                return null;
+            }
+        } else {
+            if ($monthlyMode === 'day_of_month') {
+                if ($bymonthday === null) {
+                    $error = 'recurrence.bymonthday is required for monthly day-of-month rules.';
+                    return null;
+                }
+            } else {
+                if (count($byweekdaySet) !== 1) {
+                    $error = 'Monthly nth-weekday rules require exactly one weekday.';
+                    return null;
+                }
+                if ($bysetpos === null) {
+                    $error = 'recurrence.bysetpos is required for monthly nth-weekday rules.';
+                    return null;
+                }
+            }
+        }
+        if ($endsOn !== null && strcmp($endsOn, $startsOn) < 0) {
+            $error = 'recurrence.ends_on must be on or after recurrence.starts_on.';
+            return null;
+        }
+    }
+
+    if ($frequency === 'weekly') {
+        $bymonthday = null;
+        $bymonthdaySet = [];
+        $bysetpos = null;
+        $bysetposSet = [];
+        $monthlyMode = null;
+    } elseif ($monthlyMode === 'day_of_month') {
+        $byweekday = null;
+        $byweekdaySet = [];
+        $bysetpos = null;
+        $bysetposSet = [];
+    } else {
+        $bymonthday = null;
+        $bymonthdaySet = [];
+    }
+
+    return [
+        'enabled' => $enabled,
+        'frequency' => $frequency,
+        'interval' => $interval,
+        'byweekday' => $byweekday,
+        'byweekday_set' => $byweekdaySet,
+        'bymonthday' => $bymonthday,
+        'bymonthday_set' => $bymonthdaySet,
+        'bysetpos' => $bysetpos,
+        'bysetpos_set' => $bysetposSet,
+        'monthly_mode' => $frequency === 'monthly' ? $monthlyMode : null,
+        'starts_on' => $startsOn,
+        'ends_on' => $endsOn,
+        'exceptions_provided' => $exceptionsProvided,
+        'exceptions' => $exceptions,
+    ];
+}
+
+function resolve_recurrence_default_horizon_days(array $recurrence): int
+{
+    $frequency = strtolower(trim((string) ($recurrence['frequency'] ?? 'weekly')));
+    return $frequency === 'monthly' ? 365 : 180;
+}
+
+function resolve_recurrence_limit_date(DateTimeImmutable $start, ?string $endsOn, int $defaultHorizonDays): DateTimeImmutable
+{
+    if ($endsOn !== null) {
+        try {
+            return new DateTimeImmutable($endsOn . ' 23:59:59');
+        } catch (Throwable $error) {
+            // Fall back to the default horizon below.
+        }
+    }
+    return $start->modify('+' . max(1, $defaultHorizonDays) . ' days');
+}
+
+function build_weekly_recurrence_dates(string $startsOn, ?string $endsOn, $byweekday, int $interval = 1, int $defaultHorizonDays = 180, ?int $maxCount = null): array
+{
+    try {
+        $start = new DateTimeImmutable($startsOn . ' 00:00:00');
+    } catch (Throwable $error) {
+        return [];
+    }
+    $tokens = normalize_recurrence_weekday_tokens($byweekday);
+    if (!$tokens) {
+        return [];
+    }
+    $limitDate = resolve_recurrence_limit_date($start, $endsOn, $defaultHorizonDays);
+
+    $intervalWeeks = max(1, $interval);
+    $startWeekdayIndex = (int) $start->format('w');
+    $weekCursor = $startWeekdayIndex > 0
+        ? $start->modify('-' . $startWeekdayIndex . ' days')
+        : $start;
+    $dates = [];
+    $seen = [];
+    $maxDates = $maxCount !== null
+        ? max(1, $maxCount)
+        : max(1, ((int) ceil(max(1, $defaultHorizonDays) / 7) * count($tokens)) + count($tokens) + 8);
+    while ($weekCursor <= $limitDate && count($dates) < $maxDates) {
+        foreach ($tokens as $token) {
+            $candidate = $weekCursor->modify('+' . recurrence_weekday_index($token) . ' days');
+            if ($candidate < $start || $candidate > $limitDate) {
+                continue;
+            }
+            $dateKey = $candidate->format('Y-m-d');
+            if (isset($seen[$dateKey])) {
+                continue;
+            }
+            $seen[$dateKey] = true;
+            $dates[] = $dateKey;
+            if (count($dates) >= $maxDates) {
+                break;
+            }
+        }
+        $weekCursor = $weekCursor->modify('+' . $intervalWeeks . ' weeks');
+    }
+    return $dates;
+}
+
+function recurrence_nth_weekday_of_month(int $year, int $month, int $weekdayNum, int $nth): ?DateTimeImmutable
+{
+    if ($nth === -1) {
+        try {
+            $lastOfMonth = new DateTimeImmutable(sprintf('%04d-%02d-%02d 00:00:00', $year, $month, cal_days_in_month(CAL_GREGORIAN, $month, $year)));
+        } catch (Throwable $error) {
+            return null;
+        }
+        $lastWeekdayNum = (int) $lastOfMonth->format('w');
+        $offset = ($lastWeekdayNum - $weekdayNum + 7) % 7;
+        return $lastOfMonth->modify('-' . $offset . ' days');
+    }
+
+    if ($nth < 1) {
+        return null;
+    }
+
+    try {
+        $firstOfMonth = new DateTimeImmutable(sprintf('%04d-%02d-01 00:00:00', $year, $month));
+    } catch (Throwable $error) {
+        return null;
+    }
+    $firstWeekdayNum = (int) $firstOfMonth->format('w');
+    $offsetDays = ($weekdayNum - $firstWeekdayNum + 7) % 7;
+    $day = 1 + $offsetDays + (7 * ($nth - 1));
+    $daysInMonth = (int) $firstOfMonth->format('t');
+    if ($day > $daysInMonth) {
+        return null;
+    }
+    return new DateTimeImmutable(sprintf('%04d-%02d-%02d 00:00:00', $year, $month, $day));
+}
+
+function build_monthly_day_of_month_recurrence_dates(string $startsOn, ?string $endsOn, $bymonthday, int $interval = 1, int $defaultHorizonDays = 365, ?int $maxCount = null): array
+{
+    try {
+        $start = new DateTimeImmutable($startsOn . ' 00:00:00');
+    } catch (Throwable $error) {
+        return [];
+    }
+    $monthdays = normalize_recurrence_monthday_values($bymonthday);
+    if (!$monthdays) {
+        return [];
+    }
+    $limitDate = resolve_recurrence_limit_date($start, $endsOn, $defaultHorizonDays);
+    $monthCursor = new DateTimeImmutable($start->format('Y-m-01 00:00:00'));
+    $intervalMonths = max(1, $interval);
+    $dates = [];
+    $seen = [];
+    $maxDates = $maxCount !== null
+        ? max(1, $maxCount)
+        : max(1, ((int) ceil(max(1, $defaultHorizonDays) / 28) * count($monthdays)) + count($monthdays) + 6);
+    while ($monthCursor <= $limitDate && count($dates) < $maxDates) {
+        $year = (int) $monthCursor->format('Y');
+        $month = (int) $monthCursor->format('n');
+        $daysInMonth = (int) $monthCursor->format('t');
+        foreach ($monthdays as $monthday) {
+            if ($monthday > $daysInMonth) {
+                continue;
+            }
+            $candidate = new DateTimeImmutable(sprintf('%04d-%02d-%02d 00:00:00', $year, $month, $monthday));
+            if ($candidate < $start || $candidate > $limitDate) {
+                continue;
+            }
+            $dateKey = $candidate->format('Y-m-d');
+            if (isset($seen[$dateKey])) {
+                continue;
+            }
+            $seen[$dateKey] = true;
+            $dates[] = $dateKey;
+            if (count($dates) >= $maxDates) {
+                break;
+            }
+        }
+        $monthCursor = $monthCursor->modify('+' . $intervalMonths . ' months');
+    }
+    return $dates;
+}
+
+function build_monthly_nth_weekday_recurrence_dates(string $startsOn, ?string $endsOn, $byweekday, $bysetpos, int $interval = 1, int $defaultHorizonDays = 365, ?int $maxCount = null): array
+{
+    try {
+        $start = new DateTimeImmutable($startsOn . ' 00:00:00');
+    } catch (Throwable $error) {
+        return [];
+    }
+    $tokens = normalize_recurrence_weekday_tokens($byweekday);
+    $weekday = $tokens[0] ?? null;
+    $setposValues = normalize_recurrence_setpos_values($bysetpos);
+    if ($weekday === null || !$setposValues) {
+        return [];
+    }
+    $limitDate = resolve_recurrence_limit_date($start, $endsOn, $defaultHorizonDays);
+    $monthCursor = new DateTimeImmutable($start->format('Y-m-01 00:00:00'));
+    $intervalMonths = max(1, $interval);
+    $dates = [];
+    $seen = [];
+    $maxDates = $maxCount !== null
+        ? max(1, $maxCount)
+        : max(1, ((int) ceil(max(1, $defaultHorizonDays) / 28) * count($setposValues)) + count($setposValues) + 6);
+    $weekdayIndex = recurrence_weekday_index($weekday);
+    while ($monthCursor <= $limitDate && count($dates) < $maxDates) {
+        $year = (int) $monthCursor->format('Y');
+        $month = (int) $monthCursor->format('n');
+        foreach ($setposValues as $setpos) {
+            $candidate = recurrence_nth_weekday_of_month($year, $month, $weekdayIndex, $setpos);
+            if ($candidate === null || $candidate < $start || $candidate > $limitDate) {
+                continue;
+            }
+            $dateKey = $candidate->format('Y-m-d');
+            if (isset($seen[$dateKey])) {
+                continue;
+            }
+            $seen[$dateKey] = true;
+            $dates[] = $dateKey;
+            if (count($dates) >= $maxDates) {
+                break;
+            }
+        }
+        $monthCursor = $monthCursor->modify('+' . $intervalMonths . ' months');
+    }
+    sort($dates, SORT_STRING);
+    return array_values($dates);
+}
+
+function normalize_recurrence_exception_row_to_payload(array $row): array
+{
+    $overridePayload = null;
+    if (array_key_exists('override_payload', $row) && $row['override_payload'] !== null && $row['override_payload'] !== '') {
+        if (is_array($row['override_payload'])) {
+            $overridePayload = $row['override_payload'];
+        } else {
+            $decoded = json_decode((string) $row['override_payload'], true);
+            if (is_array($decoded)) {
+                $overridePayload = $decoded;
+            }
+        }
+    }
+    $overrideDate = normalize_occurrence_date_input($row['override_date'] ?? ($overridePayload['override_date'] ?? null));
+    $exceptionDate = normalize_occurrence_date_input($row['exception_date'] ?? null);
+    return array_merge($row, [
+        'id' => isset($row['id']) ? (int) $row['id'] : null,
+        'exception_date' => $exceptionDate,
+        'exception_type' => in_array($row['exception_type'] ?? 'skip', ['skip', 'override'], true)
+            ? $row['exception_type']
+            : 'skip',
+        'override_date' => $overrideDate,
+        'override_payload' => $overrideDate !== null ? ['override_date' => $overrideDate] : null,
+        'notes' => array_key_exists('notes', $row) ? ($row['notes'] !== null ? trim((string) $row['notes']) : null) : null,
+    ]);
+}
+
+function load_recurrence_exceptions(PDO $pdo, int $recurrenceId): array
+{
+    $stmt = $pdo->prepare('SELECT * FROM event_recurrence_exceptions WHERE recurrence_id = ? ORDER BY exception_date ASC, id ASC');
+    $stmt->execute([$recurrenceId]);
+    $rows = $stmt->fetchAll() ?: [];
+    return array_map('normalize_recurrence_exception_row_to_payload', $rows);
+}
+
+function apply_recurrence_exceptions_to_dates(array $dates, array $exceptions): array
+{
+    if (!$dates || !$exceptions) {
+        return $dates;
+    }
+
+    $dateSet = array_fill_keys($dates, true);
+    foreach ($exceptions as $exception) {
+        $row = normalize_recurrence_exception_row_to_payload(is_array($exception) ? $exception : []);
+        $exceptionDate = $row['exception_date'] ?? null;
+        if ($exceptionDate === null || !isset($dateSet[$exceptionDate])) {
+            continue;
+        }
+        unset($dateSet[$exceptionDate]);
+        if (($row['exception_type'] ?? 'skip') !== 'override') {
+            continue;
+        }
+        $overrideDate = $row['override_date'] ?? null;
+        if ($overrideDate !== null) {
+            $dateSet[$overrideDate] = true;
+        }
+    }
+
+    $resolvedDates = array_keys($dateSet);
+    sort($resolvedDates, SORT_STRING);
+    return array_values($resolvedDates);
+}
+
+function build_recurrence_dates(array $recurrence, array $exceptions = [], array $options = []): array
+{
+    $frequency = strtolower(trim((string) ($recurrence['frequency'] ?? 'weekly')));
+    $defaultHorizonDays = max(1, (int) ($options['default_horizon_days'] ?? resolve_recurrence_default_horizon_days($recurrence)));
+    $maxCount = array_key_exists('max_count', $options) ? max(1, (int) $options['max_count']) : null;
+
+    if ($frequency === 'monthly') {
+        $monthlyMode = strtolower(trim((string) ($recurrence['monthly_mode'] ?? '')));
+        $monthdays = normalize_recurrence_monthday_values($recurrence['bymonthday_set'] ?? $recurrence['bymonthday'] ?? null);
+        if ($monthlyMode === 'day_of_month' || ($monthlyMode === '' && $monthdays)) {
+            $dates = build_monthly_day_of_month_recurrence_dates(
+                $recurrence['starts_on'],
+                $recurrence['ends_on'] ?? null,
+                $monthdays,
+                max(1, (int) ($recurrence['interval'] ?? 1)),
+                $defaultHorizonDays,
+                $maxCount
+            );
+        } else {
+            $dates = build_monthly_nth_weekday_recurrence_dates(
+                $recurrence['starts_on'],
+                $recurrence['ends_on'] ?? null,
+                $recurrence['byweekday_set'] ?? $recurrence['byweekday'] ?? null,
+                $recurrence['bysetpos_set'] ?? $recurrence['bysetpos'] ?? null,
+                max(1, (int) ($recurrence['interval'] ?? 1)),
+                $defaultHorizonDays,
+                $maxCount
+            );
+        }
+        return apply_recurrence_exceptions_to_dates($dates, $exceptions);
+    }
+
+    $dates = build_weekly_recurrence_dates(
+        $recurrence['starts_on'],
+        $recurrence['ends_on'] ?? null,
+        $recurrence['byweekday_set'] ?? $recurrence['byweekday'] ?? null,
+        max(1, (int) ($recurrence['interval'] ?? 1)),
+        $defaultHorizonDays,
+        $maxCount
+    );
+    return apply_recurrence_exceptions_to_dates($dates, $exceptions);
+}
+
+function recurrence_preview_cycle_size(array $recurrence): int
+{
+    $frequency = strtolower(trim((string) ($recurrence['frequency'] ?? 'weekly')));
+    if ($frequency === 'weekly') {
+        return max(1, count(normalize_recurrence_weekday_tokens($recurrence['byweekday_set'] ?? $recurrence['byweekday'] ?? null)));
+    }
+
+    $monthlyMode = strtolower(trim((string) ($recurrence['monthly_mode'] ?? '')));
+    if ($monthlyMode === 'day_of_month') {
+        return max(1, count(normalize_recurrence_monthday_values($recurrence['bymonthday_set'] ?? $recurrence['bymonthday'] ?? null)));
+    }
+
+    return max(1, count(normalize_recurrence_setpos_values($recurrence['bysetpos_set'] ?? $recurrence['bysetpos'] ?? null)));
+}
+
+function recurrence_preview_cycle_distance(string $startsOn, string $today, string $frequency, int $interval): int
+{
+    try {
+        $start = new DateTimeImmutable($startsOn . ' 00:00:00');
+        $todayDate = new DateTimeImmutable($today . ' 00:00:00');
+    } catch (Throwable $error) {
+        return 0;
+    }
+
+    if ($todayDate <= $start) {
+        return 0;
+    }
+
+    if ($frequency === 'weekly') {
+        $days = (int) $start->diff($todayDate)->format('%a');
+        return max(0, (int) floor(($days / 7) / max(1, $interval)));
+    }
+
+    $yearDelta = ((int) $todayDate->format('Y')) - ((int) $start->format('Y'));
+    $monthDelta = ((int) $todayDate->format('n')) - ((int) $start->format('n'));
+    $totalMonths = ($yearDelta * 12) + $monthDelta;
+    return max(0, (int) floor($totalMonths / max(1, $interval)));
+}
+
+function build_recurrence_exception_candidate_dates(array $recurrence, array $options = []): array
+{
+    $startsOn = normalize_occurrence_date_input($recurrence['starts_on'] ?? null);
+    if ($startsOn === null) {
+        return [];
+    }
+
+    $today = normalize_occurrence_date_input($options['today'] ?? null);
+    if ($today === null) {
+        $today = (new DateTimeImmutable('now', new DateTimeZone('America/New_York')))->format('Y-m-d');
+    }
+
+    $desiredCount = array_key_exists('max_count', $options)
+        ? max(1, (int) $options['max_count'])
+        : 24;
+    $frequency = strtolower(trim((string) ($recurrence['frequency'] ?? 'weekly')));
+    $interval = max(1, (int) ($recurrence['interval'] ?? 1));
+    $cycleSize = recurrence_preview_cycle_size($recurrence);
+    $cycleDistance = recurrence_preview_cycle_distance($startsOn, $today, $frequency, $interval);
+    $estimatedMaxCount = max(
+        $desiredCount + 4,
+        (($cycleDistance + $desiredCount + 8) * max(1, $cycleSize)) + 4
+    );
+
+    try {
+        $startDate = new DateTimeImmutable($startsOn . ' 00:00:00');
+        $todayDate = new DateTimeImmutable($today . ' 00:00:00');
+        $daysSinceStart = max(0, (int) $startDate->diff($todayDate)->format('%a'));
+    } catch (Throwable $error) {
+        $daysSinceStart = 0;
+    }
+
+    $forwardWindowDays = $frequency === 'monthly' ? 540 : 210;
+    $defaultHorizonDays = max(
+        resolve_recurrence_default_horizon_days($recurrence),
+        $daysSinceStart + $forwardWindowDays
+    );
+
+    $dates = build_recurrence_dates($recurrence, [], [
+        'default_horizon_days' => $defaultHorizonDays,
+        'max_count' => $estimatedMaxCount,
+    ]);
+
+    $upcomingDates = array_values(array_filter($dates, static function ($date) use ($today): bool {
+        return is_string($date) && strcmp($date, $today) >= 0;
+    }));
+
+    return array_slice($upcomingDates, 0, $desiredCount);
+}
+
+function resolve_recurrence_first_occurrence_date(array $recurrence, array $exceptions = []): ?string
+{
+    $dates = build_recurrence_dates($recurrence, $exceptions, ['max_count' => 1]);
+    return $dates[0] ?? null;
+}
+
+function recurrence_generated_change_note_prefix(): string
+{
+    return 'generated by recurrence|';
+}
+
+function recurrence_generated_change_note_for_date(string $date): string
+{
+    return recurrence_generated_change_note_prefix() . $date;
+}
+
+function event_is_generated_recurrence_child(array $event): bool
+{
+    $changeNote = trim((string) ($event['change_note'] ?? ''));
+    return $changeNote !== '' && strpos($changeNote, recurrence_generated_change_note_prefix()) === 0;
+}
+
+function event_is_sync_managed_recurrence_child(array $event): bool
+{
+    if (event_is_generated_recurrence_child($event)) {
+        return true;
+    }
+    return !empty($event['series_master_id']) && trim((string) ($event['change_note'] ?? '')) === 'imported from events.json';
+}
+
+function recurrence_child_date_key(array $child): ?string
+{
+    $dateKey = $child['event_date'] ?? null;
+    if (!$dateKey && !empty($child['start_datetime'])) {
+        $dateKey = substr((string) $child['start_datetime'], 0, 10);
+    }
+    $normalized = normalize_occurrence_date_input($dateKey);
+    return $normalized !== null ? $normalized : null;
+}
+
+function fetch_recurrence_children(PDO $pdo, int $masterId): array
+{
+    $childrenStmt = $pdo->prepare("
+        SELECT e.*,
+               EXISTS(SELECT 1 FROM seat_requests sr WHERE sr.event_id = e.id LIMIT 1) AS has_seat_requests
+        FROM events e
+        WHERE e.series_master_id = ? AND e.deleted_at IS NULL
+        ORDER BY COALESCE(e.event_date, DATE(e.start_datetime)) ASC, e.start_datetime ASC, e.id ASC
+    ");
+    $childrenStmt->execute([$masterId]);
+    return $childrenStmt->fetchAll() ?: [];
+}
+
+function archive_generated_recurrence_children(PDO $pdo, array $children, array $targetDateSet, string $today): int
+{
+    $archived = 0;
+    foreach ($children as $child) {
+        if (!event_is_sync_managed_recurrence_child($child)) {
+            continue;
+        }
+        $dateKey = recurrence_child_date_key($child);
+        if (!$dateKey || isset($targetDateSet[$dateKey]) || $dateKey < $today) {
+            continue;
+        }
+        if (!empty($child['has_seat_requests'])) {
+            continue;
+        }
+        soft_archive_recurrence_child($pdo, (int) $child['id']);
+        $archived++;
+    }
+    return $archived;
+}
+
+function cleanup_disabled_recurrence_children(PDO $pdo, int $masterId): array
+{
+    $masterStmt = $pdo->prepare('SELECT * FROM events WHERE id = ? LIMIT 1 FOR UPDATE');
+    $masterStmt->execute([$masterId]);
+    $master = $masterStmt->fetch();
+    if (!$master) {
+        throw new RuntimeException('Recurring series master not found.');
+    }
+
+    $today = (new DateTimeImmutable('now', new DateTimeZone((string) ($master['timezone'] ?? 'America/New_York'))))->format('Y-m-d');
+    $children = fetch_recurrence_children($pdo, $masterId);
+    $archived = archive_generated_recurrence_children($pdo, $children, [], $today);
+
+    return [
+        'created' => 0,
+        'updated' => 0,
+        'archived' => $archived,
+        'skipped_existing' => 0,
+    ];
+}
+
+function recurrence_rule_payload_json(array $recurrence): string
+{
+    $frequency = strtolower(trim((string) ($recurrence['frequency'] ?? 'weekly')));
+    $payload = [
+        'generator' => 'series_instances',
+        'horizon_days' => resolve_recurrence_default_horizon_days($recurrence),
+        'sync_generated_children' => true,
+        'frequency' => $frequency,
+        'interval' => max(1, (int) ($recurrence['interval'] ?? 1)),
+        'byweekday' => recurrence_weekday_csv($recurrence['byweekday_set'] ?? $recurrence['byweekday'] ?? null),
+        'byweekday_set' => normalize_recurrence_weekday_tokens($recurrence['byweekday_set'] ?? $recurrence['byweekday'] ?? null),
+        'bymonthday' => recurrence_monthday_csv($recurrence['bymonthday_set'] ?? $recurrence['bymonthday'] ?? null),
+        'bymonthday_set' => normalize_recurrence_monthday_values($recurrence['bymonthday_set'] ?? $recurrence['bymonthday'] ?? null),
+        'bysetpos' => recurrence_setpos_csv($recurrence['bysetpos_set'] ?? $recurrence['bysetpos'] ?? null),
+        'bysetpos_set' => normalize_recurrence_setpos_values($recurrence['bysetpos_set'] ?? $recurrence['bysetpos'] ?? null),
+        'setpos' => normalize_recurrence_setpos_values($recurrence['bysetpos_set'] ?? $recurrence['bysetpos'] ?? null),
+        'monthly_mode' => $frequency === 'monthly'
+            ? strtolower(trim((string) ($recurrence['monthly_mode'] ?? (normalize_recurrence_monthday_values($recurrence['bymonthday_set'] ?? $recurrence['bymonthday'] ?? null) ? 'day_of_month' : 'nth_weekday'))))
+            : null,
+    ];
+    return json_encode($payload);
+}
+
+function recurrence_rule_row_to_payload(array $row): ?array
+{
+    $startsOn = normalize_occurrence_date_input($row['starts_on'] ?? null);
+    $payload = [];
+    if (!empty($row['rule_payload'])) {
+        $decoded = json_decode((string) $row['rule_payload'], true);
+        if (is_array($decoded)) {
+            $payload = $decoded;
+        }
+    }
+    $frequency = strtolower(trim((string) ($row['frequency'] ?? ($payload['frequency'] ?? 'weekly')))) ?: 'weekly';
+    $byweekdaySet = normalize_recurrence_weekday_tokens($row['byweekday'] ?? ($payload['byweekday_set'] ?? ($payload['byweekday'] ?? null)));
+    $bymonthdaySet = normalize_recurrence_monthday_values($row['bymonthday'] ?? ($payload['bymonthday_set'] ?? ($payload['bymonthday'] ?? null)));
+    $bysetposSet = normalize_recurrence_setpos_values($row['bysetpos'] ?? ($payload['bysetpos_set'] ?? ($payload['bysetpos'] ?? ($payload['setpos'] ?? null))));
+    $byweekday = $byweekdaySet ? implode(',', $byweekdaySet) : null;
+    $bymonthday = $bymonthdaySet ? implode(',', $bymonthdaySet) : null;
+    $bysetpos = $bysetposSet ? implode(',', $bysetposSet) : null;
+    if ($startsOn === null) {
+        return null;
+    }
+    $monthlyMode = strtolower(trim((string) ($payload['monthly_mode'] ?? '')));
+    if ($frequency === 'monthly') {
+        if ($monthlyMode === '') {
+            $monthlyMode = $bymonthday !== null ? 'day_of_month' : 'nth_weekday';
+        }
+        if ($monthlyMode === 'day_of_month') {
+            if ($bymonthday === null) {
+                return null;
+            }
+        } else {
+            $monthlyMode = 'nth_weekday';
+            if ($byweekday === null || $bysetpos === null) {
+                return null;
+            }
+        }
+    } elseif ($byweekday === null) {
+        return null;
+    }
+    return [
+        'enabled' => true,
+        'frequency' => $frequency,
+        'interval' => max(1, (int) ($row['interval'] ?? 1)),
+        'byweekday' => $byweekday,
+        'byweekday_set' => $byweekdaySet,
+        'bymonthday' => $bymonthday,
+        'bymonthday_set' => $bymonthdaySet,
+        'bysetpos' => $bysetpos,
+        'bysetpos_set' => $bysetposSet,
+        'monthly_mode' => $frequency === 'monthly' ? $monthlyMode : null,
+        'starts_on' => $startsOn,
+        'ends_on' => normalize_occurrence_date_input($row['ends_on'] ?? null),
+        'exceptions_provided' => false,
+        'exceptions' => [],
+    ];
+}
+
+function upsert_event_recurrence_rule(PDO $pdo, int $eventId, array $recurrence, string $actor = 'api'): ?int
+{
+    if (empty($recurrence['enabled'])) {
+        $stmt = $pdo->prepare('DELETE FROM event_recurrence_rules WHERE event_id = ?');
+        $stmt->execute([$eventId]);
+        return null;
+    }
+    $existingStmt = $pdo->prepare('SELECT id FROM event_recurrence_rules WHERE event_id = ? LIMIT 1');
+    $existingStmt->execute([$eventId]);
+    $existingId = $existingStmt->fetchColumn();
+    $payloadJson = recurrence_rule_payload_json($recurrence);
+    $byweekday = recurrence_weekday_csv($recurrence['byweekday_set'] ?? $recurrence['byweekday'] ?? null);
+    $bymonthday = recurrence_monthday_csv($recurrence['bymonthday_set'] ?? $recurrence['bymonthday'] ?? null);
+    $bysetpos = recurrence_setpos_csv($recurrence['bysetpos_set'] ?? $recurrence['bysetpos'] ?? null);
+    $frequency = strtolower(trim((string) ($recurrence['frequency'] ?? 'weekly'))) ?: 'weekly';
+    if ($existingId) {
+        $stmt = $pdo->prepare('UPDATE event_recurrence_rules SET frequency = ?, `interval` = ?, byweekday = ?, bymonthday = ?, bysetpos = ?, starts_on = ?, ends_on = ?, rule_payload = ?, updated_by = ?, change_note = ? WHERE id = ?');
+        $stmt->execute([
+            $frequency,
+            max(1, (int) ($recurrence['interval'] ?? 1)),
+            $byweekday,
+            $bymonthday,
+            $bysetpos,
+            $recurrence['starts_on'],
+            $recurrence['ends_on'] ?? null,
+            $payloadJson,
+            $actor,
+            'updated via recurrence workflow',
+            $existingId,
+        ]);
+        return (int) $existingId;
+    }
+    $stmt = $pdo->prepare('INSERT INTO event_recurrence_rules (event_id, frequency, `interval`, byweekday, bymonthday, bysetpos, starts_on, ends_on, rule_payload, created_by, updated_by, change_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([
+        $eventId,
+        $frequency,
+        max(1, (int) ($recurrence['interval'] ?? 1)),
+        $byweekday,
+        $bymonthday,
+        $bysetpos,
+        $recurrence['starts_on'],
+        $recurrence['ends_on'] ?? null,
+        $payloadJson,
+        $actor,
+        $actor,
+        'created via recurrence workflow',
+    ]);
+    return (int) $pdo->lastInsertId();
+}
+
+function replace_recurrence_exceptions(PDO $pdo, int $recurrenceId, array $exceptions, string $actor = 'api'): array
+{
+    $deleteStmt = $pdo->prepare('DELETE FROM event_recurrence_exceptions WHERE recurrence_id = ?');
+    $deleteStmt->execute([$recurrenceId]);
+    if (!$exceptions) {
+        return [];
+    }
+
+    $insertStmt = $pdo->prepare('INSERT INTO event_recurrence_exceptions (recurrence_id, exception_date, exception_type, override_payload, notes, created_by) VALUES (?, ?, ?, ?, ?, ?)');
+    foreach ($exceptions as $exception) {
+        $row = normalize_recurrence_exception_row_to_payload(is_array($exception) ? $exception : []);
+        $insertStmt->execute([
+            $recurrenceId,
+            $row['exception_date'],
+            $row['exception_type'],
+            $row['override_payload'] ? json_encode($row['override_payload']) : null,
+            $row['notes'] ?? null,
+            $actor,
+        ]);
+    }
+
+    return load_recurrence_exceptions($pdo, $recurrenceId);
+}
+
+function build_recurrence_child_schedule(array $master, string $occurrenceDate): ?array
+{
+    $timezone = (string) ($master['timezone'] ?? 'America/New_York');
+    $eventTime = normalize_occurrence_time_input($master['event_time'] ?? null);
+    if ($eventTime === null) {
+        $start = resolve_event_start_datetime($master);
+        $eventTime = $start ? $start->format('H:i:s') : null;
+    }
+    if ($eventTime === null) {
+        return null;
+    }
+    $startDt = build_event_start_datetime($occurrenceDate, $eventTime, $timezone);
+    if (!$startDt) {
+        return null;
+    }
+    $durationSeconds = resolve_event_duration_seconds($master);
+    $doorTimeOfDay = extract_time_of_day_from_value($master['door_time'] ?? null, $timezone);
+    return [
+        'event_date' => $occurrenceDate,
+        'event_time' => $eventTime,
+        'start_datetime' => $startDt->format('Y-m-d H:i:s'),
+        'end_datetime' => $startDt->modify('+' . max(3600, $durationSeconds) . ' seconds')->format('Y-m-d H:i:s'),
+        'door_time' => $doorTimeOfDay ? build_occurrence_door_datetime($occurrenceDate, $doorTimeOfDay, $timezone) : null,
+    ];
+}
+
+function recurrence_child_slug_base(array $master, string $occurrenceDate): string
+{
+    $base = $master['slug'] ?? null;
+    if (!is_string($base) || trim($base) === '') {
+        $base = $master['title'] ?? $master['artist_name'] ?? 'recurring-event';
+    }
+    return slugify_string($base . '-' . str_replace('-', '', $occurrenceDate));
+}
+
+function recurrence_child_columns_from_master(array $master, int $masterId, string $occurrenceDate, array $schedule, PDO $pdo, ?int $childId = null): array
+{
+    $slug = ensure_unique_slug($pdo, recurrence_child_slug_base($master, $occurrenceDate), $childId);
+    $status = trim((string) ($master['status'] ?? 'draft'));
+    if (!in_array($status, ['draft', 'published', 'archived'], true)) {
+        $status = 'draft';
+    }
+    $visibility = trim((string) ($master['visibility'] ?? 'private'));
+    if (!in_array($visibility, ['public', 'private'], true)) {
+        $visibility = 'private';
+    }
+    if ($status === 'archived') {
+        $visibility = 'private';
+    }
+    $publishAt = $master['publish_at'] ?? null;
+    if (($publishAt === null || $publishAt === '') && $status === 'published') {
+        $publishAt = $schedule['start_datetime'];
+    }
+    $columns = [
+        'artist_name' => $master['artist_name'] ?? null,
+        'title' => $master['title'] ?? null,
+        'slug' => $slug,
+        'description' => $master['description'] ?? null,
+        'notes' => $master['notes'] ?? null,
+        'genre' => $master['genre'] ?? null,
+        'category_tags' => $master['category_tags'] ?? null,
+        'category_id' => $master['category_id'] ?? null,
+        'image_url' => $master['image_url'] ?? null,
+        'hero_image_id' => $master['hero_image_id'] ?? null,
+        'poster_image_id' => $master['poster_image_id'] ?? null,
+        'ticket_price' => $master['ticket_price'] ?? null,
+        'door_price' => $master['door_price'] ?? null,
+        'min_ticket_price' => $master['min_ticket_price'] ?? null,
+        'max_ticket_price' => $master['max_ticket_price'] ?? null,
+        'pricing_config' => $master['pricing_config'] ?? null,
+        'ticket_type' => $master['ticket_type'] ?? 'general_admission',
+        'seating_enabled' => !empty($master['seating_enabled']) ? 1 : 0,
+        'venue_code' => $master['venue_code'] ?? 'MMH',
+        'venue_section' => $master['venue_section'] ?? null,
+        'timezone' => $master['timezone'] ?? 'America/New_York',
+        'start_datetime' => $schedule['start_datetime'],
+        'end_datetime' => $schedule['end_datetime'],
+        'door_time' => $schedule['door_time'],
+        'event_date' => $schedule['event_date'],
+        'event_time' => $schedule['event_time'],
+        'age_restriction' => $master['age_restriction'] ?? 'All Ages',
+        'status' => $status,
+        'visibility' => $visibility,
+        'publish_at' => $publishAt,
+        'layout_id' => $master['layout_id'] ?? null,
+        'layout_version_id' => $master['layout_version_id'] ?? null,
+        'series_master_id' => $masterId,
+        'is_series_master' => 0,
+        'ticket_url' => $master['ticket_url'] ?? null,
+        'contact_name' => $master['contact_name'] ?? null,
+        'contact_phone_raw' => $master['contact_phone_raw'] ?? null,
+        'contact_phone_normalized' => $master['contact_phone_normalized'] ?? null,
+        'contact_email' => $master['contact_email'] ?? null,
+        'contact_notes' => $master['contact_notes'] ?? null,
+        'seat_request_email_override' => $master['seat_request_email_override'] ?? null,
+        'payment_enabled' => !empty($master['payment_enabled']) ? 1 : 0,
+        'change_note' => recurrence_generated_change_note_for_date($occurrenceDate),
+        'updated_by' => 'api',
+    ];
+    if ($childId === null) {
+        $columns['created_by'] = 'api';
+    }
+    return $columns;
+}
+
+function soft_archive_recurrence_child(PDO $pdo, int $childId): void
+{
+    $stmt = $pdo->prepare('UPDATE events SET deleted_at = NOW(), status = ?, visibility = ?, updated_by = ?, change_note = ? WHERE id = ?');
+    $stmt->execute([
+        'archived',
+        'private',
+        'api',
+        'archived by recurrence sync',
+        $childId,
+    ]);
+}
+
+function sync_generated_recurrence_children(PDO $pdo, int $masterId, array $recurrence, ?int $recurrenceId = null, ?array $exceptions = null): array
+{
+    if (empty($recurrence['enabled'])) {
+        return ['created' => 0, 'updated' => 0, 'archived' => 0, 'skipped_existing' => 0];
+    }
+    // Lock the master row so recurrence sync remains serialized per series.
+    $masterStmt = $pdo->prepare('SELECT * FROM events WHERE id = ? LIMIT 1 FOR UPDATE');
+    $masterStmt->execute([$masterId]);
+    $master = $masterStmt->fetch();
+    if (!$master) {
+        throw new RuntimeException('Recurring series master not found.');
+    }
+
+    if ($recurrenceId === null) {
+        $ruleStmt = $pdo->prepare('SELECT id FROM event_recurrence_rules WHERE event_id = ? LIMIT 1');
+        $ruleStmt->execute([$masterId]);
+        $recurrenceId = (int) ($ruleStmt->fetchColumn() ?: 0);
+    }
+    if ($exceptions === null && $recurrenceId > 0) {
+        $exceptions = load_recurrence_exceptions($pdo, $recurrenceId);
+    }
+
+    $targetDates = build_recurrence_dates($recurrence, $exceptions ?: []);
+    if (!$targetDates) {
+        return ['created' => 0, 'updated' => 0, 'archived' => 0, 'skipped_existing' => 0];
+    }
+
+    $children = fetch_recurrence_children($pdo, $masterId);
+
+    $today = (new DateTimeImmutable('now', new DateTimeZone((string) ($master['timezone'] ?? 'America/New_York'))))->format('Y-m-d');
+    $allChildrenByDate = [];
+    $generatedChildrenByDate = [];
+    foreach ($children as $child) {
+        $dateKey = recurrence_child_date_key($child);
+        if (!$dateKey) {
+            continue;
+        }
+        if (!isset($allChildrenByDate[$dateKey])) {
+            $allChildrenByDate[$dateKey] = [];
+        }
+        $allChildrenByDate[$dateKey][] = $child;
+        if (event_is_sync_managed_recurrence_child($child) && !isset($generatedChildrenByDate[$dateKey])) {
+            $generatedChildrenByDate[$dateKey] = $child;
+        }
+    }
+
+    $created = 0;
+    $updated = 0;
+    $skippedExisting = 0;
+    $targetDateSet = array_fill_keys($targetDates, true);
+
+    foreach ($targetDates as $occurrenceDate) {
+        $schedule = build_recurrence_child_schedule($master, $occurrenceDate);
+        if (!$schedule) {
+            continue;
+        }
+        if ($occurrenceDate < $today && empty($allChildrenByDate[$occurrenceDate])) {
+            continue;
+        }
+        if (isset($generatedChildrenByDate[$occurrenceDate])) {
+            $child = $generatedChildrenByDate[$occurrenceDate];
+            $columns = recurrence_child_columns_from_master($master, $masterId, $occurrenceDate, $schedule, $pdo, (int) $child['id']);
+            $assignments = implode(', ', array_map(static function ($column): string {
+                return $column . ' = ?';
+            }, array_keys($columns)));
+            $stmt = $pdo->prepare('UPDATE events SET ' . $assignments . ' WHERE id = ?');
+            $values = array_values($columns);
+            $values[] = (int) $child['id'];
+            $stmt->execute($values);
+            $updated++;
+            continue;
+        }
+        if (!empty($allChildrenByDate[$occurrenceDate])) {
+            $skippedExisting++;
+            continue;
+        }
+        $columns = recurrence_child_columns_from_master($master, $masterId, $occurrenceDate, $schedule, $pdo, null);
+        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+        $stmt = $pdo->prepare('INSERT INTO events (' . implode(', ', array_keys($columns)) . ') VALUES (' . $placeholders . ')');
+        $stmt->execute(array_values($columns));
+        $created++;
+    }
+
+    $archived = archive_generated_recurrence_children($pdo, $children, $targetDateSet, $today);
+
+    return [
+        'created' => $created,
+        'updated' => $updated,
+        'archived' => $archived,
+        'skipped_existing' => $skippedExisting,
+    ];
+}
+
 function event_categories_table_exists(PDO $pdo): bool
 {
     static $exists = null;
@@ -5178,17 +6517,65 @@ $router->add('POST', '/api/events', function (Request $request) {
         if ($occurrencesPayload && !$hasOccurrencesTable) {
             return Response::error('Run database/20251212_schema_upgrade.sql to enable multi-day events.', 422);
         }
+        $recurrenceError = null;
+        $recurrence = normalize_recurrence_request_payload($payload['recurrence'] ?? null, $recurrenceError);
+        if ($recurrenceError !== null) {
+            return Response::error($recurrenceError, 422);
+        }
+        if ($recurrence && !empty($recurrence['enabled']) && $occurrencesPayload) {
+            return Response::error('Recurring generation cannot be combined with multi-day occurrences.', 422);
+        }
+        $isSeriesMaster = array_key_exists('is_series_master', $payload) ? !empty($payload['is_series_master']) : false;
+        if ($recurrence && !empty($recurrence['enabled'])) {
+            $isSeriesMaster = true;
+        }
         $eventDate = isset($payload['event_date']) ? trim((string) $payload['event_date']) : null;
         $eventTime = isset($payload['event_time']) ? trim((string) $payload['event_time']) : null;
         $eventDate = $eventDate !== '' ? $eventDate : null;
         $eventTime = $eventTime !== '' ? $eventTime : null;
+        if ($eventDate === null && $recurrence && !empty($recurrence['enabled'])) {
+            $eventDate = $recurrence['starts_on'];
+        }
+        $hasExplicitScheduleInput = $occurrencesInputProvided;
+        foreach (['start_datetime', 'event_date', 'event_time', 'door_time', 'end_datetime'] as $scheduleField) {
+            if (!array_key_exists($scheduleField, $payload)) {
+                continue;
+            }
+            $value = $payload[$scheduleField];
+            if (is_string($value)) {
+                if (trim($value) !== '') {
+                    $hasExplicitScheduleInput = true;
+                    break;
+                }
+                continue;
+            }
+            if ($value !== null) {
+                $hasExplicitScheduleInput = true;
+                break;
+            }
+        }
+        $allowMissingSchedule = $isSeriesMaster && !$hasExplicitScheduleInput && !($recurrence['enabled'] ?? false);
         $doorTimeRaw = $payload['door_time'] ?? null;
         $doorTime = normalize_door_time_input($doorTimeRaw);
-        if (!$occurrencesPayload && $doorTime === null) {
+        if (!$occurrencesPayload && $doorTime === null && !$allowMissingSchedule) {
             return Response::error('door_time is required and must include a valid date and time.', 422);
         }
         if ($occurrencesPayload && $doorTime === null && $doorTimeRaw !== null && trim((string) $doorTimeRaw) !== '') {
             return Response::error('door_time must include a valid date and time when provided.', 422);
+        }
+        $recurrenceExceptions = $recurrence && !empty($recurrence['enabled'])
+            ? ($recurrence['exceptions'] ?? [])
+            : [];
+        if ($recurrence && !empty($recurrence['enabled'])) {
+            $firstOccurrenceDate = resolve_recurrence_first_occurrence_date($recurrence, $recurrenceExceptions);
+            if ($firstOccurrenceDate === null) {
+                return Response::error('Unable to resolve the first recurring date from recurrence settings.', 422);
+            }
+            $eventDate = $firstOccurrenceDate;
+            $doorTimeOfDay = extract_time_of_day_from_value($doorTime, $timezone);
+            if ($doorTimeOfDay !== null) {
+                $doorTime = build_occurrence_door_datetime($eventDate, $doorTimeOfDay, $timezone);
+            }
         }
         $startInput = $payload['start_datetime'] ?? null;
         $startDt = null;
@@ -5204,7 +6591,7 @@ $router->add('POST', '/api/events', function (Request $request) {
                 return Response::error('Invalid event_date or event_time value', 422);
             }
         }
-        if (!$startDt && !$occurrencesPayload) {
+        if (!$startDt && !$occurrencesPayload && !$allowMissingSchedule) {
             return Response::error('event_date and event_time are required', 422);
         }
         $endInput = $payload['end_datetime'] ?? null;
@@ -5367,6 +6754,8 @@ $router->add('POST', '/api/events', function (Request $request) {
             'publish_at' => $publishAt,
             'layout_id' => $layoutId,
             'layout_version_id' => $layoutVersionId,
+            'series_master_id' => null,
+            'is_series_master' => $isSeriesMaster ? 1 : 0,
             'ticket_url' => $payload['ticket_url'] ?? null,
             'contact_name' => $payload['contact_name'] ?? null,
             'contact_phone_raw' => $contactPhoneRaw,
@@ -5396,6 +6785,13 @@ $router->add('POST', '/api/events', function (Request $request) {
         $stmt->execute(array_values($insertColumns));
         $id = (int)$pdo->lastInsertId();
         save_event_series_meta($pdo, $id, $seriesScheduleLabel, $seriesSummary, $seriesFooter);
+        $recurrenceId = upsert_event_recurrence_rule($pdo, $id, $recurrence ?? ['enabled' => false], 'api');
+        if ($recurrenceId && $recurrence && ($recurrence['exceptions_provided'] ?? false)) {
+            $recurrenceExceptions = replace_recurrence_exceptions($pdo, $recurrenceId, $recurrence['exceptions'] ?? [], 'api');
+        }
+        $recurrenceSync = $recurrenceId
+            ? sync_generated_recurrence_children($pdo, $id, $recurrence, $recurrenceId, $recurrenceExceptions ?? [])
+            : null;
         if ($hasOccurrencesTable && $startString !== null) {
             $syncPayload = $occurrencesPayload ?: [[
                 'occurrence_date' => $eventDate,
@@ -5415,6 +6811,9 @@ $router->add('POST', '/api/events', function (Request $request) {
             'venue' => $venueCode,
             'category_id' => $categoryId,
             'seating_enabled' => (bool) $seatingEnabled,
+            'is_series_master' => $isSeriesMaster,
+            'recurrence_id' => $recurrenceId,
+            'recurrence_sync' => $recurrenceSync,
         ]);
         Response::success(['id' => $id, 'slug' => $slug]);
     } catch (Throwable $e) {
@@ -5456,7 +6855,35 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         if ($occurrencesPayload && !$hasOccurrencesTable) {
             return Response::error('Run database/20251212_schema_upgrade.sql to enable multi-day events.', 422);
         }
-        $isSeriesMaster = !empty($existing['is_series_master']);
+        $recurrenceInputProvided = array_key_exists('recurrence', $payload);
+        $recurrenceError = null;
+        $recurrence = $recurrenceInputProvided
+            ? normalize_recurrence_request_payload($payload['recurrence'] ?? null, $recurrenceError)
+            : null;
+        if ($recurrenceInputProvided && $recurrenceError !== null) {
+            return Response::error($recurrenceError, 422);
+        }
+        $existingRecurrenceStmt = $pdo->prepare('SELECT * FROM event_recurrence_rules WHERE event_id = ? LIMIT 1');
+        $existingRecurrenceStmt->execute([$eventId]);
+        $existingRecurrenceRow = $existingRecurrenceStmt->fetch() ?: null;
+        $existingRecurrenceExceptions = $existingRecurrenceRow
+            ? load_recurrence_exceptions($pdo, (int) $existingRecurrenceRow['id'])
+            : [];
+        $activeRecurrence = $recurrenceInputProvided
+            ? $recurrence
+            : ($existingRecurrenceRow ? recurrence_rule_row_to_payload($existingRecurrenceRow) : null);
+        $activeRecurrenceExceptions = ($recurrenceInputProvided && $recurrence && ($recurrence['exceptions_provided'] ?? false))
+            ? ($recurrence['exceptions'] ?? [])
+            : $existingRecurrenceExceptions;
+        if ($activeRecurrence && !empty($activeRecurrence['enabled']) && $occurrencesPayload) {
+            return Response::error('Recurring generation cannot be combined with multi-day occurrences.', 422);
+        }
+        $isSeriesMaster = array_key_exists('is_series_master', $payload)
+            ? !empty($payload['is_series_master'])
+            : !empty($existing['is_series_master']);
+        if ($activeRecurrence && !empty($activeRecurrence['enabled'])) {
+            $isSeriesMaster = true;
+        }
         $hasExplicitScheduleInput = $occurrencesInputProvided;
         foreach (['start_datetime', 'event_date', 'event_time', 'door_time', 'end_datetime'] as $scheduleField) {
             if (!array_key_exists($scheduleField, $payload)) {
@@ -5478,7 +6905,7 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $multiDayEnabled = array_key_exists('multi_day_enabled', $payload)
             ? !empty($payload['multi_day_enabled'])
             : ($existingIsMultiDay || count($occurrencesPayload) > 1);
-        $allowMissingSchedule = $isSeriesMaster && !$hasExplicitScheduleInput;
+        $allowMissingSchedule = $isSeriesMaster && !$hasExplicitScheduleInput && !($activeRecurrence['enabled'] ?? false);
         $artist = trim((string)($payload['artist_name'] ?? $existing['artist_name']));
         if ($artist === '') {
             return Response::error('artist_name is required', 400);
@@ -5489,6 +6916,9 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $eventTimeInput = array_key_exists('event_time', $payload) ? trim((string) $payload['event_time']) : null;
         $eventDate = $eventDateInput !== null ? ($eventDateInput !== '' ? $eventDateInput : null) : ($existing['event_date'] ?? null);
         $eventTime = $eventTimeInput !== null ? ($eventTimeInput !== '' ? $eventTimeInput : null) : ($existing['event_time'] ?? null);
+        if ($eventDate === null && $activeRecurrence && !empty($activeRecurrence['enabled'])) {
+            $eventDate = $activeRecurrence['starts_on'];
+        }
         $startInput = $payload['start_datetime'] ?? null;
         $shouldRecomputeStart = $occurrencesInputProvided
             || array_key_exists('event_date', $payload)
@@ -5521,6 +6951,12 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         if (!$startDt && !$occurrencesPayload && $eventDate && $eventTime) {
             $startDt = build_event_start_datetime($eventDate, $eventTime, $timezone);
         }
+        if ($eventDate === null && $startDt) {
+            $eventDate = $startDt->format('Y-m-d');
+        }
+        if ($eventTime === null && $startDt) {
+            $eventTime = $startDt->format('H:i:s');
+        }
         if (!$startDt && !$allowMissingSchedule && !$occurrencesPayload) {
             return Response::error('event_date and event_time are required', 422);
         }
@@ -5551,6 +6987,26 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
                 return Response::error('door_time must include a valid date and time when provided.', 422);
             }
         }
+        if ($activeRecurrence && !empty($activeRecurrence['enabled'])) {
+            $firstOccurrenceDate = resolve_recurrence_first_occurrence_date($activeRecurrence, $activeRecurrenceExceptions);
+            if ($firstOccurrenceDate === null) {
+                return Response::error('Unable to resolve the first recurring date from recurrence settings.', 422);
+            }
+            $eventDate = $firstOccurrenceDate;
+            if (!$eventTime) {
+                return Response::error('event_time is required for recurring events.', 422);
+            }
+            $startDt = build_event_start_datetime($eventDate, $eventTime, $timezone);
+            if (!$startDt) {
+                return Response::error('Invalid event_date or event_time value', 422);
+            }
+            if ($doorTime !== null) {
+                $doorTimeOfDay = extract_time_of_day_from_value($doorTime, $timezone);
+                if ($doorTimeOfDay !== null) {
+                    $doorTime = build_occurrence_door_datetime($eventDate, $doorTimeOfDay, $timezone);
+                }
+            }
+        }
         $durationSeconds = resolve_event_duration_seconds([
             'start_datetime' => $startDt ? $startDt->format('Y-m-d H:i:s') : ($existing['start_datetime'] ?? null),
             'end_datetime' => $endDt ? $endDt->format('Y-m-d H:i:s') : ($existing['end_datetime'] ?? null),
@@ -5579,6 +7035,12 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $slugInput = $payload['slug'] ?? $existing['slug'] ?? null;
         $slugBase = slugify_string($slugInput ?? ($title . ($startDt ? '-' . $startDt->format('Ymd') : '')));
         $slug = ensure_unique_slug($pdo, $slugBase, $eventId);
+        $seriesMasterId = array_key_exists('series_master_id', $payload)
+            ? normalize_nullable_int($payload['series_master_id'])
+            : normalize_nullable_int($existing['series_master_id'] ?? null);
+        if ($isSeriesMaster) {
+            $seriesMasterId = null;
+        }
         $venueCode = strtoupper(trim((string)($payload['venue_code'] ?? $existing['venue_code'] ?? 'MMH')));
         if (!in_array($venueCode, ['MMH','TGP'], true)) {
             $venueCode = $existing['venue_code'] ?? 'MMH';
@@ -5799,6 +7261,8 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             'publish_at' => array_key_exists('publish_at', $payload) ? $payload['publish_at'] : $existing['publish_at'],
             'layout_id' => $layoutId,
             'layout_version_id' => $layoutVersionId,
+            'series_master_id' => $seriesMasterId,
+            'is_series_master' => $isSeriesMaster ? 1 : 0,
             'ticket_url' => $valueOrExisting('ticket_url', 'normalize_nullable_text'),
             'contact_name' => $valueOrExisting('contact_name', 'normalize_nullable_text'),
             'contact_phone_raw' => $contactPhoneRaw,
@@ -5830,6 +7294,29 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
         $values[] = $eventId;
         $stmt->execute($values);
         save_event_series_meta($pdo, $eventId, $seriesScheduleLabel, $seriesSummary, $seriesFooter);
+        $recurrenceId = $existingRecurrenceRow ? (int) $existingRecurrenceRow['id'] : null;
+        $recurrenceSync = null;
+        if ($recurrenceInputProvided) {
+            $recurrenceId = upsert_event_recurrence_rule($pdo, $eventId, $activeRecurrence ?? ['enabled' => false], 'api');
+            if ($recurrenceId && $activeRecurrence && !empty($activeRecurrence['enabled'])) {
+                if ($activeRecurrence['exceptions_provided'] ?? false) {
+                    $activeRecurrenceExceptions = replace_recurrence_exceptions($pdo, $recurrenceId, $activeRecurrence['exceptions'] ?? [], 'api');
+                } else {
+                    $activeRecurrenceExceptions = load_recurrence_exceptions($pdo, $recurrenceId);
+                }
+                $recurrenceSync = sync_generated_recurrence_children($pdo, $eventId, $activeRecurrence, $recurrenceId, $activeRecurrenceExceptions);
+            } elseif ($existingRecurrenceRow) {
+                $recurrenceSync = cleanup_disabled_recurrence_children($pdo, $eventId);
+            }
+        } elseif ($activeRecurrence && !empty($activeRecurrence['enabled']) && $isSeriesMaster) {
+            $recurrenceSync = sync_generated_recurrence_children(
+                $pdo,
+                $eventId,
+                $activeRecurrence,
+                $existingRecurrenceRow ? (int) $existingRecurrenceRow['id'] : null,
+                $activeRecurrenceExceptions
+            );
+        }
         if ($syncOccurrencePayload !== null) {
             $syncError = null;
             $syncResult = sync_event_occurrences($pdo, $eventId, $syncOccurrencePayload, $timezone, $doorTime, $durationSeconds, $syncError);
@@ -5848,6 +7335,10 @@ $router->add('PUT', '/api/events/:id', function (Request $request, $params) {
             'seating_snapshot_id' => $snapshotMeta['id'] ?? null,
             'layout_id' => $layoutId,
             'layout_version_id' => $layoutVersionId,
+            'series_master_id' => $seriesMasterId,
+            'is_series_master' => $isSeriesMaster,
+            'recurrence_id' => $recurrenceId,
+            'recurrence_sync' => $recurrenceSync,
         ]);
         Response::success([
             'id' => $eventId,
@@ -6023,8 +7514,21 @@ $router->add('GET', '/api/events/:id/recurrence', function ($request, $params) {
         if (!$rule) {
             return Response::success(['recurrence' => null]);
         }
-        $exStmt = Database::run('SELECT * FROM event_recurrence_exceptions WHERE recurrence_id = ? ORDER BY exception_date ASC', [$rule['id']]);
-        $exceptions = $exStmt->fetchAll() ?: [];
+        $normalizedRule = recurrence_rule_row_to_payload($rule);
+        if ($normalizedRule) {
+            $rule['frequency'] = $normalizedRule['frequency'];
+            $rule['interval'] = $normalizedRule['interval'];
+            $rule['byweekday'] = $normalizedRule['byweekday'];
+            $rule['byweekday_set'] = $normalizedRule['byweekday_set'];
+            $rule['bymonthday'] = $normalizedRule['bymonthday'];
+            $rule['bymonthday_set'] = $normalizedRule['bymonthday_set'];
+            $rule['bysetpos'] = $normalizedRule['bysetpos'];
+            $rule['bysetpos_set'] = $normalizedRule['bysetpos_set'];
+            $rule['monthly_mode'] = $normalizedRule['monthly_mode'];
+            $rule['starts_on'] = $normalizedRule['starts_on'];
+            $rule['ends_on'] = $normalizedRule['ends_on'];
+        }
+        $exceptions = load_recurrence_exceptions(Database::connection(), (int) $rule['id']);
         Response::success(['recurrence' => $rule, 'exceptions' => $exceptions]);
     } catch (Throwable $e) {
         if (APP_DEBUG) {
@@ -6034,59 +7538,110 @@ $router->add('GET', '/api/events/:id/recurrence', function ($request, $params) {
     }
 });
 
-$router->add('POST', '/api/events/:id/recurrence', function (Request $request, $params) {
-    $payload = [];
+$router->add('POST', '/api/recurrence/preview', function (Request $request) {
     try {
         $payload = read_json_body($request);
-        $frequency = strtolower($payload['frequency'] ?? 'weekly');
-        if (!in_array($frequency, ['daily','weekly','monthly','yearly','custom'], true)) {
-            $frequency = 'weekly';
+        $recurrenceInput = is_array($payload['recurrence'] ?? null)
+            ? $payload['recurrence']
+            : $payload;
+        $recurrenceError = null;
+        $recurrence = normalize_recurrence_request_payload($recurrenceInput, $recurrenceError);
+        if ($recurrenceError !== null) {
+            return Response::error($recurrenceError, 422);
         }
-        $interval = max(1, (int)($payload['interval'] ?? 1));
-        $byweekday = strtoupper(trim((string)($payload['byweekday'] ?? '')));
-        $startsOn = $payload['starts_on'] ?? date('Y-m-d');
-        $rulePayload = [
-            'setpos' => $payload['setpos'] ?? null,
-            'notes' => $payload['notes'] ?? null,
-        ];
-        $stmt = Database::run('SELECT id FROM event_recurrence_rules WHERE event_id = ? LIMIT 1', [$params['id']]);
-        $existing = $stmt->fetchColumn();
-        if ($existing) {
-            Database::run('UPDATE event_recurrence_rules SET frequency = ?, interval = ?, byweekday = ?, starts_on = ?, ends_on = ?, rule_payload = ?, updated_by = ? WHERE id = ?', [
-                $frequency,
-                $interval,
-                $byweekday,
-                $startsOn,
-                $payload['ends_on'] ?? null,
-                json_encode($rulePayload),
-                'api',
-                $existing
-            ]);
-            $recurrenceId = (int)$existing;
-        } else {
-            Database::run('INSERT INTO event_recurrence_rules (event_id, frequency, interval, byweekday, starts_on, ends_on, rule_payload, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [
-                $params['id'],
-                $frequency,
-                $interval,
-                $byweekday,
-                $startsOn,
-                $payload['ends_on'] ?? null,
-                json_encode($rulePayload),
-                'api',
-                'api'
-            ]);
-            $recurrenceId = (int)Database::connection()->lastInsertId();
+        if (!$recurrence || empty($recurrence['enabled'])) {
+            return Response::success(['occurrence_candidates' => []]);
         }
+        Response::success([
+            'occurrence_candidates' => build_recurrence_exception_candidate_dates($recurrence),
+        ]);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('POST /api/recurrence/preview error: ' . $e->getMessage());
+        }
+        Response::error('Failed to preview recurrence', 500);
+    }
+});
+
+$router->add('POST', '/api/events/:id/recurrence', function (Request $request, $params) {
+    try {
+        $pdo = Database::connection();
+        $eventId = (int) $params['id'];
+        $eventStmt = $pdo->prepare('SELECT * FROM events WHERE id = ? LIMIT 1');
+        $eventStmt->execute([$eventId]);
+        $event = $eventStmt->fetch();
+        if (!$event) {
+            return Response::error('Event not found', 404);
+        }
+        $payload = [];
+        $payload = read_json_body($request);
+        $recurrenceError = null;
+        $recurrence = normalize_recurrence_request_payload($payload, $recurrenceError);
+        if ($recurrenceError !== null || !$recurrence || empty($recurrence['enabled'])) {
+            return Response::error($recurrenceError ?: 'recurrence configuration is required.', 422);
+        }
+        $eventTime = trim((string) ($event['event_time'] ?? ''));
+        if ($eventTime === '' && !empty($event['start_datetime'])) {
+            $eventTime = substr((string) $event['start_datetime'], 11, 8);
+        }
+        if ($eventTime === '') {
+            return Response::error('Set an event time on the series master before saving recurrence.', 422);
+        }
+        $timezone = (string) ($event['timezone'] ?? 'America/New_York');
+        $recurrenceExceptions = $recurrence['exceptions'] ?? [];
+        $firstOccurrenceDate = resolve_recurrence_first_occurrence_date($recurrence, $recurrenceExceptions);
+        if ($firstOccurrenceDate === null) {
+            return Response::error('Unable to resolve the first recurring date from recurrence settings.', 422);
+        }
+        $startDt = build_event_start_datetime($firstOccurrenceDate, $eventTime, $timezone);
+        if (!$startDt) {
+            return Response::error('Invalid event schedule for recurring generation.', 422);
+        }
+        $doorTime = $event['door_time'] ?? null;
+        if ($doorTime !== null) {
+            $doorTimeOfDay = extract_time_of_day_from_value($doorTime, $timezone);
+            if ($doorTimeOfDay !== null) {
+                $doorTime = build_occurrence_door_datetime($firstOccurrenceDate, $doorTimeOfDay, $timezone);
+            }
+        }
+        $pdo->beginTransaction();
+        $updateMaster = $pdo->prepare('UPDATE events SET is_series_master = 1, series_master_id = NULL, start_datetime = ?, event_date = ?, event_time = ?, door_time = ?, change_note = ?, updated_by = ? WHERE id = ?');
+        $updateMaster->execute([
+            $startDt->format('Y-m-d H:i:s'),
+            $firstOccurrenceDate,
+            $eventTime,
+            $doorTime,
+            'updated via recurrence workflow',
+            'api',
+            $eventId,
+        ]);
+        $recurrenceId = upsert_event_recurrence_rule($pdo, $eventId, $recurrence, 'api');
+        if ($recurrenceId && ($recurrence['exceptions_provided'] ?? false)) {
+            $recurrenceExceptions = replace_recurrence_exceptions($pdo, $recurrenceId, $recurrence['exceptions'] ?? [], 'api');
+        } elseif ($recurrenceId) {
+            $recurrenceExceptions = load_recurrence_exceptions($pdo, $recurrenceId);
+        }
+        $syncResult = $recurrenceId
+            ? sync_generated_recurrence_children($pdo, $eventId, $recurrence, $recurrenceId, $recurrenceExceptions ?? [])
+            : null;
+        $pdo->commit();
         record_audit('recurrence.save', 'event', (int) $params['id'], [
             'recurrence_id' => $recurrenceId,
-            'frequency' => $frequency,
-            'interval' => $interval,
-            'byweekday' => $byweekday,
-            'starts_on' => $startsOn,
-            'ends_on' => $payload['ends_on'] ?? null,
+            'frequency' => $recurrence['frequency'] ?? 'weekly',
+            'interval' => $recurrence['interval'] ?? 1,
+            'byweekday' => $recurrence['byweekday'],
+            'bymonthday' => $recurrence['bymonthday'] ?? null,
+            'bysetpos' => $recurrence['bysetpos'] ?? null,
+            'starts_on' => $recurrence['starts_on'],
+            'ends_on' => $recurrence['ends_on'] ?? null,
+            'exceptions' => count($recurrenceExceptions ?? []),
+            'sync' => $syncResult,
         ]);
-        Response::success(['recurrence_id' => $recurrenceId]);
+        Response::success(['recurrence_id' => $recurrenceId, 'sync' => $syncResult]);
     } catch (Throwable $e) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         if (APP_DEBUG) {
             error_log('POST /api/events/:id/recurrence error: ' . $e->getMessage());
         }
@@ -6096,12 +7651,25 @@ $router->add('POST', '/api/events/:id/recurrence', function (Request $request, $
 
 $router->add('DELETE', '/api/events/:id/recurrence', function ($request, $params) {
     try {
-        $stmt = Database::run('DELETE FROM event_recurrence_rules WHERE event_id = ?', [$params['id']]);
+        $pdo = Database::connection();
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare('DELETE FROM event_recurrence_rules WHERE event_id = ?');
+        $stmt->execute([(int) $params['id']]);
+        $syncResult = null;
         if ($stmt->rowCount() > 0) {
-            record_audit('recurrence.delete', 'event', (int) $params['id']);
+            $syncResult = cleanup_disabled_recurrence_children($pdo, (int) $params['id']);
         }
-        Response::success(['deleted' => $stmt->rowCount()]);
+        $pdo->commit();
+        if ($stmt->rowCount() > 0) {
+            record_audit('recurrence.delete', 'event', (int) $params['id'], [
+                'sync' => $syncResult,
+            ]);
+        }
+        Response::success(['deleted' => $stmt->rowCount(), 'sync' => $syncResult]);
     } catch (Throwable $e) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         if (APP_DEBUG) {
             error_log('DELETE /api/events/:id/recurrence error: ' . $e->getMessage());
         }
@@ -6111,34 +7679,50 @@ $router->add('DELETE', '/api/events/:id/recurrence', function ($request, $params
 
 $router->add('POST', '/api/events/:id/recurrence/exceptions', function (Request $request, $params) {
     try {
-        $ruleStmt = Database::run('SELECT id FROM event_recurrence_rules WHERE event_id = ? LIMIT 1', [$params['id']]);
-        $ruleId = $ruleStmt->fetchColumn();
-        if (!$ruleId) {
+        $pdo = Database::connection();
+        $ruleStmt = $pdo->prepare('SELECT * FROM event_recurrence_rules WHERE event_id = ? LIMIT 1');
+        $ruleStmt->execute([(int) $params['id']]);
+        $rule = $ruleStmt->fetch();
+        if (!$rule) {
             return Response::error('Recurrence rule not found', 404);
         }
         $payload = read_json_body($request);
-        $exceptionDate = $payload['exception_date'] ?? null;
-        if (!$exceptionDate) {
-            return Response::error('exception_date is required', 400);
+        $exceptionError = null;
+        $normalizedRows = normalize_recurrence_exception_rows([$payload], $exceptionError);
+        if ($exceptionError !== null || !$normalizedRows) {
+            return Response::error($exceptionError ?: 'exception_date is required', 422);
         }
-        $type = in_array($payload['exception_type'] ?? 'skip', ['skip','override'], true) ? $payload['exception_type'] : 'skip';
-        $override = $payload['override_payload'] ?? null;
-        Database::run('INSERT INTO event_recurrence_exceptions (recurrence_id, exception_date, exception_type, override_payload, notes, created_by) VALUES (?, ?, ?, ?, ?, ?)', [
-            $ruleId,
-            $exceptionDate,
-            $type,
-            $override ? json_encode($override) : null,
-            $payload['notes'] ?? null,
+        $exception = $normalizedRows[0];
+        $pdo->beginTransaction();
+        $insert = $pdo->prepare('INSERT INTO event_recurrence_exceptions (recurrence_id, exception_date, exception_type, override_payload, notes, created_by) VALUES (?, ?, ?, ?, ?, ?)');
+        $insert->execute([
+            (int) $rule['id'],
+            $exception['exception_date'],
+            $exception['exception_type'],
+            $exception['override_payload'] ? json_encode($exception['override_payload']) : null,
+            $exception['notes'] ?? null,
             'api'
         ]);
-        $exceptionId = (int)Database::connection()->lastInsertId();
+        $exceptionId = (int) $pdo->lastInsertId();
+        $recurrence = recurrence_rule_row_to_payload($rule);
+        $syncResult = null;
+        if ($recurrence) {
+            $exceptions = load_recurrence_exceptions($pdo, (int) $rule['id']);
+            $syncResult = sync_generated_recurrence_children($pdo, (int) $params['id'], $recurrence, (int) $rule['id'], $exceptions);
+        }
+        $pdo->commit();
         record_audit('recurrence.exception.add', 'event', (int) $params['id'], [
             'exception_id' => $exceptionId,
-            'exception_date' => $exceptionDate,
-            'exception_type' => $type,
+            'exception_date' => $exception['exception_date'],
+            'exception_type' => $exception['exception_type'],
+            'override_date' => $exception['override_date'] ?? null,
+            'sync' => $syncResult,
         ]);
-        Response::success(['exception_id' => $exceptionId]);
+        Response::success(['exception_id' => $exceptionId, 'sync' => $syncResult]);
     } catch (Throwable $e) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         if (APP_DEBUG) {
             error_log('POST /api/events/:id/recurrence/exceptions error: ' . $e->getMessage());
         }
@@ -6148,19 +7732,42 @@ $router->add('POST', '/api/events/:id/recurrence/exceptions', function (Request 
 
 $router->add('DELETE', '/api/recurrence-exceptions/:id', function ($request, $params) {
     try {
-        $fetch = Database::run('SELECT rx.id, rx.recurrence_id, rx.exception_date, rr.event_id FROM event_recurrence_exceptions rx LEFT JOIN event_recurrence_rules rr ON rr.id = rx.recurrence_id WHERE rx.id = ? LIMIT 1', [$params['id']]);
+        $pdo = Database::connection();
+        $fetch = $pdo->prepare('SELECT rx.id, rx.recurrence_id, rx.exception_date, rr.event_id FROM event_recurrence_exceptions rx LEFT JOIN event_recurrence_rules rr ON rr.id = rx.recurrence_id WHERE rx.id = ? LIMIT 1');
+        $fetch->execute([$params['id']]);
         $row = $fetch->fetch();
         if (!$row) {
             return Response::error('Exception not found', 404);
         }
-        Database::run('DELETE FROM event_recurrence_exceptions WHERE id = ?', [$params['id']]);
+        $pdo->beginTransaction();
+        $delete = $pdo->prepare('DELETE FROM event_recurrence_exceptions WHERE id = ?');
+        $delete->execute([$params['id']]);
+        $rule = null;
+        if (!empty($row['recurrence_id'])) {
+            $ruleStmt = $pdo->prepare('SELECT * FROM event_recurrence_rules WHERE id = ? LIMIT 1');
+            $ruleStmt->execute([(int) $row['recurrence_id']]);
+            $rule = $ruleStmt->fetch() ?: null;
+        }
+        $syncResult = null;
+        if ($rule && !empty($row['event_id'])) {
+            $recurrence = recurrence_rule_row_to_payload($rule);
+            if ($recurrence) {
+                $exceptions = load_recurrence_exceptions($pdo, (int) $row['recurrence_id']);
+                $syncResult = sync_generated_recurrence_children($pdo, (int) $row['event_id'], $recurrence, (int) $row['recurrence_id'], $exceptions);
+            }
+        }
+        $pdo->commit();
         record_audit('recurrence.exception.delete', 'recurrence_exception', (int) $row['id'], [
             'event_id' => $row['event_id'] ?? null,
             'recurrence_id' => $row['recurrence_id'] ?? null,
             'exception_date' => $row['exception_date'] ?? null,
+            'sync' => $syncResult,
         ]);
-        Response::success();
+        Response::success(['sync' => $syncResult]);
     } catch (Throwable $e) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         if (APP_DEBUG) {
             error_log('DELETE /api/recurrence-exceptions/:id error: ' . $e->getMessage());
         }

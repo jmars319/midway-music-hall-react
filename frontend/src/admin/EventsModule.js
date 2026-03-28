@@ -55,6 +55,56 @@ const TIME_INPUT_ERROR = 'Use h:mm AM/PM (example: 7:00 PM)';
 const OCCURRENCE_DOOR_TIME_ERROR = 'Set a doors-open time here or use the default below.';
 const SCHEDULE_VALIDATION_SUMMARY = 'Please fix the highlighted fields.';
 const MIN_MULTI_DAY_OCCURRENCES = 2;
+const RECURRENCE_WEEKDAY_ERROR = 'Choose at least one weekday.';
+const RECURRENCE_MONTHLY_WEEKDAY_ERROR = 'Choose one weekday for the monthly pattern.';
+const RECURRENCE_MONTHDAY_ERROR = 'Use a day number from 1 to 31.';
+const RECURRENCE_SETPOS_ERROR = 'Choose at least one monthly position.';
+const RECURRENCE_END_DATE_ERROR = 'End date must be on or after the start date.';
+const RECURRENCE_EXCEPTION_ERROR = 'Review the exception dates.';
+const RECURRENCE_EXCEPTION_FALLBACK_VALUE = '__manual__';
+
+const RECURRENCE_WEEKDAY_OPTIONS = [
+  { value: 'SU', label: 'Sunday' },
+  { value: 'MO', label: 'Monday' },
+  { value: 'TU', label: 'Tuesday' },
+  { value: 'WE', label: 'Wednesday' },
+  { value: 'TH', label: 'Thursday' },
+  { value: 'FR', label: 'Friday' },
+  { value: 'SA', label: 'Saturday' },
+];
+
+const RECURRENCE_WEEKDAY_LABELS = Object.fromEntries(
+  RECURRENCE_WEEKDAY_OPTIONS.map((option) => [option.value, option.label])
+);
+
+const RECURRENCE_FREQUENCY_OPTIONS = [
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' },
+];
+
+const RECURRENCE_MONTHLY_MODE_OPTIONS = [
+  { value: 'nth_weekday', label: 'Nth weekday' },
+  { value: 'day_of_month', label: 'Day of month' },
+];
+
+const RECURRENCE_MONTHLY_ORDINAL_OPTIONS = [
+  { value: '1', label: 'First' },
+  { value: '2', label: 'Second' },
+  { value: '3', label: 'Third' },
+  { value: '4', label: 'Fourth' },
+  { value: '5', label: 'Fifth' },
+  { value: '-1', label: 'Last' },
+];
+
+const RECURRENCE_MONTHLY_ORDINAL_LABELS = Object.fromEntries(
+  RECURRENCE_MONTHLY_ORDINAL_OPTIONS.map((option) => [option.value, option.label])
+);
+
+const RECURRENCE_EXCEPTION_ACTION_OPTIONS = [
+  { value: 'keep', label: 'Keep as-is' },
+  { value: 'skip', label: 'Skip occurrence' },
+  { value: 'move', label: 'Move occurrence' },
+];
 
 const SORT_OPTIONS = [
   { value: 'start_asc', label: 'Start date (upcoming first)' },
@@ -456,11 +506,317 @@ const summarizeOccurrenceDoorTimes = (rows = [], sharedDoorTime = '') => {
     : 'Doors vary';
 };
 
+const inferRecurringWeekday = (value) => {
+  const parsed = parseFriendlyEventDate(value);
+  if (!parsed) return '';
+  const date = new Date(`${parsed}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return '';
+  return RECURRENCE_WEEKDAY_OPTIONS[date.getDay()]?.value || '';
+};
+
+const inferRecurringMonthday = (value) => {
+  const parsed = parseFriendlyEventDate(value);
+  if (!parsed) return '';
+  const date = new Date(`${parsed}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return '';
+  return String(date.getDate());
+};
+
+const inferRecurringSetpos = (value) => {
+  const parsed = parseFriendlyEventDate(value);
+  if (!parsed) return '';
+  const date = new Date(`${parsed}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return '';
+  return String(Math.min(5, Math.max(1, Math.ceil(date.getDate() / 7))));
+};
+
+const normalizeRecurringWeekdayTokens = (value) => {
+  if (!value) return [];
+  const queue = Array.isArray(value) ? [...value] : [value];
+  const seen = new Set();
+
+  while (queue.length > 0) {
+    const candidate = queue.shift();
+    if (candidate === null || candidate === undefined || candidate === false) continue;
+    if (Array.isArray(candidate)) {
+      queue.push(...candidate);
+      continue;
+    }
+    const raw = String(candidate).trim();
+    if (!raw) continue;
+    if (raw.startsWith('[')) {
+      try {
+        const decoded = JSON.parse(raw);
+        if (Array.isArray(decoded)) {
+          queue.push(...decoded);
+          continue;
+        }
+      } catch {
+        // Ignore and continue with token parsing below.
+      }
+    }
+    if (/[,\s]/.test(raw)) {
+      raw.split(/[\s,]+/).filter(Boolean).forEach((part) => queue.push(part));
+      continue;
+    }
+    const token = raw.toUpperCase();
+    if (RECURRENCE_WEEKDAY_LABELS[token]) {
+      seen.add(token);
+    }
+  }
+
+  return RECURRENCE_WEEKDAY_OPTIONS
+    .map((option) => option.value)
+    .filter((token) => seen.has(token));
+};
+
+const normalizeRecurringSetposTokens = (value) => {
+  if (!value) return [];
+  const queue = Array.isArray(value) ? [...value] : [value];
+  const seen = new Set();
+  const aliasMap = {
+    first: '1',
+    '1st': '1',
+    second: '2',
+    '2nd': '2',
+    third: '3',
+    '3rd': '3',
+    fourth: '4',
+    '4th': '4',
+    fifth: '5',
+    '5th': '5',
+    last: '-1',
+  };
+
+  while (queue.length > 0) {
+    const candidate = queue.shift();
+    if (candidate === null || candidate === undefined || candidate === false) continue;
+    if (Array.isArray(candidate)) {
+      queue.push(...candidate);
+      continue;
+    }
+    const raw = String(candidate).trim();
+    if (!raw) continue;
+    if (raw.startsWith('[')) {
+      try {
+        const decoded = JSON.parse(raw);
+        if (Array.isArray(decoded)) {
+          queue.push(...decoded);
+          continue;
+        }
+      } catch {
+        // Ignore and continue with token parsing below.
+      }
+    }
+    if (/[,\s]/.test(raw)) {
+      raw.split(/[\s,]+/).filter(Boolean).forEach((part) => queue.push(part));
+      continue;
+    }
+    const normalized = aliasMap[raw.toLowerCase()] || raw;
+    if (RECURRENCE_MONTHLY_ORDINAL_LABELS[normalized]) {
+      seen.add(normalized);
+    }
+  }
+
+  return RECURRENCE_MONTHLY_ORDINAL_OPTIONS
+    .map((option) => option.value)
+    .filter((token) => seen.has(token));
+};
+
+const stringifyRecurringWeekdayTokens = (value) => normalizeRecurringWeekdayTokens(value).join(',');
+
+const stringifyRecurringSetposTokens = (value) => normalizeRecurringSetposTokens(value).join(',');
+
+const describeRecurringWeekdayTokens = (value) => {
+  const labels = normalizeRecurringWeekdayTokens(value)
+    .map((token) => RECURRENCE_WEEKDAY_LABELS[token])
+    .filter(Boolean);
+  if (!labels.length) return 'Weekday missing';
+  if (labels.length === 1) return labels[0];
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]}`;
+};
+
+const describeRecurringSetposTokens = (value) => {
+  const labels = normalizeRecurringSetposTokens(value)
+    .map((token) => RECURRENCE_MONTHLY_ORDINAL_LABELS[token])
+    .filter(Boolean);
+  if (!labels.length) return 'Monthly position missing';
+  if (labels.length === 1) return labels[0];
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]}`;
+};
+
+const toggleRecurringWeekdayToken = (value, token) => {
+  const normalizedToken = String(token || '').trim().toUpperCase();
+  if (!RECURRENCE_WEEKDAY_LABELS[normalizedToken]) {
+    return stringifyRecurringWeekdayTokens(value);
+  }
+  const selected = normalizeRecurringWeekdayTokens(value);
+  const nextSelected = selected.includes(normalizedToken)
+    ? selected.filter((item) => item !== normalizedToken)
+    : [...selected, normalizedToken];
+  return stringifyRecurringWeekdayTokens(nextSelected);
+};
+
+const toggleRecurringSetposToken = (value, token) => {
+  const normalizedToken = String(token || '').trim();
+  if (!RECURRENCE_MONTHLY_ORDINAL_LABELS[normalizedToken]) {
+    return stringifyRecurringSetposTokens(value);
+  }
+  const selected = normalizeRecurringSetposTokens(value);
+  const nextSelected = selected.includes(normalizedToken)
+    ? selected.filter((item) => item !== normalizedToken)
+    : [...selected, normalizedToken];
+  return stringifyRecurringSetposTokens(nextSelected);
+};
+
+const formatRecurrenceExceptionDateValue = (value) => parseFriendlyEventDate(value) || '';
+
+const formatRecurrenceOccurrenceLabel = (value) => {
+  const normalized = parseFriendlyEventDate(value);
+  if (!normalized) return 'Choose a valid date';
+  const [year, month, day] = normalized.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  if (Number.isNaN(date.getTime())) {
+    return normalized;
+  }
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: SESSION_TIMEZONE,
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+};
+
+const buildRecurrenceExceptionRow = (overrides = {}) => ({
+  row_id: overrides.row_id || `rx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  exception_date: formatRecurrenceExceptionDateValue(overrides.exception_date || ''),
+  override_date: formatRecurrenceExceptionDateValue(overrides.override_date || ''),
+  notes: overrides.notes || '',
+  action: overrides.action || 'keep',
+  input_mode: overrides.input_mode || 'select',
+});
+
+const normalizeRecurrenceExceptionRows = (rows = []) => (
+  Array.isArray(rows)
+    ? rows.map((row) => buildRecurrenceExceptionRow({
+        row_id: row?.row_id || row?.id || undefined,
+        exception_date: row?.exception_date || '',
+        override_date: row?.override_date || row?.override_payload?.override_date || '',
+        notes: String(row?.notes || '').trim(),
+        action: row?.exception_type === 'override' ? 'move' : 'skip',
+      }))
+    : []
+);
+
+const normalizeRecurringMonthdayValue = (value) => {
+  const raw = String(value || '').trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 31) return null;
+  return parsed;
+};
+
+const normalizeRecurrenceExceptionsForPayload = (rows = []) => {
+  const normalized = [];
+  const seenDates = new Set();
+  const drafts = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      action: row?.action === 'move' ? 'move' : row?.action === 'skip' ? 'skip' : 'keep',
+      exception_date: formatRecurrenceExceptionDateValue(row?.exception_date || ''),
+      override_date: formatRecurrenceExceptionDateValue(row?.override_date || ''),
+      notes: String(row?.notes || '').trim(),
+    }))
+    .filter((row) => row.exception_date || row.override_date || row.notes || row.action !== 'keep');
+
+  for (const row of drafts) {
+    if (row.action === 'keep') {
+      continue;
+    }
+    const exceptionDate = row.exception_date;
+    if (!exceptionDate) {
+      return { error: RECURRENCE_EXCEPTION_ERROR };
+    }
+    if (seenDates.has(exceptionDate)) {
+      return { error: 'Each exception date can only appear once.' };
+    }
+    const overrideDate = row.action === 'move' ? row.override_date : null;
+    if (row.action === 'move' && !overrideDate) {
+      return { error: RECURRENCE_EXCEPTION_ERROR };
+    }
+    seenDates.add(exceptionDate);
+    normalized.push({
+      exception_date: exceptionDate,
+      override_date: overrideDate || null,
+      exception_type: row.action === 'move' ? 'override' : 'skip',
+      notes: row.notes || null,
+    });
+  }
+
+  return { error: null, exceptions: normalized };
+};
+
+const applyRecurrenceExceptionDraftsToDates = (dates = [], rows = []) => {
+  const dateSet = new Set(
+    (Array.isArray(dates) ? dates : [])
+      .map((value) => formatRecurrenceExceptionDateValue(value))
+      .filter(Boolean)
+  );
+
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const action = row?.action === 'move' ? 'move' : row?.action === 'skip' ? 'skip' : 'keep';
+    if (action === 'keep') {
+      return;
+    }
+    const exceptionDate = formatRecurrenceExceptionDateValue(row?.exception_date || '');
+    if (!exceptionDate) {
+      return;
+    }
+    if (action === 'skip') {
+      dateSet.delete(exceptionDate);
+      return;
+    }
+    const overrideDate = formatRecurrenceExceptionDateValue(row?.override_date || '');
+    if (!overrideDate) {
+      return;
+    }
+    dateSet.delete(exceptionDate);
+    dateSet.add(overrideDate);
+  });
+
+  return Array.from(dateSet).sort((left, right) => left.localeCompare(right));
+};
+
+const describeRecurringPattern = (formData) => {
+  const frequency = formData.recurrence_frequency === 'monthly' ? 'monthly' : 'weekly';
+  if (frequency === 'weekly') {
+    return describeRecurringWeekdayTokens(formData.recurrence_byweekday);
+  }
+  if (formData.recurrence_monthly_mode === 'day_of_month') {
+    const monthday = String(formData.recurrence_bymonthday || '').trim();
+    return monthday ? `Day ${monthday} of the month` : 'Monthly day missing';
+  }
+  const weekday = describeRecurringWeekdayTokens(formData.recurrence_byweekday);
+  const positions = describeRecurringSetposTokens(formData.recurrence_bysetpos);
+  return `${positions} ${weekday}`;
+};
+
 const initialForm = {
   artist_name: '',
   event_date: '',
   event_time: '',
   door_time: '',
+  is_series_master: false,
+  recurrence_enabled: false,
+  recurrence_frequency: 'weekly',
+  recurrence_byweekday: '',
+  recurrence_monthly_mode: 'nth_weekday',
+  recurrence_bymonthday: '',
+  recurrence_bysetpos: '',
+  recurrence_end_date: '',
+  recurrence_exceptions: [],
   multi_day_enabled: false,
   occurrence_rows: [buildOccurrenceRow()],
   genre: '',
@@ -495,6 +851,7 @@ const createInitialFormState = () => ({
   pricing_tiers: buildDefaultPricingTiers(),
   pricing_assignments: {},
   occurrence_rows: [buildOccurrenceRow()],
+  recurrence_exceptions: [],
 });
 
 const findLayoutName = (layouts, layoutId) => {
@@ -522,6 +879,20 @@ const summarizePricingMode = (formData) => {
 };
 
 const summarizeOccurrenceSchedule = (formData) => {
+  if (formData.recurrence_enabled) {
+    return [
+      'Recurring',
+      formData.recurrence_frequency === 'monthly' ? 'Monthly' : 'Weekly',
+      describeRecurringPattern(formData),
+      formData.event_date ? `Starts ${formData.event_date}` : 'Start date missing',
+      formData.event_time || 'Time missing',
+      formData.door_time ? `Doors ${formData.door_time}` : 'Doors missing',
+      formData.recurrence_end_date ? `Until ${formData.recurrence_end_date}` : null,
+    ].filter(Boolean).join(' • ');
+  }
+  if (formData.is_series_master && !formData.event_date && !formData.event_time) {
+    return 'Series master • automatic generation off';
+  }
   if (!formData.multi_day_enabled) {
     return [
       formData.event_date || 'Date missing',
@@ -562,6 +933,13 @@ export default function EventsModule(){
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
+  const [recurrenceLoading, setRecurrenceLoading] = useState(false);
+  const [recurrenceError, setRecurrenceError] = useState('');
+  const [recurrenceExceptionPreview, setRecurrenceExceptionPreview] = useState({
+    loading: false,
+    error: '',
+    dates: [],
+  });
   const [imageUploading, setImageUploading] = useState(false);
   const [imageUploadProgress, setImageUploadProgress] = useState(0);
   const [imageUploadProcessing, setImageUploadProcessing] = useState(false);
@@ -609,6 +987,12 @@ export default function EventsModule(){
     event_date: null,
     event_time: null,
     door_time: null,
+    recurrence_frequency: null,
+    recurrence_byweekday: null,
+    recurrence_bymonthday: null,
+    recurrence_bysetpos: null,
+    recurrence_end_date: null,
+    recurrence_exceptions: null,
   });
 
   useEffect(() => {
@@ -998,16 +1382,231 @@ export default function EventsModule(){
   const selectedCategoryId = formData.category_id ? String(formData.category_id) : '';
   const selectedCategory = selectedCategoryId ? categoryLookup.get(selectedCategoryId) : null;
   const editingIsSeriesMaster = Boolean(editing && Number(editing.is_series_master) === 1);
+  const editingRecurringChild = Boolean(editing && editing.series_master_id && Number(editing.is_series_master) !== 1);
+  const effectiveIsSeriesMaster = Boolean(formData.is_series_master);
   const effectiveCategorySlug = (selectedCategory?.slug || editing?.category_slug || '').toLowerCase();
   const editorFlags = useMemo(
     () =>
       getEventEditorFlags({
         categorySlug: effectiveCategorySlug,
-        isSeriesMaster: editingIsSeriesMaster,
+        isSeriesMaster: effectiveIsSeriesMaster,
         seatingEnabled: Boolean(formData.seating_enabled),
       }),
-    [effectiveCategorySlug, editingIsSeriesMaster, formData.seating_enabled]
+    [effectiveCategorySlug, effectiveIsSeriesMaster, formData.seating_enabled]
   );
+
+  const recurrenceExceptionPreviewRequest = useMemo(() => {
+    if (!showForm || !formData.recurrence_enabled) {
+      return null;
+    }
+    const startsOn = parseFriendlyEventDate(formData.event_date);
+    if (!startsOn) {
+      return null;
+    }
+    const endsOn = String(formData.recurrence_end_date || '').trim()
+      ? parseFriendlyEventDate(formData.recurrence_end_date)
+      : null;
+    if (String(formData.recurrence_end_date || '').trim() && !endsOn) {
+      return null;
+    }
+    if (endsOn && endsOn < startsOn) {
+      return null;
+    }
+
+    const frequency = formData.recurrence_frequency === 'monthly' ? 'monthly' : 'weekly';
+    const request = {
+      recurrence: {
+        enabled: 1,
+        frequency,
+        starts_on: startsOn,
+        ends_on: endsOn || null,
+      },
+    };
+
+    if (frequency === 'weekly') {
+      const byweekday = normalizeRecurringWeekdayTokens(formData.recurrence_byweekday);
+      if (!byweekday.length) {
+        return null;
+      }
+      request.recurrence.byweekday = byweekday.length === 1 ? byweekday[0] : byweekday;
+      return request;
+    }
+
+    const monthlyMode = formData.recurrence_monthly_mode === 'day_of_month' ? 'day_of_month' : 'nth_weekday';
+    if (monthlyMode === 'day_of_month') {
+      const bymonthday = normalizeRecurringMonthdayValue(formData.recurrence_bymonthday);
+      if (bymonthday === null) {
+        return null;
+      }
+      request.recurrence.monthly_mode = 'day_of_month';
+      request.recurrence.bymonthday = bymonthday;
+      return request;
+    }
+
+    const byweekday = normalizeRecurringWeekdayTokens(formData.recurrence_byweekday);
+    const bysetpos = normalizeRecurringSetposTokens(formData.recurrence_bysetpos);
+    if (byweekday.length !== 1 || !bysetpos.length) {
+      return null;
+    }
+    request.recurrence.monthly_mode = 'nth_weekday';
+    request.recurrence.byweekday = byweekday[0];
+    request.recurrence.bysetpos = bysetpos;
+    return request;
+  }, [
+    showForm,
+    formData.recurrence_enabled,
+    formData.recurrence_frequency,
+    formData.event_date,
+    formData.recurrence_end_date,
+    formData.recurrence_monthly_mode,
+    formData.recurrence_bymonthday,
+    formData.recurrence_byweekday,
+    formData.recurrence_bysetpos,
+  ]);
+
+  const recurrenceExceptionCandidateOptions = useMemo(() => {
+    const seen = new Set();
+    const options = [];
+    const pushOption = (rawValue) => {
+      const value = formatRecurrenceExceptionDateValue(rawValue);
+      if (!value || seen.has(value)) return;
+      seen.add(value);
+      options.push({
+        value,
+        label: formatRecurrenceOccurrenceLabel(value),
+      });
+    };
+    (recurrenceExceptionPreview.dates || []).forEach(pushOption);
+    (formData.recurrence_exceptions || []).forEach((row) => pushOption(row?.exception_date));
+    options.sort((left, right) => left.value.localeCompare(right.value));
+    return options;
+  }, [recurrenceExceptionPreview.dates, formData.recurrence_exceptions]);
+
+  const recurrenceExceptionCandidateValueSet = useMemo(
+    () => new Set(recurrenceExceptionCandidateOptions.map((option) => option.value)),
+    [recurrenceExceptionCandidateOptions]
+  );
+
+  const recurrencePreviewDisplayDates = useMemo(
+    () => applyRecurrenceExceptionDraftsToDates(recurrenceExceptionPreview.dates, formData.recurrence_exceptions),
+    [recurrenceExceptionPreview.dates, formData.recurrence_exceptions]
+  );
+
+  const recurrencePreviewDisplayLabels = useMemo(
+    () => recurrencePreviewDisplayDates.slice(0, 6).map((value) => ({
+      value,
+      label: formatRecurrenceOccurrenceLabel(value),
+    })),
+    [recurrencePreviewDisplayDates]
+  );
+
+  useEffect(() => {
+    if (!showForm || !editing?.id || !editingIsSeriesMaster || editingRecurringChild) {
+      setRecurrenceLoading(false);
+      setRecurrenceError('');
+      return undefined;
+    }
+    let cancelled = false;
+    setRecurrenceLoading(true);
+    setRecurrenceError('');
+    fetch(`${API_BASE}/events/${editing.id}/recurrence`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (!data?.success) {
+          throw new Error(data?.message || 'Unable to load recurrence settings');
+        }
+        const rule = data.recurrence || null;
+        setFormData((prev) => ({
+          ...prev,
+          is_series_master: true,
+          recurrence_enabled: Boolean(rule),
+          recurrence_frequency: rule?.frequency === 'monthly' ? 'monthly' : 'weekly',
+          recurrence_byweekday: stringifyRecurringWeekdayTokens(rule?.byweekday_set || rule?.byweekday || ''),
+          recurrence_monthly_mode: rule?.monthly_mode === 'day_of_month' ? 'day_of_month' : 'nth_weekday',
+          recurrence_bymonthday: rule?.bymonthday_set?.[0] ? String(rule.bymonthday_set[0]) : (rule?.bymonthday ? String(rule.bymonthday).split(',')[0] : ''),
+          recurrence_bysetpos: stringifyRecurringSetposTokens(rule?.bysetpos_set || rule?.bysetpos || ''),
+          recurrence_end_date: formatEventDateForInput(rule?.ends_on || ''),
+          recurrence_exceptions: normalizeRecurrenceExceptionRows(data.exceptions || []),
+          event_date: rule?.starts_on ? formatEventDateForInput(rule.starts_on) : prev.event_date,
+        }));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Failed to load recurrence settings', err);
+          setRecurrenceError(err instanceof Error ? err.message : 'Unable to load recurrence settings');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRecurrenceLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showForm, editing?.id, editingIsSeriesMaster, editingRecurringChild]);
+
+  useEffect(() => {
+    if (!showForm || !formData.recurrence_enabled) {
+      setRecurrenceExceptionPreview({ loading: false, error: '', dates: [] });
+      return undefined;
+    }
+    if (!recurrenceExceptionPreviewRequest) {
+      setRecurrenceExceptionPreview({
+        loading: false,
+        error: '',
+        dates: [],
+      });
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+    setRecurrenceExceptionPreview((prev) => ({
+      loading: true,
+      error: '',
+      dates: prev.dates,
+    }));
+
+    fetch(`${API_BASE}/recurrence/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(recurrenceExceptionPreviewRequest),
+      signal: controller.signal,
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (!data?.success) {
+          throw new Error(data?.message || 'Unable to load recurrence occurrences');
+        }
+        setRecurrenceExceptionPreview({
+          loading: false,
+          error: '',
+          dates: Array.isArray(data.occurrence_candidates) ? data.occurrence_candidates : [],
+        });
+      })
+      .catch((err) => {
+        if (cancelled || err?.name === 'AbortError') return;
+        console.error('Failed to preview recurrence occurrences', err);
+        setRecurrenceExceptionPreview({
+          loading: false,
+          error: err instanceof Error ? err.message : 'Unable to load recurrence occurrences',
+          dates: [],
+        });
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [
+    showForm,
+    formData.recurrence_enabled,
+    formData.recurrence_frequency,
+    recurrenceExceptionPreviewRequest,
+  ]);
 
   const layoutNameForEvent = (event) => {
     if (!event.layout_id) return 'Not assigned';
@@ -1897,6 +2496,8 @@ export default function EventsModule(){
     setFormData(createInitialFormState());
     setEventPricingRows([]);
     setEventPricingRowsLoading(false);
+    setRecurrenceLoading(false);
+    setRecurrenceError('');
     setImageFile(null);
     setImagePreview(null);
     setError('');
@@ -1931,6 +2532,15 @@ export default function EventsModule(){
       event_date: primaryOccurrence.event_date || formatEventDateForInput(event.event_date),
       event_time: primaryOccurrence.event_time || formatEventTimeForInput(event.event_time),
       door_time: isMultiDay ? occurrenceEditorState.sharedDoorTime : formatEventTimeForInput(event.door_time),
+      is_series_master: Boolean(Number(event.is_series_master) === 1),
+      recurrence_enabled: Boolean(event.recurrence_rule_id),
+      recurrence_frequency: 'weekly',
+      recurrence_byweekday: '',
+      recurrence_monthly_mode: 'nth_weekday',
+      recurrence_bymonthday: '',
+      recurrence_bysetpos: '',
+      recurrence_end_date: '',
+      recurrence_exceptions: [],
       multi_day_enabled: isMultiDay,
       occurrence_rows: occurrenceRows.length ? occurrenceRows : [buildOccurrenceRow()],
       genre: event.genre || '',
@@ -1959,6 +2569,8 @@ export default function EventsModule(){
       seating_enabled: Boolean(event.seating_enabled),
       payment_enabled: Boolean(event.payment_enabled),
     });
+    setRecurrenceLoading(Boolean(Number(event.is_series_master) === 1));
+    setRecurrenceError('');
     setImageFile(null);
     setEventPricingRows([]);
     setEventPricingRowsLoading(false);
@@ -2175,6 +2787,420 @@ export default function EventsModule(){
     });
   };
 
+  const handleRecurringGenerationToggle = (enabled) => {
+    setRecurrenceError('');
+    setFormData((prev) => {
+      const existingRows = getNonEmptyOccurrenceRows(prev.occurrence_rows || []);
+      const firstRow = existingRows[0] || buildOccurrenceRow(prev.event_date, prev.event_time, null, prev.door_time);
+      const nextStartDate = firstRow.event_date || prev.event_date;
+      const nextEventTime = firstRow.event_time || prev.event_time;
+      const nextDoorTime = prev.door_time || firstRow.door_time || '';
+      return {
+        ...prev,
+        is_series_master: enabled ? true : (editingIsSeriesMaster ? true : false),
+        recurrence_enabled: enabled,
+        recurrence_frequency: prev.recurrence_frequency || 'weekly',
+        recurrence_byweekday: enabled
+          ? (prev.recurrence_byweekday || inferRecurringWeekday(nextStartDate))
+          : prev.recurrence_byweekday,
+        recurrence_bymonthday: enabled
+          ? (prev.recurrence_bymonthday || inferRecurringMonthday(nextStartDate))
+          : prev.recurrence_bymonthday,
+        recurrence_bysetpos: enabled
+          ? (prev.recurrence_bysetpos || inferRecurringSetpos(nextStartDate))
+          : prev.recurrence_bysetpos,
+        multi_day_enabled: enabled ? false : prev.multi_day_enabled,
+        event_date: enabled ? nextStartDate : prev.event_date,
+        event_time: enabled ? nextEventTime : prev.event_time,
+        door_time: enabled ? nextDoorTime : prev.door_time,
+      };
+    });
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next.occurrences;
+      delete next.recurrence_frequency;
+      delete next.recurrence_byweekday;
+      delete next.recurrence_bymonthday;
+      delete next.recurrence_bysetpos;
+      delete next.recurrence_end_date;
+      delete next.recurrence_exceptions;
+      return next;
+    });
+    setError('');
+  };
+
+  const handleRecurringFrequencyChange = (value) => {
+    const frequency = value === 'monthly' ? 'monthly' : 'weekly';
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next.recurrence_frequency;
+      delete next.recurrence_byweekday;
+      delete next.recurrence_bymonthday;
+      delete next.recurrence_bysetpos;
+      delete next.recurrence_exceptions;
+      return next;
+    });
+    if (error === SCHEDULE_VALIDATION_SUMMARY) {
+      setError('');
+    }
+    setFormData((prev) => ({
+      ...prev,
+      recurrence_frequency: frequency,
+      recurrence_monthly_mode: frequency === 'monthly' ? (prev.recurrence_monthly_mode || 'nth_weekday') : prev.recurrence_monthly_mode,
+      recurrence_byweekday: prev.recurrence_byweekday || inferRecurringWeekday(prev.event_date),
+      recurrence_bymonthday: prev.recurrence_bymonthday || inferRecurringMonthday(prev.event_date),
+      recurrence_bysetpos: prev.recurrence_bysetpos || inferRecurringSetpos(prev.event_date),
+    }));
+  };
+
+  const handleRecurringMonthlyModeChange = (value) => {
+    const monthlyMode = value === 'day_of_month' ? 'day_of_month' : 'nth_weekday';
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next.recurrence_byweekday;
+      delete next.recurrence_bymonthday;
+      delete next.recurrence_bysetpos;
+      return next;
+    });
+    if (error === SCHEDULE_VALIDATION_SUMMARY) {
+      setError('');
+    }
+    setFormData((prev) => ({
+      ...prev,
+      recurrence_monthly_mode: monthlyMode,
+      recurrence_bymonthday: prev.recurrence_bymonthday || inferRecurringMonthday(prev.event_date),
+      recurrence_byweekday: prev.recurrence_byweekday || inferRecurringWeekday(prev.event_date),
+      recurrence_bysetpos: prev.recurrence_bysetpos || inferRecurringSetpos(prev.event_date),
+    }));
+  };
+
+  const handleRecurringWeekdayToggle = (token) => {
+    setFieldErrors((prev) => {
+      if (!prev.recurrence_byweekday) return prev;
+      const next = { ...prev };
+      delete next.recurrence_byweekday;
+      return next;
+    });
+    if (error === SCHEDULE_VALIDATION_SUMMARY) {
+      setError('');
+    }
+    setFormData((prev) => ({
+      ...prev,
+      recurrence_byweekday: toggleRecurringWeekdayToken(prev.recurrence_byweekday, token),
+    }));
+  };
+
+  const handleRecurringSetposToggle = (token) => {
+    setFieldErrors((prev) => {
+      if (!prev.recurrence_bysetpos) return prev;
+      const next = { ...prev };
+      delete next.recurrence_bysetpos;
+      return next;
+    });
+    if (error === SCHEDULE_VALIDATION_SUMMARY) {
+      setError('');
+    }
+    setFormData((prev) => ({
+      ...prev,
+      recurrence_bysetpos: toggleRecurringSetposToken(prev.recurrence_bysetpos, token),
+    }));
+  };
+
+  const handleRecurrenceExceptionChange = (rowId, field, value) => {
+    setFieldErrors((prev) => {
+      if (!prev.recurrence_exceptions) return prev;
+      const next = { ...prev };
+      delete next.recurrence_exceptions;
+      return next;
+    });
+    if (error === SCHEDULE_VALIDATION_SUMMARY) {
+      setError('');
+    }
+    setFormData((prev) => ({
+      ...prev,
+      recurrence_exceptions: (prev.recurrence_exceptions || []).map((row) => (
+        row.row_id === rowId
+          ? {
+              ...row,
+              [field]: value,
+            }
+          : row
+      )),
+    }));
+  };
+
+  const handleRecurrenceExceptionActionChange = (rowId, action) => {
+    handleRecurrenceExceptionChange(rowId, 'action', action);
+    if (action !== 'move') {
+      handleRecurrenceExceptionChange(rowId, 'override_date', '');
+    }
+  };
+
+  const handleRecurrenceExceptionOccurrenceSelect = (rowId, value) => {
+    if (value === RECURRENCE_EXCEPTION_FALLBACK_VALUE) {
+      setFieldErrors((prev) => {
+        if (!prev.recurrence_exceptions) return prev;
+        const next = { ...prev };
+        delete next.recurrence_exceptions;
+        return next;
+      });
+      if (error === SCHEDULE_VALIDATION_SUMMARY) {
+        setError('');
+      }
+      setFormData((prev) => ({
+        ...prev,
+        recurrence_exceptions: (prev.recurrence_exceptions || []).map((row) => (
+          row.row_id === rowId
+            ? {
+                ...row,
+                input_mode: 'manual',
+              }
+            : row
+        )),
+      }));
+      return;
+    }
+    setFieldErrors((prev) => {
+      if (!prev.recurrence_exceptions) return prev;
+      const next = { ...prev };
+      delete next.recurrence_exceptions;
+      return next;
+    });
+    if (error === SCHEDULE_VALIDATION_SUMMARY) {
+      setError('');
+    }
+    setFormData((prev) => ({
+      ...prev,
+      recurrence_exceptions: (prev.recurrence_exceptions || []).map((row) => (
+        row.row_id === rowId
+          ? {
+              ...row,
+              exception_date: value,
+              input_mode: 'select',
+            }
+          : row
+      )),
+    }));
+  };
+
+  const handleAddRecurrenceException = () => {
+    setFieldErrors((prev) => {
+      if (!prev.recurrence_exceptions) return prev;
+      const next = { ...prev };
+      delete next.recurrence_exceptions;
+      return next;
+    });
+    setFormData((prev) => ({
+      ...prev,
+      recurrence_exceptions: [...(prev.recurrence_exceptions || []), buildRecurrenceExceptionRow()],
+    }));
+  };
+
+  const handleRemoveRecurrenceException = (rowId) => {
+    setFieldErrors((prev) => {
+      if (!prev.recurrence_exceptions) return prev;
+      const next = { ...prev };
+      delete next.recurrence_exceptions;
+      return next;
+    });
+    setFormData((prev) => ({
+      ...prev,
+      recurrence_exceptions: (prev.recurrence_exceptions || []).filter((row) => row.row_id !== rowId),
+    }));
+  };
+
+  const renderRecurrenceExceptionEditor = () => (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-blue-500/20 bg-gray-900/30 p-4">
+        <div>
+          <label className="block text-sm font-semibold text-white">Next 6 Occurrences</label>
+          <p className="mt-1 text-xs text-gray-400">
+            Preview updates as you change the rule and any skip or move exceptions below.
+          </p>
+        </div>
+        {recurrenceExceptionPreview.loading ? (
+          <p className="mt-3 text-xs text-blue-200">Loading upcoming recurring dates...</p>
+        ) : recurrencePreviewDisplayLabels.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {recurrencePreviewDisplayLabels.map((occurrence) => (
+              <span
+                key={occurrence.value}
+                className="rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs text-blue-100"
+              >
+                {occurrence.label}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-xs text-gray-500">
+            Finish the recurring rule above to preview the next generated dates.
+          </p>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-blue-500/20 bg-gray-900/30 p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <label className="block text-sm font-semibold text-white">Recurring Exceptions</label>
+            <p className="mt-1 text-xs text-gray-400">
+              Choose the generated occurrence you want to adjust, then skip it or move it to another date. Use “Other date” only when the occurrence you need is outside the current preview.
+            </p>
+            {recurrenceExceptionPreview.loading ? (
+              <p className="mt-2 text-xs text-blue-200">Loading occurrence choices from the current recurring rule...</p>
+            ) : recurrenceExceptionCandidateOptions.length > 0 ? (
+              <p className="mt-2 text-xs text-gray-400">
+                Upcoming choices: {recurrenceExceptionCandidateOptions.slice(0, 5).map((option) => option.label).join(' • ')}
+              </p>
+            ) : (
+              <p className="mt-2 text-xs text-gray-500">
+                Finish the recurring rule above to load generated occurrence choices.
+              </p>
+            )}
+            {recurrenceExceptionPreview.error && (
+              <p className="mt-2 text-xs text-red-300">
+                {recurrenceExceptionPreview.error}. You can still use “Other date” if needed.
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={handleAddRecurrenceException}
+            className="rounded border border-blue-400/40 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-100 hover:bg-blue-500/20"
+          >
+            Add exception
+          </button>
+        </div>
+
+        {(formData.recurrence_exceptions || []).length > 0 ? (
+          <div className="mt-4 space-y-3">
+            {(formData.recurrence_exceptions || []).map((row, index) => {
+              const normalizedExceptionDate = formatRecurrenceExceptionDateValue(row.exception_date);
+              const normalizedOverrideDate = formatRecurrenceExceptionDateValue(row.override_date);
+              const usingManualOccurrence = row.input_mode === 'manual'
+                || (Boolean(normalizedExceptionDate) && !recurrenceExceptionCandidateValueSet.has(normalizedExceptionDate));
+              const occurrenceSelectValue = usingManualOccurrence
+                ? RECURRENCE_EXCEPTION_FALLBACK_VALUE
+                : (normalizedExceptionDate || '');
+              const selectedOccurrenceLabel = normalizedExceptionDate
+                ? formatRecurrenceOccurrenceLabel(normalizedExceptionDate)
+                : '';
+              return (
+                <div key={row.row_id} className="rounded-lg border border-gray-700 bg-gray-950/40 p-3">
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.6fr_0.9fr_1fr_auto]">
+                    <div>
+                      <label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">Occurrence</label>
+                      <select
+                        value={occurrenceSelectValue}
+                        onChange={(e) => handleRecurrenceExceptionOccurrenceSelect(row.row_id, e.target.value)}
+                        ref={index === 0 ? (node) => { scheduleInputRefs.current.recurrence_exceptions = node; } : undefined}
+                        className="w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Choose an occurrence</option>
+                        {recurrenceExceptionCandidateOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                        <option value={RECURRENCE_EXCEPTION_FALLBACK_VALUE}>Other date...</option>
+                      </select>
+                      {usingManualOccurrence && (
+                        <div className="mt-2">
+                          <input
+                            type="text"
+                            name="exception_date"
+                            value={row.exception_date ? (formatEventDateForInput(row.exception_date) || row.exception_date) : ''}
+                            onChange={(e) => handleRecurrenceExceptionChange(row.row_id, 'exception_date', e.target.value)}
+                            onBlur={handleScheduleBlur}
+                            data-row-id={row.row_id}
+                            placeholder="MM/DD/YYYY"
+                            inputMode="numeric"
+                            autoComplete="off"
+                            className="w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      )}
+                      {selectedOccurrenceLabel && (
+                        <p className="mt-2 text-xs text-gray-400">Selected: {selectedOccurrenceLabel}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">Action</label>
+                      <select
+                        value={row.action || 'keep'}
+                        onChange={(e) => handleRecurrenceExceptionActionChange(row.row_id, e.target.value)}
+                        className="w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                      >
+                        {RECURRENCE_EXCEPTION_ACTION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      {(row.action || 'keep') === 'keep' && (
+                        <p className="mt-2 text-xs text-gray-500">
+                          Keep leaves this occurrence on the base recurring rule and will not save an exception.
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">Replacement Date</label>
+                      {(row.action || 'keep') === 'move' ? (
+                        <input
+                          type="text"
+                          name="override_date"
+                          value={row.override_date ? (formatEventDateForInput(row.override_date) || row.override_date) : ''}
+                          onChange={(e) => handleRecurrenceExceptionChange(row.row_id, 'override_date', e.target.value)}
+                          onBlur={handleScheduleBlur}
+                          data-row-id={row.row_id}
+                          placeholder="MM/DD/YYYY"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          className="w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                        />
+                      ) : (
+                        <div className="flex h-[42px] items-center rounded border border-dashed border-gray-700 px-3 text-sm text-gray-500">
+                          {(row.action || 'keep') === 'skip' ? 'Skipped occurrences do not need a new date.' : 'No date change needed.'}
+                        </div>
+                      )}
+                      {(row.action || 'keep') === 'move' && normalizedOverrideDate && (
+                        <p className="mt-2 text-xs text-gray-400">
+                          Moves to: {formatRecurrenceOccurrenceLabel(normalizedOverrideDate)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-start justify-end">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRecurrenceException(row.row_id)}
+                        className="rounded border border-gray-600 px-3 py-2 text-xs font-semibold text-gray-200 hover:border-red-400 hover:text-red-200"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <label className="mb-1 block text-xs uppercase tracking-wide text-gray-400">Notes</label>
+                    <input
+                      type="text"
+                      value={row.notes}
+                      onChange={(e) => handleRecurrenceExceptionChange(row.row_id, 'notes', e.target.value)}
+                      placeholder="Optional note"
+                      className="w-full rounded border border-gray-600 bg-gray-700 px-3 py-2 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mt-4 text-xs text-gray-400">
+            No exceptions yet. Add one when a specific occurrence needs to be skipped or moved away from the default recurring rule.
+          </p>
+        )}
+
+        {fieldErrors.recurrence_exceptions && (
+          <p className="mt-3 text-xs text-red-300">{fieldErrors.recurrence_exceptions}</p>
+        )}
+      </div>
+    </div>
+  );
+
   const handleOccurrenceRowChange = (index, field, value) => {
     clearOccurrenceFieldError(index, field);
     setFormData((prev) => ({
@@ -2277,6 +3303,11 @@ export default function EventsModule(){
       name === 'event_date' ||
       name === 'event_time' ||
       name === 'door_time' ||
+      name === 'recurrence_frequency' ||
+      name === 'recurrence_byweekday' ||
+      name === 'recurrence_bymonthday' ||
+      name === 'recurrence_bysetpos' ||
+      name === 'recurrence_end_date' ||
       name === 'seat_request_email_override' ||
       name === 'contact_email'
     ) {
@@ -2363,12 +3394,18 @@ export default function EventsModule(){
     const raw = String(value || '').trim();
     if (!raw) return;
     let normalized = '';
-    if (name === 'event_date') {
+    if (name === 'event_date' || name === 'recurrence_end_date' || name === 'exception_date' || name === 'override_date') {
       normalized = formatEventDateForInput(raw);
     } else if (name === 'event_time' || name === 'door_time') {
       normalized = formatEventTimeForInput(raw);
     }
     if (!normalized || normalized === value) {
+      return;
+    }
+    if (name === 'exception_date' || name === 'override_date') {
+      const rowId = e.target.dataset.rowId;
+      if (!rowId) return;
+      handleRecurrenceExceptionChange(rowId, name, normalized);
       return;
     }
     setFormData((prev) => ({ ...prev, [name]: normalized }));
@@ -2560,7 +3597,9 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
     }
   };
 
-  const scheduleInputsRequired = editorFlags.requireScheduleFields;
+  const recurrenceActive = Boolean(formData.recurrence_enabled) && !editingRecurringChild;
+  const scheduleInputsRequired = recurrenceActive || editorFlags.requireScheduleFields;
+  const multiDayToggleDisabled = Boolean(formData.is_series_master) || recurrenceActive || editingRecurringChild;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -2731,7 +3770,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
           Boolean(formData.multi_day_enabled) !== originalMultiDay ||
           occurrenceRowsDiffer(formData.occurrence_rows, originalOccurrenceRows)
         : Boolean(eventDateValue || eventTimeValue || doorTimeValue || startOrEndProvided);
-      const mustRequireSchedule = editorFlags.requireScheduleFields || scheduleFieldsChanged;
+      const mustRequireSchedule = recurrenceActive || editorFlags.requireScheduleFields || scheduleFieldsChanged;
       if (mustRequireSchedule) {
         const parsedDoorTime = doorTimeValue ? parseFriendlyEventTime(doorTimeValue) : null;
         const nextFieldErrors = {};
@@ -2740,7 +3779,99 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
         }
         let scheduleErrorMessage = SCHEDULE_VALIDATION_SUMMARY;
         let firstInvalidKey = null;
-        if (formData.multi_day_enabled) {
+        if (recurrenceActive) {
+          const parsedEventDate = parseFriendlyEventDate(eventDateValue);
+          const parsedEventTime = parseFriendlyEventTime(eventTimeValue);
+          const recurrenceFrequency = formData.recurrence_frequency === 'monthly' ? 'monthly' : 'weekly';
+          const recurrenceMonthlyMode = formData.recurrence_monthly_mode === 'day_of_month' ? 'day_of_month' : 'nth_weekday';
+          const recurrenceByweekday = normalizeRecurringWeekdayTokens(formData.recurrence_byweekday);
+          const recurrenceBysetpos = normalizeRecurringSetposTokens(formData.recurrence_bysetpos);
+          const recurrenceBymonthday = normalizeRecurringMonthdayValue(formData.recurrence_bymonthday);
+          const recurrenceEndDateValue = String(formData.recurrence_end_date || '').trim();
+          const parsedRecurrenceEndDate = recurrenceEndDateValue ? parseFriendlyEventDate(recurrenceEndDateValue) : null;
+          const recurrenceExceptionPayload = normalizeRecurrenceExceptionsForPayload(formData.recurrence_exceptions);
+          if (!parsedEventDate) {
+            nextFieldErrors.event_date = DATE_INPUT_ERROR;
+          }
+          if (!parsedEventTime) {
+            nextFieldErrors.event_time = TIME_INPUT_ERROR;
+          }
+          if (!parsedDoorTime) {
+            nextFieldErrors.door_time = TIME_INPUT_ERROR;
+          }
+          if (recurrenceFrequency === 'weekly') {
+            if (!recurrenceByweekday.length) {
+              nextFieldErrors.recurrence_byweekday = RECURRENCE_WEEKDAY_ERROR;
+            }
+          } else if (recurrenceMonthlyMode === 'day_of_month') {
+            if (recurrenceBymonthday === null) {
+              nextFieldErrors.recurrence_bymonthday = RECURRENCE_MONTHDAY_ERROR;
+            }
+          } else {
+            if (recurrenceByweekday.length !== 1) {
+              nextFieldErrors.recurrence_byweekday = RECURRENCE_MONTHLY_WEEKDAY_ERROR;
+            }
+            if (!recurrenceBysetpos.length) {
+              nextFieldErrors.recurrence_bysetpos = RECURRENCE_SETPOS_ERROR;
+            }
+          }
+          if (recurrenceEndDateValue && !parsedRecurrenceEndDate) {
+            nextFieldErrors.recurrence_end_date = DATE_INPUT_ERROR;
+          } else if (
+            parsedEventDate &&
+            parsedRecurrenceEndDate &&
+            parsedRecurrenceEndDate < parsedEventDate
+          ) {
+            nextFieldErrors.recurrence_end_date = RECURRENCE_END_DATE_ERROR;
+          }
+          if (recurrenceExceptionPayload.error) {
+            nextFieldErrors.recurrence_exceptions = recurrenceExceptionPayload.error;
+          }
+          if (Object.keys(nextFieldErrors).length > 0) {
+            setFieldErrors(nextFieldErrors);
+            setError(SCHEDULE_VALIDATION_SUMMARY);
+            setEditorSectionsState(['schedule'], false);
+            setSubmitting(false);
+            const firstInvalid = ['event_date', 'event_time', 'door_time', 'recurrence_frequency', 'recurrence_byweekday', 'recurrence_bymonthday', 'recurrence_bysetpos', 'recurrence_end_date', 'recurrence_exceptions'].find((field) => nextFieldErrors[field]);
+            if (firstInvalid) {
+              requestAnimationFrame(() => {
+                const input = scheduleInputRefs.current[firstInvalid];
+                if (input && typeof input.focus === 'function') {
+                  input.focus();
+                }
+              });
+            }
+            return;
+          }
+          payload.event_date = parsedEventDate;
+          payload.event_time = parsedEventTime;
+          payload.door_time = `${parsedEventDate} ${parsedDoorTime}`;
+          payload.multi_day_enabled = 0;
+          payload.is_series_master = 1;
+          const recurrencePayload = {
+            enabled: 1,
+            frequency: recurrenceFrequency,
+            starts_on: parsedEventDate,
+            ends_on: parsedRecurrenceEndDate || null,
+          };
+          if (recurrenceFrequency === 'weekly') {
+            recurrencePayload.byweekday = recurrenceByweekday.length === 1 ? recurrenceByweekday[0] : recurrenceByweekday;
+            recurrencePayload.exceptions = recurrenceExceptionPayload.exceptions || [];
+          } else if (recurrenceMonthlyMode === 'day_of_month') {
+            recurrencePayload.monthly_mode = 'day_of_month';
+            recurrencePayload.bymonthday = recurrenceBymonthday;
+            recurrencePayload.exceptions = recurrenceExceptionPayload.exceptions || [];
+          } else {
+            recurrencePayload.monthly_mode = 'nth_weekday';
+            recurrencePayload.byweekday = recurrenceByweekday[0];
+            recurrencePayload.bysetpos = recurrenceBysetpos.length === 1
+              ? recurrenceBysetpos[0]
+              : recurrenceBysetpos;
+            recurrencePayload.exceptions = recurrenceExceptionPayload.exceptions || [];
+          }
+          payload.recurrence = recurrencePayload;
+          delete payload.occurrences;
+        } else if (formData.multi_day_enabled) {
           const occurrenceErrors = {};
           const normalizedOccurrences = [];
           (formData.occurrence_rows || []).forEach((row, index) => {
@@ -2841,6 +3972,9 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
         } else {
           const parsedEventDate = parseFriendlyEventDate(eventDateValue);
           const parsedEventTime = parseFriendlyEventTime(eventTimeValue);
+          if (!parsedDoorTime) {
+            nextFieldErrors.door_time = TIME_INPUT_ERROR;
+          }
           if (!parsedEventDate) {
             nextFieldErrors.event_date = DATE_INPUT_ERROR;
           }
@@ -2874,7 +4008,23 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
         delete payload.door_time;
         delete payload.occurrences;
       }
+      if (!recurrenceActive) {
+        payload.is_series_master = formData.is_series_master ? 1 : 0;
+        if (editing?.recurrence_rule_id && !formData.recurrence_enabled) {
+          payload.recurrence = { enabled: 0 };
+        } else {
+          delete payload.recurrence;
+        }
+      }
       delete payload.occurrence_rows;
+      delete payload.recurrence_enabled;
+      delete payload.recurrence_frequency;
+      delete payload.recurrence_byweekday;
+      delete payload.recurrence_monthly_mode;
+      delete payload.recurrence_bymonthday;
+      delete payload.recurrence_bysetpos;
+      delete payload.recurrence_end_date;
+      delete payload.recurrence_exceptions;
       const seatOverrideValue = String(payload.seat_request_email_override || '').trim();
       const contactEmailValue = String(payload.contact_email || '').trim();
       const emailFieldErrors = {};
@@ -3602,13 +4752,291 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                   onToggle={() => toggleEditorSection('schedule')}
                 >
                   <div className="space-y-5">
-                    <div className="rounded-xl border border-purple-500/20 bg-gray-900/40 p-4">
+                    {editingRecurringChild ? (
+                      <div className="rounded-xl border border-blue-500/30 bg-blue-950/20 p-4">
+                        <p className="text-sm font-semibold text-white">Recurring series instance</p>
+                        <p className="mt-1 text-xs text-blue-100/80">
+                          This date belongs to a recurring series. Edit the series master to change the weekday rule or future generated dates.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-blue-500/20 bg-blue-950/20 p-4">
+                        <div className="space-y-4">
+                          <label className="flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              checked={recurrenceActive}
+                              onChange={(e) => handleRecurringGenerationToggle(e.target.checked)}
+                              className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
+                            />
+                            <span>
+                              <span className="block text-sm font-semibold text-white">Recurring series</span>
+                              <span className="mt-1 block text-xs text-gray-300">
+                                Choose a weekly or monthly pattern, one start time, and one start date. The system will generate future dates from that recurring rule.
+                              </span>
+                            </span>
+                          </label>
+
+                          {formData.is_series_master && !recurrenceActive && !recurrenceLoading && (
+                            <p className="rounded-lg border border-blue-500/20 bg-gray-900/40 px-3 py-2 text-xs text-gray-300">
+                              This event is already a series master. Turn on automatic generation to extend it forward by recurrence rule.
+                            </p>
+                          )}
+
+                          {recurrenceLoading && (
+                            <p className="text-xs text-gray-300">Loading recurrence settings…</p>
+                          )}
+
+                          {recurrenceError && (
+                            <p className="text-xs text-red-300">{recurrenceError}</p>
+                          )}
+
+                          {recurrenceActive && (
+                            <div className="space-y-4">
+                              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                <div>
+                                  <label className="block text-sm text-gray-300 mb-1">Pattern</label>
+                                  <select
+                                    value={formData.recurrence_frequency}
+                                    onChange={(e) => handleRecurringFrequencyChange(e.target.value)}
+                                    ref={(node) => { scheduleInputRefs.current.recurrence_frequency = node; }}
+                                    className="w-full rounded border border-gray-600 bg-gray-700 px-4 py-2 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                                  >
+                                    {RECURRENCE_FREQUENCY_OPTIONS.map((option) => (
+                                      <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                  </select>
+                                  <p className="mt-1 text-xs text-gray-400">
+                                    Weekly supports one or more weekdays. Monthly supports a day number or one weekday with one or more monthly positions.
+                                  </p>
+                                </div>
+                                <div>
+                                  <label className="block text-sm text-gray-300 mb-1">End Date</label>
+                                  <input
+                                    type="text"
+                                    name="recurrence_end_date"
+                                    value={formData.recurrence_end_date}
+                                    onChange={handleChange}
+                                    onBlur={handleScheduleBlur}
+                                    placeholder="MM/DD/YYYY"
+                                    inputMode="numeric"
+                                    autoComplete="off"
+                                    aria-invalid={fieldErrors.recurrence_end_date ? 'true' : 'false'}
+                                    ref={(node) => { scheduleInputRefs.current.recurrence_end_date = node; }}
+                                    className={`w-full rounded border px-4 py-2 text-white ${
+                                      fieldErrors.recurrence_end_date
+                                        ? 'border-red-500 bg-red-900/25 focus:border-red-500 focus:ring-2 focus:ring-red-500'
+                                        : 'border-gray-600 bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500'
+                                    }`}
+                                  />
+                                  <p className="mt-1 text-xs text-gray-400">Optional. Leave blank to keep generating ahead using the default horizon.</p>
+                                  {fieldErrors.recurrence_end_date && (
+                                    <p className="mt-1 text-xs text-red-300">{fieldErrors.recurrence_end_date}</p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {formData.recurrence_frequency === 'weekly' ? (
+                                <div>
+                                  <label className="block text-sm text-gray-300 mb-1">Weekdays*</label>
+                                  <div
+                                    className={`grid grid-cols-2 gap-2 rounded-lg border p-3 ${
+                                      fieldErrors.recurrence_byweekday
+                                        ? 'border-red-500 bg-red-900/25'
+                                        : 'border-gray-600 bg-gray-900/40'
+                                    }`}
+                                  >
+                                    {RECURRENCE_WEEKDAY_OPTIONS.map((option, index) => {
+                                      const checked = normalizeRecurringWeekdayTokens(formData.recurrence_byweekday).includes(option.value);
+                                      return (
+                                        <label
+                                          key={option.value}
+                                          className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                                            checked
+                                              ? 'border-blue-400 bg-blue-500/10 text-white'
+                                              : 'border-gray-700 bg-gray-800/50 text-gray-200'
+                                          }`}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={() => handleRecurringWeekdayToggle(option.value)}
+                                            aria-required="true"
+                                            aria-invalid={fieldErrors.recurrence_byweekday ? 'true' : 'false'}
+                                            ref={index === 0 ? (node) => { scheduleInputRefs.current.recurrence_byweekday = node; } : undefined}
+                                            className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
+                                          />
+                                          <span>{option.label}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                  <p className="mt-1 text-xs text-gray-400">
+                                    Select one day for a standard weekly series, or multiple days to generate several occurrences in the same week.
+                                  </p>
+                                  {fieldErrors.recurrence_byweekday && (
+                                    <p className="mt-1 text-xs text-red-300">{fieldErrors.recurrence_byweekday}</p>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="space-y-4">
+                                  <div>
+                                    <label className="block text-sm text-gray-300 mb-1">Monthly Rule</label>
+                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                      {RECURRENCE_MONTHLY_MODE_OPTIONS.map((option) => {
+                                        const checked = formData.recurrence_monthly_mode === option.value;
+                                        return (
+                                          <label
+                                            key={option.value}
+                                            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                                              checked
+                                                ? 'border-blue-400 bg-blue-500/10 text-white'
+                                                : 'border-gray-700 bg-gray-800/50 text-gray-200'
+                                            }`}
+                                          >
+                                            <input
+                                              type="radio"
+                                              name="recurrence_monthly_mode"
+                                              value={option.value}
+                                              checked={checked}
+                                              onChange={(e) => handleRecurringMonthlyModeChange(e.target.value)}
+                                              className="h-4 w-4 border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
+                                            />
+                                            <span>{option.label}</span>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+
+                                  {formData.recurrence_monthly_mode === 'day_of_month' ? (
+                                    <div>
+                                      <label className="block text-sm text-gray-300 mb-1">Day of Month*</label>
+                                      <input
+                                        type="text"
+                                        name="recurrence_bymonthday"
+                                        value={formData.recurrence_bymonthday}
+                                        onChange={handleChange}
+                                        inputMode="numeric"
+                                        autoComplete="off"
+                                        aria-invalid={fieldErrors.recurrence_bymonthday ? 'true' : 'false'}
+                                        ref={(node) => { scheduleInputRefs.current.recurrence_bymonthday = node; }}
+                                        placeholder="15"
+                                        className={`w-full rounded border px-4 py-2 text-white ${
+                                          fieldErrors.recurrence_bymonthday
+                                            ? 'border-red-500 bg-red-900/25 focus:border-red-500 focus:ring-2 focus:ring-red-500'
+                                            : 'border-gray-600 bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500'
+                                        }`}
+                                      />
+                                      <p className="mt-1 text-xs text-gray-400">
+                                        Example: enter `15` to generate the 15th of each month.
+                                      </p>
+                                      {fieldErrors.recurrence_bymonthday && (
+                                        <p className="mt-1 text-xs text-red-300">{fieldErrors.recurrence_bymonthday}</p>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                      <div>
+                                        <label className="block text-sm text-gray-300 mb-1">Weekday*</label>
+                                        <select
+                                          value={normalizeRecurringWeekdayTokens(formData.recurrence_byweekday)[0] || ''}
+                                          onChange={(e) => {
+                                            setFieldErrors((prev) => {
+                                              if (!prev.recurrence_byweekday) return prev;
+                                              const next = { ...prev };
+                                              delete next.recurrence_byweekday;
+                                              return next;
+                                            });
+                                            if (error === SCHEDULE_VALIDATION_SUMMARY) {
+                                              setError('');
+                                            }
+                                            setFormData((prev) => ({
+                                              ...prev,
+                                              recurrence_byweekday: e.target.value ? stringifyRecurringWeekdayTokens([e.target.value]) : '',
+                                            }));
+                                          }}
+                                          aria-invalid={fieldErrors.recurrence_byweekday ? 'true' : 'false'}
+                                          ref={(node) => { scheduleInputRefs.current.recurrence_byweekday = node; }}
+                                          className={`w-full rounded border px-4 py-2 text-white ${
+                                            fieldErrors.recurrence_byweekday
+                                              ? 'border-red-500 bg-red-900/25 focus:border-red-500 focus:ring-2 focus:ring-red-500'
+                                              : 'border-gray-600 bg-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500'
+                                          }`}
+                                        >
+                                          <option value="">Select a weekday</option>
+                                          {RECURRENCE_WEEKDAY_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>{option.label}</option>
+                                          ))}
+                                        </select>
+                                        {fieldErrors.recurrence_byweekday && (
+                                          <p className="mt-1 text-xs text-red-300">{fieldErrors.recurrence_byweekday}</p>
+                                        )}
+                                      </div>
+                                      <div>
+                                        <label className="block text-sm text-gray-300 mb-1">Monthly Positions*</label>
+                                        <div
+                                          className={`grid grid-cols-2 gap-2 rounded-lg border p-3 ${
+                                            fieldErrors.recurrence_bysetpos
+                                              ? 'border-red-500 bg-red-900/25'
+                                              : 'border-gray-600 bg-gray-900/40'
+                                          }`}
+                                        >
+                                          {RECURRENCE_MONTHLY_ORDINAL_OPTIONS.map((option, index) => {
+                                            const checked = normalizeRecurringSetposTokens(formData.recurrence_bysetpos).includes(option.value);
+                                            return (
+                                              <label
+                                                key={option.value}
+                                                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                                                  checked
+                                                    ? 'border-blue-400 bg-blue-500/10 text-white'
+                                                    : 'border-gray-700 bg-gray-800/50 text-gray-200'
+                                                }`}
+                                              >
+                                                <input
+                                                  type="checkbox"
+                                                  checked={checked}
+                                                  onChange={() => handleRecurringSetposToggle(option.value)}
+                                                  aria-required="true"
+                                                  aria-invalid={fieldErrors.recurrence_bysetpos ? 'true' : 'false'}
+                                                  ref={index === 0 ? (node) => { scheduleInputRefs.current.recurrence_bysetpos = node; } : undefined}
+                                                  className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
+                                                />
+                                                <span>{option.label}</span>
+                                              </label>
+                                            );
+                                          })}
+                                        </div>
+                                        <p className="mt-1 text-xs text-gray-400">
+                                          Example: second Sunday uses `Second` plus `Sunday`. Existing business rules like second and fourth Friday are supported here too.
+                                        </p>
+                                        {fieldErrors.recurrence_bysetpos && (
+                                          <p className="mt-1 text-xs text-red-300">{fieldErrors.recurrence_bysetpos}</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              {renderRecurrenceExceptionEditor()}
+                            </div>
+                          )}
+
+                          <p className="text-xs text-gray-400">
+                            Multi-day shared-seat runs stay separate from recurring series generation in this editor.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className={`rounded-xl border border-purple-500/20 bg-gray-900/40 p-4 ${multiDayToggleDisabled ? 'opacity-60' : ''}`}>
                       <label className="flex items-start gap-3">
                         <input
                           type="checkbox"
                           checked={Boolean(formData.multi_day_enabled)}
                           onChange={(e) => handleMultiDayToggle(e.target.checked)}
-                          className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-800 text-purple-500 focus:ring-purple-500"
+                          disabled={multiDayToggleDisabled}
+                          className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-800 text-purple-500 focus:ring-purple-500 disabled:cursor-not-allowed disabled:opacity-60"
                         />
                         <span>
                           <span className="block text-sm font-semibold text-white">Multi-Day Event</span>
@@ -3617,12 +5045,17 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                           </span>
                         </span>
                       </label>
+                      {multiDayToggleDisabled && (
+                        <p className="mt-3 text-xs text-gray-400">
+                          Series masters and automatically generated weekday events cannot use the multi-day shared-seat schedule model.
+                        </p>
+                      )}
                     </div>
 
                     {!formData.multi_day_enabled ? (
                       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                         <div>
-                          <label className="block text-sm text-gray-300 mb-1">Event Date*</label>
+                          <label className="block text-sm text-gray-300 mb-1">{recurrenceActive ? 'Start Date*' : 'Event Date*'}</label>
                           <input
                             type="text"
                             name="event_date"
@@ -3645,6 +5078,13 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                           {fieldErrors.event_date && (
                             <p id="event-date-error" className="mt-1 text-xs text-red-300">
                               {fieldErrors.event_date}
+                            </p>
+                          )}
+                          {recurrenceActive && (
+                            <p className="mt-1 text-xs text-gray-400">
+                              {formData.recurrence_frequency === 'monthly'
+                                ? 'Generation begins on the first matching monthly occurrence on or after this date.'
+                                : 'Generation begins on the selected weekday on or after this date.'}
                             </p>
                           )}
                         </div>
@@ -3821,11 +5261,13 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                             : 'border-gray-600 bg-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500'
                         }`}
                       />
-                      <p id="door-time-help" className="mt-1 text-xs text-gray-400">
-                        {formData.multi_day_enabled
-                          ? 'Optional shared default. Leave an occurrence blank to use this time, or set an occurrence-specific doors-open time above.'
-                          : 'This feeds the “Doors Open” line on the public schedule.'}
-                      </p>
+                        <p id="door-time-help" className="mt-1 text-xs text-gray-400">
+                          {formData.multi_day_enabled
+                            ? 'Optional shared default. Leave an occurrence blank to use this time, or set an occurrence-specific doors-open time above.'
+                          : recurrenceActive
+                            ? 'Used for the doors-open time on every generated date in this recurring series.'
+                            : 'This feeds the “Doors Open” line on the public schedule.'}
+                        </p>
                       {fieldErrors.door_time && (
                         <p id="door-time-error" className="mt-1 text-xs text-red-300">
                           {fieldErrors.door_time}

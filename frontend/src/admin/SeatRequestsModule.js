@@ -10,6 +10,7 @@ import { buildEventRunDisplayLabel, formatEventRunText, isMultiDayEventRun, reso
 import { getSeatReasonMessage, getAdminReservationFailureMessage } from '../utils/reservationReasonMessages';
 import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
+import { getSeatRowFrame, resolveTableShapeForRow } from '../utils/tableLayoutGeometry';
 
 const OPEN_STATUSES = ['new', 'contacted', 'waiting'];
 const FINAL_STATUSES = ['confirmed', 'declined', 'closed', 'spam'];
@@ -1795,6 +1796,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                       const seatIds = seatIdsForRow(row);
                       const reservedForRow = seatIds.filter((seatId) => reservedSeatSet.has(seatId));
                       const pendingForRow = seatIds.filter((seatId) => pendingSeatSet.has(seatId));
+                      const seatFrame = getSeatRowFrame(row, { size: 60 });
                       return (
                         <div
                           key={`${row.id}-${row.row_label}`}
@@ -1803,20 +1805,19 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                             left: `${row.pos_x}%`,
                             top: `${row.pos_y}%`,
                             transform: 'translate(-50%, -50%)',
-                            padding: '20px',
-                            minWidth: `${row.width || 120}px`,
-                            minHeight: `${row.height || 120}px`,
+                            width: `${seatFrame.width}px`,
+                            height: `${seatFrame.height}px`,
                             pointerEvents: 'none',
                           }}
                         >
                           <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-xs font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap z-20 pointer-events-none">
                             {row.section_name} - {row.row_label}
                           </div>
-                          <div className="flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
+                          <div className="flex h-full w-full items-center justify-center" style={{ pointerEvents: 'auto' }}>
                             <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
                               <TableComponent
                                 row={row}
-                                tableShape={row.table_shape || 'table-6'}
+                                tableShape={resolveTableShapeForRow(row)}
                                 selectedSeats={selectedSeats}
                                 pendingSeats={pendingSeats}
                                 holdSeats={holdSeats}

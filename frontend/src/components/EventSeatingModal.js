@@ -13,6 +13,7 @@ import { formatEventDateTimeLabel, formatEventPriceDisplay, formatEventRunSummar
 import { buildEventPricingLegend, getFlatSeatPrice, resolveRowPricingTier, resolveSeatPricingTier } from '../utils/eventPricing';
 import { buildTierBodyStyle, buildTierGroupStyle, buildTierSwatchStyle, withAlpha } from '../utils/seatingTierTheme';
 import ReservationBanner from './ReservationBanner';
+import { getSeatRowFrame, resolveTableShapeForRow } from '../utils/tableLayoutGeometry';
 
 const ALWAYS_USE_SEAT_CHART_OVERLAY = true;
 
@@ -355,11 +356,19 @@ export default function EventSeatingModal({ event, onClose }) {
         (acc, row) => {
           const x = ((Number(row.pos_x) || 0) / 100) * canvasWidth;
           const y = ((Number(row.pos_y) || 0) / 100) * canvasHeight;
+          const rowFrame = isSeatRow(row)
+            ? getSeatRowFrame(row, { size: 60 })
+            : {
+                width: Number(row?.width) || 160,
+                height: Number(row?.height) || 120,
+              };
+          const halfWidth = rowFrame.width / 2;
+          const halfHeight = rowFrame.height / 2;
           return {
-            minX: Math.min(acc.minX, x),
-            maxX: Math.max(acc.maxX, x),
-            minY: Math.min(acc.minY, y),
-            maxY: Math.max(acc.maxY, y),
+            minX: Math.min(acc.minX, x - halfWidth),
+            maxX: Math.max(acc.maxX, x + halfWidth),
+            minY: Math.min(acc.minY, y - halfHeight),
+            maxY: Math.max(acc.maxY, y + halfHeight),
           };
         },
         { minX: Number.POSITIVE_INFINITY, maxX: Number.NEGATIVE_INFINITY, minY: Number.POSITIVE_INFINITY, maxY: Number.NEGATIVE_INFINITY }
@@ -1072,7 +1081,7 @@ export default function EventSeatingModal({ event, onClose }) {
 	                const tierVisual = tier ? pricingTierDisplayMap.get(tier.id) || null : null;
 	                const showTierRowSurface = tierVisual && shouldRenderTierRowSurface(row);
 	                const tierRowSurfaceFrame = showTierRowSurface ? resolveCompactTierRowSurfaceFrame(row) : null;
-	                const tierRowPadding = showTierRowSurface ? 10 : 0;
+	                const seatFrame = getSeatRowFrame(row, { size: 60 });
 
 	                return (
 	                  <div
@@ -1082,9 +1091,8 @@ export default function EventSeatingModal({ event, onClose }) {
 	                      left: `${row.pos_x}%`,
 	                      top: `${row.pos_y}%`,
 	                      transform: 'translate(-50%, -50%)',
-	                      padding: `${tierRowPadding}px`,
-	                      minWidth: `${row.width || 120}px`,
-	                      minHeight: `${row.height || 120}px`,
+	                      width: `${seatFrame.width}px`,
+	                      height: `${seatFrame.height}px`,
 	                      pointerEvents: 'none',
 	                    }}
 	                  >
@@ -1106,11 +1114,11 @@ export default function EventSeatingModal({ event, onClose }) {
 	                        }}
 	                      />
 	                    )}
-                    <div className="relative flex items-center justify-center" style={{ minHeight: '60px', pointerEvents: 'auto' }}>
+                    <div className="relative flex h-full w-full items-center justify-center" style={{ pointerEvents: 'auto' }}>
                       <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
                         <TableComponent
                           row={row}
-                          tableShape={row.table_shape || 'table-6'}
+                          tableShape={resolveTableShapeForRow(row)}
                           selectedSeats={selectedSeats}
                           pendingSeats={pendingSeats}
                           holdSeats={holdSeats}

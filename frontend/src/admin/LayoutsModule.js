@@ -5,6 +5,13 @@ import { API_BASE } from '../apiConfig';
 import TableComponent from '../components/TableComponent';
 import SeatingChart from '../components/SeatingChart';
 import { buildSeatLabel, normalizeSeatLabels, resolveRowHeaderLabels } from '../utils/seatLabelUtils';
+import {
+  DEFAULT_TABLE_SHAPE,
+  TABLE_SHAPE_OPTIONS,
+  getSeatRowFrame,
+  normalizeTableShapeValue,
+  resolveTableShapeForRow,
+} from '../utils/tableLayoutGeometry';
 
 const isDevBuild = process.env.NODE_ENV !== 'production';
 
@@ -60,29 +67,7 @@ const createInitialFormState = (overrides = {}) => ({
 });
 
 const seatTypes = ['general', 'premium', 'vip', 'accessible'];
-const tableShapes = [
-  { value: 'table-2', label: '2-Top Table', seats: 2 },
-  { value: 'high-top-2', label: '2-Seat High-Top', seats: 2 },
-  { value: 'table-4', label: '4-Top Table', seats: 4 },
-  { value: 'table-6', label: '6-Top Table', seats: 6 },
-  { value: 'table-7', label: '7-Top Table', seats: 7 },
-  { value: 'table-8', label: '8-Top Table', seats: 8 },
-  { value: 'round-6', label: 'Round Table (6)', seats: 6 },
-  { value: 'round-8', label: 'Round Table (8)', seats: 8 },
-  { value: 'bar-6', label: 'Bar Seating (6)', seats: 6 },
-  { value: 'booth-4', label: 'Booth (4)', seats: 4 },
-  { value: 'standing-10', label: 'Standing (10)', seats: 10 },
-  { value: 'standing-20', label: 'Standing (20)', seats: 20 }
-];
-
-const TABLE_SHAPE_ALIASES = {
-  'table-8-rect': 'table-8',
-};
-
-const normalizeTableShapeValue = (shape) => {
-  if (!shape) return shape;
-  return TABLE_SHAPE_ALIASES[shape] || shape;
-};
+const tableShapes = TABLE_SHAPE_OPTIONS;
 
 const canvasPresets = [
   { key: 'standard', label: 'Standard (120′ × 80′)', width: 1200, height: 800 },
@@ -95,6 +80,9 @@ const quickObjects = [
   { key: 'rect-7', label: 'Rect Table (7)', element_type: 'table', table_shape: 'table-7', total_seats: 7, seat_type: 'general' },
   { key: 'high-top-2', label: 'High-Top Table (2)', element_type: 'table', table_shape: 'high-top-2', total_seats: 2, seat_type: 'general', width: 110, height: 90 },
   { key: 'rect-8', label: 'Rect Table (8)', element_type: 'table', table_shape: 'table-8', total_seats: 8, seat_type: 'general' },
+  { key: 'rect-14', label: 'Rect Table (14)', element_type: 'table', table_shape: 'table-14', total_seats: 14, seat_type: 'general' },
+  { key: 'rect-22', label: 'Rect Table (22)', element_type: 'table', table_shape: 'table-22', total_seats: 22, seat_type: 'general' },
+  { key: 'rect-30', label: 'Rect Table (30)', element_type: 'table', table_shape: 'table-30', total_seats: 30, seat_type: 'general' },
   { key: 'round-8', label: 'Round Table (8)', element_type: 'table', table_shape: 'round-8', total_seats: 8, seat_type: 'general' },
   { key: 'chair', label: 'Single Chair', element_type: 'chair', table_shape: 'chair', total_seats: 1, seat_type: 'general' },
   { key: 'dance-floor', label: 'Dance Floor', element_type: 'area', width: 320, height: 220, color: '#f97316' },
@@ -102,6 +90,16 @@ const quickObjects = [
   { key: 'door', label: 'Door', element_type: 'marker', width: 80, height: 24, color: '#60a5fa' },
   { key: 'pole', label: 'Pole / Column', element_type: 'marker', width: 30, height: 30, color: '#9ca3af' }
 ];
+
+const buildSeatFrame = (row = {}) => getSeatRowFrame(row, { size: 60 });
+const canPreviewSeatObject = (row = {}) => {
+  const type = String(row?.element_type || '').trim().toLowerCase();
+  const normalizedShape = normalizeTableShapeValue(row?.table_shape || row?.seat_type || '');
+  return type === 'table'
+    || type === 'chair'
+    || normalizedShape === 'chair'
+    || /^(table-|high-top-|round-|bar-|booth-|standing-)/.test(normalizedShape);
+};
 
 export default function LayoutsModule() {
   const [layouts, setLayouts] = useState([]);
@@ -121,7 +119,7 @@ export default function LayoutsModule() {
     section_name: '',
     row_label: '',
     seat_type: 'general',
-    table_shape: 'table-6',
+    table_shape: DEFAULT_TABLE_SHAPE,
     total_seats: 6,
     pos_x: 50,
     pos_y: 50,
@@ -237,14 +235,23 @@ export default function LayoutsModule() {
     setEditingLayout(layout);
     const rows = Array.isArray(layout.layout_data)
       ? layout.layout_data.map((r, idx) => ({
-          ...r,
-          id: r.id || `temp-${idx}`,
-          element_type: r.element_type || (r.table_shape || r.total_seats ? 'table' : 'marker'),
-          width: r.width || r.marker_width || r.size || (r.element_type === 'chair' ? 60 : 160),
-          height: r.height || r.marker_height || r.size || 120,
-          label: r.label || r.marker_label || r.section_name || '',
-          seat_labels: normalizeSeatLabels(r.seat_labels || r.seatLabels || null),
-          table_shape: normalizeTableShapeValue(r.table_shape || null)
+          ...(() => {
+            const elementType = r.element_type || (r.table_shape || r.total_seats ? 'table' : 'marker');
+            const normalizedShape = normalizeTableShapeValue(r.table_shape || null);
+            const seatFrame = (elementType === 'table' || elementType === 'chair')
+              ? buildSeatFrame({ ...r, element_type: elementType, table_shape: normalizedShape })
+              : null;
+            return {
+              ...r,
+              id: r.id || `temp-${idx}`,
+              element_type: elementType,
+              width: r.width || r.marker_width || r.size || seatFrame?.width || (elementType === 'chair' ? 60 : 160),
+              height: r.height || r.marker_height || r.size || seatFrame?.height || 120,
+              label: r.label || r.marker_label || r.section_name || '',
+              seat_labels: normalizeSeatLabels(r.seat_labels || r.seatLabels || null),
+              table_shape: normalizedShape,
+            };
+          })()
         }))
       : [];
     setLayoutRows(rows);
@@ -388,6 +395,10 @@ export default function LayoutsModule() {
   // Visual editor functions
   const handleAddRow = () => {
     const shape = tableShapes.find(s => s.value === rowForm.table_shape);
+    const seatFrame = buildSeatFrame({
+      element_type: 'table',
+      table_shape: rowForm.table_shape || DEFAULT_TABLE_SHAPE,
+    });
     const newRow = {
       id: createRowId(),
       element_type: 'table',
@@ -399,6 +410,8 @@ export default function LayoutsModule() {
       pos_x: rowForm.pos_x,
       pos_y: rowForm.pos_y,
       rotation: rowForm.rotation,
+      width: seatFrame.width,
+      height: seatFrame.height,
       seat_labels: {}
     };
     setLayoutRows([...layoutRows, newRow]);
@@ -408,7 +421,7 @@ export default function LayoutsModule() {
       section_name: '',
       row_label: '',
       seat_type: 'general',
-      table_shape: 'table-6',
+      table_shape: DEFAULT_TABLE_SHAPE,
       total_seats: 6,
       pos_x: 50,
       pos_y: 50,
@@ -417,6 +430,12 @@ export default function LayoutsModule() {
   };
 
   const handleAddObject = (template) => {
+    const seatFrame = (template.element_type === 'table' || template.element_type === 'chair')
+      ? buildSeatFrame({
+          element_type: template.element_type,
+          table_shape: normalizeTableShapeValue(template.table_shape || null),
+        })
+      : null;
     const newRow = {
       id: createRowId(),
       element_type: template.element_type || 'marker',
@@ -430,8 +449,8 @@ export default function LayoutsModule() {
       rotation: 0,
       label: template.label,
       color: template.color || '#4b5563',
-      width: template.width || 140,
-      height: template.height || 120,
+      width: template.width || seatFrame?.width || 140,
+      height: template.height || seatFrame?.height || 120,
       seat_labels: template.element_type === 'table' ? {} : undefined
     };
     setLayoutRows([...layoutRows, newRow]);
@@ -772,13 +791,14 @@ export default function LayoutsModule() {
 
               {/* Visual preview thumbnail */}
               <div className="mb-4 bg-gray-50 dark:bg-gray-900 rounded-lg p-3 h-32 relative overflow-hidden border border-gray-200 dark:border-gray-700">
-                {Array.isArray(layout.layout_data) && layout.layout_data.length > 0 ? (
+                {Array.isArray(layout.layout_data) && layout.layout_data.some(canPreviewSeatObject) ? (
                   <div className="flex flex-wrap gap-1 items-center justify-center h-full">
-                    {layout.layout_data.slice(0, 6).map((row, idx) => (
+                    {layout.layout_data.filter(canPreviewSeatObject).slice(0, 6).map((row, idx) => (
                       <div key={idx} className="text-xs">
                         <TableComponent
-                          row={{...row, total_seats: Math.min(row.total_seats, 6)}}
-                          tableShape={row.table_shape || 'table-6'}
+                          row={row}
+                          size={36}
+                          tableShape={resolveTableShapeForRow(row)}
                           selectedSeats={[]}
                           pendingSeats={[]}
                           onToggleSeat={() => {}}
@@ -786,8 +806,8 @@ export default function LayoutsModule() {
                         />
                       </div>
                     ))}
-                    {layout.layout_data.length > 6 && (
-                      <div className="text-xs text-gray-400 ml-2">+{layout.layout_data.length - 6} more</div>
+                    {layout.layout_data.filter(canPreviewSeatObject).length > 6 && (
+                      <div className="text-xs text-gray-400 ml-2">+{layout.layout_data.filter(canPreviewSeatObject).length - 6} more</div>
                     )}
                   </div>
                 ) : (
@@ -1268,7 +1288,7 @@ export default function LayoutsModule() {
                       >
                         <TableComponent
                           row={draggingRow}
-                          tableShape={draggingRow.table_shape || 'table-6'}
+                          tableShape={resolveTableShapeForRow(draggingRow)}
                           selectedSeats={[]}
                           pendingSeats={[]}
                           onToggleSeat={() => {}}
@@ -1354,9 +1374,9 @@ export default function LayoutsModule() {
                       );
                     }
 
-                    const isChairRow = type === 'chair';
-                    const containerWidth = row.width || (isChairRow ? 60 : 120);
-                    const containerHeight = row.height || (isChairRow ? 60 : 120);
+                    const seatFrame = buildSeatFrame({ ...row, element_type: type });
+                    const containerWidth = seatFrame.width;
+                    const containerHeight = seatFrame.height;
                     return (
                       <div
                         key={row.id}
@@ -1370,9 +1390,8 @@ export default function LayoutsModule() {
                         style={{
                           ...baseStyle,
                           transform: 'translate(-50%, -50%)',
-                          padding: isChairRow ? '16px 10px' : '40px 20px',
-                          minWidth: `${containerWidth}px`,
-                          minHeight: `${containerHeight}px`,
+                          width: `${containerWidth}px`,
+                          height: `${containerHeight}px`,
                         }}
                       >
                         {showRowControls && (() => {
@@ -1395,11 +1414,11 @@ export default function LayoutsModule() {
                             </div>
                           );
                         })()}
-                        <div className="flex items-center justify-center" style={{ minHeight: '60px' }}>
+                        <div className="flex h-full w-full items-center justify-center">
                           <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
                             <TableComponent
                               row={row}
-                              tableShape={row.table_shape || (type === 'chair' ? 'chair' : 'table-6')}
+                              tableShape={resolveTableShapeForRow({ ...row, element_type: type })}
                               selectedSeats={[]}
                               pendingSeats={[]}
                               onToggleSeat={() => {}}

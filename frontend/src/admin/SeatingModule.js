@@ -4,30 +4,22 @@ import { Plus, Trash2, Edit } from 'lucide-react';
 import TableComponent from '../components/TableComponent';
 import { API_BASE } from '../apiConfig';
 import { resolveRowHeaderLabels } from '../utils/seatLabelUtils';
+import {
+  DEFAULT_TABLE_SHAPE,
+  TABLE_SHAPE_OPTIONS,
+  normalizeTableShapeValue,
+  resolveTableShapeForRow,
+} from '../utils/tableLayoutGeometry';
 
 const seatTypes = ['general', 'premium', 'vip', 'accessible'];
-const tableShapes = [
-  { value: 'table-2', label: '2-Top Table', seats: 2 },
-  { value: 'high-top-2', label: '2-Seat High-Top', seats: 2 },
-  { value: 'table-4', label: '4-Top Table', seats: 4 },
-  { value: 'table-6', label: '6-Top Table', seats: 6 },
-  { value: 'table-7', label: '7-Top Table', seats: 7 },
-  { value: 'table-8', label: '8-Top Table', seats: 8 },
-  { value: 'round-6', label: 'Round Table (6)', seats: 6 },
-  { value: 'round-8', label: 'Round Table (8)', seats: 8 },
-  { value: 'bar-6', label: 'Bar Seating (6)', seats: 6 },
-  { value: 'booth-4', label: 'Booth (4)', seats: 4 },
-  { value: 'standing-10', label: 'Standing (10)', seats: 10 },
-  { value: 'standing-20', label: 'Standing (20)', seats: 20 }
-];
-
-const TABLE_SHAPE_ALIASES = {
-  'table-8-rect': 'table-8',
-};
-
-const normalizeTableShapeValue = (shape) => {
-  if (!shape) return shape;
-  return TABLE_SHAPE_ALIASES[shape] || shape;
+const tableShapes = TABLE_SHAPE_OPTIONS;
+const hasRenderableTableShape = (row = {}) => {
+  const type = String(row?.element_type || '').trim().toLowerCase();
+  const normalizedShape = normalizeTableShapeValue(row?.table_shape || row?.seat_type || '');
+  return type === 'table'
+    || type === 'chair'
+    || normalizedShape === 'chair'
+    || /^(table-|high-top-|round-|bar-|booth-|standing-)/.test(normalizedShape);
 };
 
 export default function SeatingModule(){
@@ -37,7 +29,7 @@ export default function SeatingModule(){
   const containerRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ section_name: '', row_letter: '', total_seats: 1, seat_type: 'general', table_shape: 'table-6' });
+  const [formData, setFormData] = useState({ section_name: '', row_letter: '', total_seats: 1, seat_type: 'general', table_shape: DEFAULT_TABLE_SHAPE });
   const [editing, setEditing] = useState(null);
 
   const fetchSeating = async () => {
@@ -184,7 +176,7 @@ export default function SeatingModule(){
 
   const openAdd = (section = '') => {
     setEditing(null);
-    setFormData({ section_name: section, row_letter: '', total_seats: 6, seat_type: 'general', table_shape: 'table-6', is_active: true, pos_x: '', pos_y: '', rotation: 0 });
+    setFormData({ section_name: section, row_letter: '', total_seats: 6, seat_type: 'general', table_shape: DEFAULT_TABLE_SHAPE, is_active: true, pos_x: '', pos_y: '', rotation: 0 });
     setShowForm(true);
   };
 
@@ -195,7 +187,7 @@ export default function SeatingModule(){
       row_letter: row.row_label || row.row_letter,
       total_seats: row.total_seats,
       seat_type: row.seat_type,
-      table_shape: normalizeTableShapeValue(row.table_shape || 'table-6'),
+      table_shape: normalizeTableShapeValue(row.table_shape || DEFAULT_TABLE_SHAPE),
       is_active: !!row.is_active,
       pos_x: row.pos_x,
       pos_y: row.pos_y,
@@ -360,7 +352,7 @@ export default function SeatingModule(){
 
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Table Shape</label>
-                <select name="table_shape" value={formData.table_shape || 'table-6'} onChange={(e) => {
+                <select name="table_shape" value={formData.table_shape || DEFAULT_TABLE_SHAPE} onChange={(e) => {
                   const selected = tableShapes.find(ts => ts.value === e.target.value);
                   handleChange(e);
                   if (selected) {
@@ -693,12 +685,12 @@ function LayoutDraggable({ row, style, containerRef, onUpdate, gridEnabled, grid
         );
       })()}
       <div className="flex items-center gap-2">
-        {(row.table_shape || row.seat_type === 'table-6') ? (
+        {hasRenderableTableShape(row) ? (
           <div className="flex items-center gap-2">
             <TableComponent
               row={row}
               size={96}
-              tableShape={row.table_shape || 'table-6'}
+              tableShape={resolveTableShapeForRow(row)}
               selectedSeats={(function(){ try{ return Array.isArray(row.selected_seats) ? row.selected_seats : (row.selected_seats ? JSON.parse(row.selected_seats) : []); }catch(e){ return []; } })()}
               interactive={true}
               onToggleSeat={async (seatId) => {
