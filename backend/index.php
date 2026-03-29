@@ -5318,7 +5318,14 @@ function list_events(Request $request, ?string $scopeOverride = null): array
         $seriesMetaSelect = ', esm.schedule_label AS series_schedule_label, esm.summary AS series_summary, esm.footer_note AS series_footer_note';
         $seriesMetaJoin = ' LEFT JOIN event_series_meta esm ON esm.event_id = e.id';
     }
-    $recurrenceSelect = ', rr_self.id AS recurrence_rule_id, rr_parent.id AS parent_recurrence_rule_id, rx_skip.id AS skipped_instance_exception_id, rx_skip.exception_date AS skipped_instance_exception_date';
+    $recurrenceSelect = ', rr_self.id AS recurrence_rule_id, rr_parent.id AS parent_recurrence_rule_id, rx_skip.id AS skipped_instance_exception_id, rx_skip.exception_date AS skipped_instance_exception_date'
+        . ', COALESCE(rr_self.frequency, rr_parent.frequency) AS recurrence_frequency'
+        . ', COALESCE(rr_self.byweekday, rr_parent.byweekday) AS recurrence_byweekday'
+        . ', COALESCE(rr_self.bymonthday, rr_parent.bymonthday) AS recurrence_bymonthday'
+        . ', COALESCE(rr_self.bysetpos, rr_parent.bysetpos) AS recurrence_bysetpos'
+        . ', COALESCE(rr_self.starts_on, rr_parent.starts_on) AS recurrence_starts_on'
+        . ', COALESCE(rr_self.ends_on, rr_parent.ends_on) AS recurrence_ends_on'
+        . ', COALESCE(rr_self.rule_payload, rr_parent.rule_payload) AS recurrence_rule_payload';
     $occurrenceDateExpr = "COALESCE(e.event_date, DATE(e.start_datetime))";
     $recurrenceJoin = ' LEFT JOIN event_recurrence_rules rr_self ON rr_self.event_id = e.id LEFT JOIN event_recurrence_rules rr_parent ON rr_parent.event_id = e.series_master_id LEFT JOIN event_recurrence_exceptions rx_skip ON rx_skip.recurrence_id = rr_parent.id AND rx_skip.exception_type = \'skip\' AND rx_skip.exception_date = ' . $occurrenceDateExpr;
     $sql = "SELECT e.*{$categorySelect}{$seriesMetaSelect}{$recurrenceSelect} FROM events e{$seriesMetaJoin}{$categoryJoin}{$recurrenceJoin} $where $orderBy $limitClause";

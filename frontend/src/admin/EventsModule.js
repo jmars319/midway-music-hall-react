@@ -15,6 +15,7 @@ import {
   parseFriendlyEventDate,
   parseFriendlyEventTime,
 } from '../utils/adminEventDateTimeInput';
+import { getLegacyRecurringSeriesOverride } from '../utils/recurringSeriesDisplay';
 const SECTION_STORAGE_KEY = 'mmh_event_sections';
 const EVENT_EDITOR_SECTION_STORAGE_KEY = 'mmh_event_editor_sections';
 
@@ -1393,6 +1394,18 @@ export default function EventsModule(){
         seatingEnabled: Boolean(formData.seating_enabled),
       }),
     [effectiveCategorySlug, effectiveIsSeriesMaster, formData.seating_enabled]
+  );
+  const legacyRecurringSeriesOverride = useMemo(() => getLegacyRecurringSeriesOverride({
+    title: editing?.title || formData.artist_name || '',
+    artist_name: formData.artist_name || editing?.artist_name || '',
+  }), [editing?.artist_name, editing?.title, formData.artist_name]);
+  const usingLegacySeriesScheduleFallback = Boolean(
+    legacyRecurringSeriesOverride?.schedule
+    && !String(formData.series_schedule_label || '').trim()
+  );
+  const usingLegacySeriesSummaryFallback = Boolean(
+    legacyRecurringSeriesOverride?.summary
+    && !String(formData.series_summary || '').trim()
   );
 
   const recurrenceExceptionPreviewRequest = useMemo(() => {
@@ -5793,6 +5806,11 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                         <div>
                           <h3 className="text-lg font-semibold text-white">Recurring Series Details</h3>
                           <p className="text-sm text-gray-400">Customize the public copy for this series. These fields power the Recurring Events grid on the home page.</p>
+                          {(usingLegacySeriesScheduleFallback || usingLegacySeriesSummaryFallback) ? (
+                            <p className="mt-2 text-xs text-blue-200">
+                              This series is currently using legacy default recurring copy on the public page. Type in the fields below to replace that fallback without changing code.
+                            </p>
+                          ) : null}
                         </div>
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                           <div>
@@ -5802,9 +5820,13 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                               value={formData.series_schedule_label}
                               onChange={handleChange}
                               className="w-full rounded bg-gray-800 px-4 py-2 text-white"
-                              placeholder="e.g., Thursdays · 6:00 – 10:00 PM"
+                              placeholder={legacyRecurringSeriesOverride?.schedule || 'e.g., Thursdays · 6:00 – 10:00 PM'}
                             />
-                            <p className="mt-1 text-xs text-gray-400">Shown beneath the “Typical schedule” heading.</p>
+                            <p className="mt-1 text-xs text-gray-400">
+                              {usingLegacySeriesScheduleFallback
+                                ? `Current legacy default: ${legacyRecurringSeriesOverride.schedule}. Enter text here to override it.`
+                                : 'Shown beneath the “Typical schedule” heading.'}
+                            </p>
                           </div>
                           <div>
                             <label className="block text-sm text-gray-300 mb-1">Highlight summary</label>
@@ -5814,8 +5836,13 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                               onChange={handleChange}
                               rows="3"
                               className="w-full rounded bg-gray-800 px-4 py-2 text-white"
-                              placeholder="One-line overview that appears near the title."
+                              placeholder={legacyRecurringSeriesOverride?.summary || 'One-line overview that appears near the title.'}
                             />
+                            <p className="mt-1 text-xs text-gray-400">
+                              {usingLegacySeriesSummaryFallback
+                                ? `Current legacy default: ${legacyRecurringSeriesOverride.summary}. Enter text here to override it.`
+                                : 'Shown near the title on the recurring card.'}
+                            </p>
                           </div>
                         </div>
                         <div>

@@ -1,23 +1,9 @@
 import React from 'react';
 import { RefreshCw, CalendarDays, Clock, Info, CheckCircle2 } from 'lucide-react';
-
-const formatDateTime = (date) => {
-  if (!date) return '';
-  const value = new Date(date);
-  if (Number.isNaN(value.getTime())) return '';
-  return value.toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
-};
-
-const formatTime = (date) => {
-  if (!date) return '';
-  const value = new Date(date);
-  if (Number.isNaN(value.getTime())) return '';
-  return value.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-};
+import {
+  formatRecurringOccurrenceDateLabel,
+  formatRecurringOccurrenceTimeLabel,
+} from '../utils/recurringSeriesDisplay';
 
 const pickBalancedColumns = (count, maxCols = 4) => {
   const safeCount = Math.max(0, count || 0);
@@ -73,6 +59,8 @@ export default function RecurringEvents({ series = [] }) {
             const { master, nextOccurrence, upcomingOccurrences, happeningThisWeek, scheduleLabel, summary, footerNote } = item || {};
             const safeMaster = master || {};
             const upcoming = Array.isArray(upcomingOccurrences) ? upcomingOccurrences : [];
+            const nextOccurrenceDate = formatRecurringOccurrenceDateLabel(nextOccurrence);
+            const nextOccurrenceTime = formatRecurringOccurrenceTimeLabel(nextOccurrence);
             const fallbackKey = [
               item?.key,
               safeMaster.id,
@@ -104,13 +92,13 @@ export default function RecurringEvents({ series = [] }) {
                       <p className="text-white font-semibold">{scheduleLabel || 'Recurring schedule TBA'}</p>
                     </div>
                   </div>
-                  {nextOccurrence?.start_datetime ? (
+                  {nextOccurrenceDate ? (
                     <div className="flex items-center gap-3">
                       <Clock className="h-5 w-5 text-purple-300" />
                       <div>
                         <p className="text-sm uppercase tracking-wide text-purple-300">Next occurrence</p>
                         <p className="text-white font-semibold">
-                          {formatDateTime(nextOccurrence.start_datetime)} · {formatTime(nextOccurrence.start_datetime)}
+                          {nextOccurrenceDate}{nextOccurrenceTime ? ` · ${nextOccurrenceTime}` : ''}
                         </p>
                       </div>
                     </div>
@@ -134,11 +122,13 @@ export default function RecurringEvents({ series = [] }) {
                     <div className="divide-y divide-gray-800 border border-gray-800 rounded-xl overflow-hidden">
                       {upcoming.slice(0, 4).map((occ, occIdx) => {
                         const occKey = occ?.id || `${fallbackKey || 'recurring'}-occ-${occIdx}`;
+                        const occurrenceDate = formatRecurringOccurrenceDateLabel(occ);
+                        const occurrenceTime = formatRecurringOccurrenceTimeLabel(occ);
                         return (
                         <div key={occKey} className="px-4 py-3 flex items-center justify-between bg-gray-900/70">
                           <div>
-                            <p className="text-white font-medium">{formatDateTime(occ?.start_datetime)}</p>
-                            <p className="text-gray-400 text-sm">{formatTime(occ?.start_datetime)} · {occ?.venue_code || 'MMH'}</p>
+                            <p className="text-white font-medium">{occurrenceDate || 'Date TBA'}</p>
+                            <p className="text-gray-400 text-sm">{occurrenceTime || 'Time TBA'} · {occ?.venue_code || 'MMH'}</p>
                           </div>
                         </div>
                       );})}

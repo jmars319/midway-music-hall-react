@@ -22,6 +22,7 @@ scripts=(
   ./scripts/dev-verify-paypal-hosted-buttons-api.sh
   ./scripts/dev-verify-seating-guardrails.sh
   ./scripts/dev-verify-table-layout-geometry.sh
+  ./scripts/dev-verify-recurring-homepage.sh
   ./scripts/dev-verify-recurring-events-api.sh
   ./scripts/dev-verify-recurring-backcompat.sh
   ./scripts/dev-verify-event-images.sh

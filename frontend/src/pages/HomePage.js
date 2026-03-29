@@ -18,29 +18,14 @@ import { API_BASE } from '../apiConfig';
 import { getEventAnchorId, getEventEndDate, getEventStartDate } from '../utils/eventFormat';
 import { getEventMinimumPrice } from '../utils/eventPricing';
 import { resolveEventImageUrl } from '../utils/imageVariants';
+import {
+  MANUAL_RECURRING_OVERRIDES,
+  deriveRecurringSeriesFooterNote,
+  deriveRecurringSeriesScheduleLabel,
+  deriveRecurringSeriesSummary,
+} from '../utils/recurringSeriesDisplay';
 
 const SITE_BASE_URL = 'https://midwaymusichall.net';
-
-const SERIES_OVERRIDES = [
-  {
-    key: 'community-jam',
-    match: /jam session/i,
-    schedule: 'Thursdays · 6:00 – 10:00 PM',
-    summary: 'Open community jam hosted by local musicians.',
-  },
-  {
-    key: 'dj-dan',
-    match: /dancin'? dan|friday night dj/i,
-    schedule: 'Fridays · 6:00 – 10:00 PM',
-    summary: 'Friday Night DJ dance party with Dancin’ Dan.',
-  },
-  {
-    key: 'cruise-in',
-    match: /cruise in/i,
-    schedule: 'Monthly Cruise-In',
-    summary: 'Classic cars, vendors, and community hangouts.',
-  },
-];
 
 const parseTags = (value) => {
   if (!value) return [];
@@ -177,18 +162,6 @@ const resolveEventStatus = (event) => {
   return EVENT_STATUS_MAP[status] || 'https://schema.org/EventScheduled';
 };
 
-const lookupSeriesMetadata = (master) => {
-  const override = SERIES_OVERRIDES.find((item) => item.match.test(master.title || master.artist_name || ''));
-  const getTrimmed = (value) => (typeof value === 'string' ? value.trim() : '');
-  const customSummary = getTrimmed(master.series_summary);
-  const customSchedule = getTrimmed(master.series_schedule_label);
-  const customFooter = getTrimmed(master.series_footer_note);
-  const summary = customSummary || override?.summary || master.description || master.notes || 'Recurring community series.';
-  const scheduleLabel = customSchedule || override?.schedule || 'Recurring schedule';
-  const footerNote = customFooter || null;
-  return { summary, scheduleLabel, footerNote, overrideKey: override?.key || null };
-};
-
 const getSeriesDisplayName = (event = {}) => event.series_label || event.artist_name || event.title || 'Recurring Series';
 
 const normalizeSeriesKey = (value = '') => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'series';
@@ -241,11 +214,12 @@ const buildRecurringSeries = (masters, occurrences, now) => {
       return null;
     }
     const happeningThisWeek = nextOccurrence ? sameWeek(getEventDateValue(nextOccurrence), now) : false;
-    const { summary, scheduleLabel, footerNote, overrideKey } = lookupSeriesMetadata(masterLike || {});
+    const summary = deriveRecurringSeriesSummary(masterLike || {});
+    const scheduleLabel = deriveRecurringSeriesScheduleLabel(masterLike || {}, filtered);
+    const footerNote = deriveRecurringSeriesFooterNote(masterLike || {});
     const displayNameSource = masterLike || {};
     const fallbackBaseKey = normalizeSeriesKey(getSeriesDisplayName(displayNameSource));
-    const baseKey = overrideKey || fallbackBaseKey;
-    const key = registerKey(baseKey, masterId || reference?.id || filtered[0]?.id);
+    const key = registerKey(fallbackBaseKey, masterId || reference?.id || filtered[0]?.id);
     const sourceIds = [
       reference?.id,
       masterId && (!reference || reference.id !== masterId) ? masterId : null,
@@ -284,8 +258,8 @@ const buildRecurringSeries = (masters, occurrences, now) => {
   return series.filter((item) => item.nextOccurrence || item.upcomingOccurrences.length);
 };
 
-const buildManualRecurringSeries = (events, now, existingKeys = new Set()) => SERIES_OVERRIDES.map((override) => {
-  const key = override.key || normalizeSeriesKey(override.scheduleLabel || override.summary || override.match.toString());
+const buildManualRecurringSeries = (events, now, existingKeys = new Set()) => MANUAL_RECURRING_OVERRIDES.map((override) => {
+  const key = override.key || normalizeSeriesKey(override.schedule || override.summary || override.match.toString());
   if (existingKeys.has(key)) {
     return null;
   }
@@ -351,9 +325,7 @@ const transformEvents = (events) => {
 
   const recurringSeriesBase = buildRecurringSeries(masters, decoratedOccurrences, startOfToday);
   const existingRecurringKeys = new Set(recurringSeriesBase.map((series) => series.key));
-  const recurringCandidates = decoratedOccurrences.length
-    ? [...decoratedOccurrences, ...decoratedSingles]
-    : decoratedSingles;
+  const recurringCandidates = decoratedSingles;
   const manualRecurring = buildManualRecurringSeries(recurringCandidates, startOfToday, existingRecurringKeys);
   const recurringSeries = [...recurringSeriesBase, ...manualRecurring];
   const recurringEventIds = new Set(
