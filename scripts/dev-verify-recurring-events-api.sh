@@ -138,6 +138,13 @@ fetch_child_rows() {
     "$event_id"
 }
 
+fetch_child_publish_rows() {
+  local event_id="$1"
+  php -r "if (!isset(\$_SERVER['REQUEST_METHOD'])) { \$_SERVER['REQUEST_METHOD'] = 'CLI'; } require \$argv[1]; \$pdo = \\Midway\\Backend\\Database::connection(); \$stmt = \$pdo->prepare('SELECT event_date, status, visibility FROM events WHERE series_master_id = ? AND deleted_at IS NULL ORDER BY event_date ASC, id ASC'); \$stmt->execute([(int) \$argv[2]]); echo json_encode(\$stmt->fetchAll(PDO::FETCH_ASSOC));" \
+    "$ROOT_DIR/backend/bootstrap.php" \
+    "$event_id"
+}
+
 fetch_event_response() {
   local event_id="$1"
   curl -fsS \
@@ -145,6 +152,32 @@ fetch_event_response() {
     -H "Origin: ${ADMIN_ORIGIN}" \
     -H 'Accept: application/json' \
     "${API_BASE}/events/${event_id}"
+}
+
+fetch_public_events_response() {
+  curl -fsS \
+    -H 'Accept: application/json' \
+    "${API_BASE}/public/events?timeframe=upcoming&archived=0&limit=200"
+}
+
+find_event_by_id() {
+  local json="$1"
+  local event_id="$2"
+  JSON_INPUT="$json" python3 - "$event_id" <<'PYCODE'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ.get("JSON_INPUT", ""))
+events = payload.get("events", []) if isinstance(payload, dict) else payload
+target = int(sys.argv[1])
+for event in events:
+    if int(event.get("id") or 0) == target:
+        print(json.dumps(event, separators=(',', ':')))
+        break
+else:
+    raise SystemExit(f"event not found: {target}")
+PYCODE
 }
 
 assert_json_array_equals() {
@@ -177,11 +210,12 @@ monthly_day_event_id=""
 monthly_nth_event_id=""
 monthly_override_event_id=""
 legacy_monthly_event_id=""
+public_display_event_id=""
 single_event_id=""
 
 cleanup() {
   local event_id
-  for event_id in "$single_weekday_event_id" "$weekly_exception_event_id" "$multi_weekday_event_id" "$monthly_day_event_id" "$monthly_nth_event_id" "$monthly_override_event_id" "$legacy_monthly_event_id" "$single_event_id"; do
+  for event_id in "$single_weekday_event_id" "$weekly_exception_event_id" "$multi_weekday_event_id" "$monthly_day_event_id" "$monthly_nth_event_id" "$monthly_override_event_id" "$legacy_monthly_event_id" "$public_display_event_id" "$single_event_id"; do
     if [ -n "$event_id" ]; then
       curl -fsS -X DELETE \
         -b "$ADMIN_COOKIE_JAR" \
@@ -212,6 +246,15 @@ apply_legacy_monthly_rule_shape() {
     "$starts_on" \
     "$ends_on" \
     "$rule_payload"
+}
+
+tamper_child_occurrence_date() {
+  local child_id="$1"
+  local new_date="$2"
+  php -r "if (!isset(\$_SERVER['REQUEST_METHOD'])) { \$_SERVER['REQUEST_METHOD'] = 'CLI'; } require \$argv[1]; \$pdo = \\Midway\\Backend\\Database::connection(); \$stmt = \$pdo->prepare('SELECT event_time, timezone, door_time, end_datetime FROM events WHERE id = ? LIMIT 1'); \$stmt->execute([(int) \$argv[2]]); \$row = \$stmt->fetch(PDO::FETCH_ASSOC); if (!\$row) { fwrite(STDERR, \"child not found\\n\"); exit(1); } \$time = \$row['event_time'] ?: '18:00:00'; \$tz = new DateTimeZone((string) (\$row['timezone'] ?: 'America/New_York')); \$start = new DateTimeImmutable(\$argv[3] . ' ' . \$time, \$tz); \$existingEnd = !empty(\$row['end_datetime']) ? new DateTimeImmutable((string) \$row['end_datetime'], \$tz) : \$start->modify('+4 hours'); \$duration = max(3600, \$existingEnd->getTimestamp() - \$start->getTimestamp()); \$door = null; if (!empty(\$row['door_time'])) { \$doorDt = new DateTimeImmutable((string) \$row['door_time'], \$tz); \$door = new DateTimeImmutable(\$argv[3] . ' ' . \$doorDt->format('H:i:s'), \$tz); } \$update = \$pdo->prepare('UPDATE events SET event_date = ?, start_datetime = ?, end_datetime = ?, door_time = ?, updated_by = ?, change_note = ? WHERE id = ?'); \$update->execute([\$argv[3], \$start->format('Y-m-d H:i:s'), \$start->modify('+' . \$duration . ' seconds')->format('Y-m-d H:i:s'), \$door ? \$door->format('Y-m-d H:i:s') : null, 'verify', 'tampered stale child for public recurrence verify', (int) \$argv[2]]);" \
+    "$ROOT_DIR/backend/bootstrap.php" \
+    "$child_id" \
+    "$new_date"
 }
 
 admin_login
@@ -506,6 +549,39 @@ if event.get("pricing_config") is not None:
     raise SystemExit("flat recurring child should not have tiered pricing_config")
 PY
 log_success "[recurring-api] flat pricing remains intact on generated recurring children"
+
+single_child_publish_rows="$(fetch_child_publish_rows "$single_weekday_event_id")"
+SINGLE_CHILD_PUBLISH_ROWS="$single_child_publish_rows" python3 - <<'PY'
+import json
+import os
+
+rows = json.loads(os.environ["SINGLE_CHILD_PUBLISH_ROWS"])
+if not rows:
+    raise SystemExit("expected generated recurring children to exist")
+for row in rows:
+    if row.get("status") != "published":
+        raise SystemExit(f"child {row.get('event_date')} was not auto-published")
+    if row.get("visibility") != "public":
+        raise SystemExit(f"child {row.get('event_date')} was not auto-published to public visibility")
+PY
+log_success "[recurring-api] generated recurring children auto-publish by default"
+
+post_json "PUT" "/events/${single_weekday_event_id}" '{"status":"published","visibility":"public"}' >/dev/null
+single_child_publish_rows="$(fetch_child_publish_rows "$single_weekday_event_id")"
+SINGLE_CHILD_PUBLISH_ROWS="$single_child_publish_rows" python3 - <<'PY'
+import json
+import os
+
+rows = json.loads(os.environ["SINGLE_CHILD_PUBLISH_ROWS"])
+if not rows:
+    raise SystemExit("expected generated recurring children to exist")
+for row in rows:
+    if row.get("status") != "published":
+        raise SystemExit(f"child {row.get('event_date')} lost published status after master publish")
+    if row.get("visibility") != "public":
+        raise SystemExit(f"child {row.get('event_date')} lost public visibility after master publish")
+PY
+log_success "[recurring-api] publishing the series master keeps generated recurring children public"
 
 weekly_exception_series_payload="$(python3 - "$single_start_on" "$single_third_occurrence" "$single_second_occurrence" "$weekly_override_date" "$(date +%s)" <<'PY'
 import json
@@ -1052,6 +1128,108 @@ post_json "PUT" "/events/${legacy_monthly_event_id}" "$legacy_monthly_update_pay
 legacy_monthly_trimmed_dates="$(fetch_child_dates "$legacy_monthly_event_id")"
 assert_json_array_equals "$legacy_monthly_trimmed_dates" "$legacy_trimmed_dates_csv"
 log_success "[recurring-api] legacy monthly rows with imported recurrence children remain compatible when resynced"
+
+public_display_info="$(python3 - <<'PY'
+import json
+import calendar
+from datetime import date, timedelta
+
+today = date.today()
+start = today + timedelta(days=1)
+current = date(start.year, start.month, 1)
+dates = []
+seen = set()
+
+def nth_weekday(year, month, weekday, nth):
+    matches = []
+    for week in calendar.monthcalendar(year, month):
+        day_value = week[weekday]
+        if day_value:
+            matches.append(date(year, month, day_value))
+    return matches[nth - 1] if len(matches) >= nth else None
+
+while len(dates) < 3:
+    for position in (2, 4):
+        candidate = nth_weekday(current.year, current.month, 1, position)  # Tuesday
+        if candidate is None or candidate < start or candidate in seen:
+            continue
+        dates.append(candidate.isoformat())
+        seen.add(candidate)
+        if len(dates) >= 3:
+            break
+    current = date(current.year + 1, 1, 1) if current.month == 12 else date(current.year, current.month + 1, 1)
+
+print(json.dumps({
+    "start_on": start.isoformat(),
+    "end_on": dates[-1],
+    "dates": dates,
+    "tampered_date": (date.fromisoformat(dates[1]) - timedelta(days=1)).isoformat(),
+}))
+PY
+)"
+
+public_display_start_on="$(json_field "$public_display_info" start_on)"
+public_display_end_on="$(json_field "$public_display_info" end_on)"
+public_display_dates_csv="$(json_array_to_csv "$(json_field "$public_display_info" dates)")"
+public_display_tampered_date="$(json_field "$public_display_info" tampered_date)"
+
+public_display_series_payload="$(python3 - "$public_display_start_on" "$public_display_end_on" "$(date +%s)" <<'PY'
+import json
+import sys
+
+start_on, end_on, stamp = sys.argv[1:4]
+print(json.dumps({
+    "artist_name": f"Verify Public Recurring Display {stamp}",
+    "event_date": start_on,
+    "event_time": "18:00:00",
+    "door_time": f"{start_on} 16:30:00",
+    "timezone": "America/New_York",
+    "status": "published",
+    "visibility": "public",
+    "ticket_type": "general_admission",
+    "series_schedule_label": "2nd & 4th Tuesday · 6:00 PM",
+    "series_summary": "Public recurring display verification",
+    "is_series_master": 1,
+    "recurrence": {
+        "enabled": 1,
+        "frequency": "monthly",
+        "monthly_mode": "nth_weekday",
+        "byweekday": "TU",
+        "bysetpos": [2, 4],
+        "starts_on": start_on,
+        "ends_on": end_on,
+        "exceptions": [],
+    },
+}))
+PY
+)"
+
+public_display_series_response="$(post_json "POST" "/events" "$public_display_series_payload")"
+public_display_event_id="$(json_field "$public_display_series_response" id)"
+
+public_display_child_rows="$(fetch_child_rows "$public_display_event_id")"
+public_display_second_child_id="$(json_field "$public_display_child_rows" '1.id')"
+tamper_child_occurrence_date "$public_display_second_child_id" "$public_display_tampered_date"
+
+public_events_response="$(fetch_public_events_response)"
+public_master_row="$(find_event_by_id "$public_events_response" "$public_display_event_id")"
+PUBLIC_MASTER_ROW="$public_master_row" EXPECTED_DATES="$public_display_dates_csv" TAMPERED_DATE="$public_display_tampered_date" python3 - <<'PY'
+import json
+import os
+
+row = json.loads(os.environ["PUBLIC_MASTER_ROW"])
+expected = [value for value in os.environ["EXPECTED_DATES"].split(",") if value]
+tampered = os.environ["TAMPERED_DATE"]
+actual = [
+    (occurrence.get("event_date") or occurrence.get("occurrence_date"))
+    for occurrence in (row.get("public_recurrence_occurrences") or [])
+]
+if actual != expected:
+    raise SystemExit(f"public recurrence preview should follow the saved rule: expected {expected}, got {actual}")
+if tampered in actual:
+    raise SystemExit(f"tampered child date leaked into public recurrence preview: {tampered}")
+PY
+log_success "[recurring-api] public recurring series preview follows admin recurrence settings even if a child row becomes stale"
 
 single_date="$(date -u +%F)"
 single_payload="$(python3 - "$single_date" "$(date +%s)" <<'PY'

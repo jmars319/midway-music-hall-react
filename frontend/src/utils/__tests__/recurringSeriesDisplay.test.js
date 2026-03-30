@@ -4,6 +4,7 @@ import {
   formatRecurringOccurrenceDateLabel,
   formatRecurringOccurrenceTimeLabel,
   getLegacyRecurringSeriesOverride,
+  resolveRecurringSeriesDisplayOccurrences,
 } from '../recurringSeriesDisplay';
 
 describe('recurringSeriesDisplay', () => {
@@ -63,5 +64,20 @@ describe('recurringSeriesDisplay', () => {
       event_date: '2026-04-07',
       event_time: '18:00:00',
     })).toBe('6:00 PM');
+  });
+
+  test('prefers rule-derived public recurrence occurrences over stale attached child rows', () => {
+    expect(resolveRecurringSeriesDisplayOccurrences({
+      public_recurrence_occurrences: [
+        { event_date: '2026-04-14', event_time: '18:00:00' },
+        { event_date: '2026-04-28', event_time: '18:00:00' },
+      ],
+    }, [
+      { event_date: '2026-04-14', event_time: '18:00:00' },
+      { event_date: '2026-04-27', event_time: '18:00:00' },
+    ])).toEqual([
+      { event_date: '2026-04-14', event_time: '18:00:00' },
+      { event_date: '2026-04-28', event_time: '18:00:00' },
+    ]);
   });
 });

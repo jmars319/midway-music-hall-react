@@ -248,6 +248,16 @@ export const deriveRecurringSeriesFooterNote = (master = {}) => {
   return value || null;
 };
 
+export const resolveRecurringSeriesDisplayOccurrences = (master = {}, fallbackOccurrences = []) => {
+  const configured = Array.isArray(master?.public_recurrence_occurrences)
+    ? master.public_recurrence_occurrences.filter(Boolean)
+    : [];
+  if (configured.length > 0) {
+    return configured;
+  }
+  return Array.isArray(fallbackOccurrences) ? fallbackOccurrences : [];
+};
+
 export const deriveRecurringSeriesScheduleLabel = (master = {}, upcomingOccurrences = []) => {
   const customLabel = typeof master.series_schedule_label === 'string' ? master.series_schedule_label.trim() : '';
   if (customLabel) return customLabel;

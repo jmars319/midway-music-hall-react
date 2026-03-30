@@ -1,5 +1,6 @@
 import React from 'react';
 import { RefreshCw, CalendarDays, Clock, Info, CheckCircle2 } from 'lucide-react';
+import { formatEventPriceDisplay } from '../utils/eventFormat';
 import {
   formatRecurringOccurrenceDateLabel,
   formatRecurringOccurrenceTimeLabel,
@@ -61,6 +62,7 @@ export default function RecurringEvents({ series = [] }) {
             const upcoming = Array.isArray(upcomingOccurrences) ? upcomingOccurrences : [];
             const nextOccurrenceDate = formatRecurringOccurrenceDateLabel(nextOccurrence);
             const nextOccurrenceTime = formatRecurringOccurrenceTimeLabel(nextOccurrence);
+            const priceLabel = formatEventPriceDisplay(safeMaster);
             const fallbackKey = [
               item?.key,
               safeMaster.id,
@@ -114,6 +116,12 @@ export default function RecurringEvents({ series = [] }) {
                       Happening this week
                     </div>
                   )}
+                  {priceLabel ? (
+                    <div>
+                      <p className="text-sm uppercase tracking-wide text-purple-300">Pricing</p>
+                      <p className="text-white font-semibold">{priceLabel}</p>
+                    </div>
+                  ) : null}
                 </div>
 
                 {upcoming.length ? (

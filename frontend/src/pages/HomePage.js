@@ -23,6 +23,7 @@ import {
   deriveRecurringSeriesFooterNote,
   deriveRecurringSeriesScheduleLabel,
   deriveRecurringSeriesSummary,
+  resolveRecurringSeriesDisplayOccurrences,
 } from '../utils/recurringSeriesDisplay';
 
 const SITE_BASE_URL = 'https://midwaymusichall.net';
@@ -197,7 +198,8 @@ const buildRecurringSeries = (masters, occurrences, now) => {
   };
 
   const buildPayload = (reference, masterId, occList = []) => {
-    const filtered = occList.filter((occ) => {
+    const sourceOccurrences = resolveRecurringSeriesDisplayOccurrences(reference || {}, occList);
+    const filtered = sourceOccurrences.filter((occ) => {
       const dt = getEventDateValue(occ);
       return dt && dt >= now;
     }).sort((a, b) => {

@@ -2323,6 +2323,7 @@ export default function EventsModule(){
   const renderSeriesInstanceRow = (seriesItem, instance) => {
     const status = normalizeEventStatus(instance);
     const archived = isEventArchived(instance);
+    const isPublished = status === 'published' && !archived;
     const statusClasses = status === 'published'
       ? 'bg-green-500/15 text-green-200 border border-green-500/30'
       : archived
@@ -2352,6 +2353,23 @@ export default function EventsModule(){
           <p className="text-xs text-gray-500 mt-1">Slug: {instance.slug}</p>
         </div>
         <div className="flex items-center gap-2">
+          {!archived && (
+            isPublished ? (
+              <button
+                onClick={() => unpublishEvent(instance)}
+                className="px-3 py-2 rounded bg-yellow-600 hover:bg-yellow-500 text-white text-sm"
+              >
+                Unpublish
+              </button>
+            ) : (
+              <button
+                onClick={() => publishEvent(instance)}
+                className="px-3 py-2 rounded bg-green-600 hover:bg-green-700 text-white text-sm"
+              >
+                Publish
+              </button>
+            )
+          )}
           <button
             onClick={() => openEdit(instance)}
             className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm"
@@ -2385,6 +2403,15 @@ export default function EventsModule(){
     const eventTitle = master.artist_name || master.title || 'Recurring Series';
     const subtitle = master.title && master.title !== eventTitle ? master.title : master.notes;
     const expanded = !!seriesExpanded[seriesItem.id];
+    const masterStatus = normalizeEventStatus(master);
+    const masterArchived = isEventArchived(master);
+    const masterPublished = masterStatus === 'published' && !masterArchived;
+    const masterStatusClasses = masterPublished
+      ? 'bg-green-500/15 text-green-200 border border-green-500/30'
+      : masterArchived
+        ? 'bg-gray-500/15 text-gray-200 border border-gray-500/30'
+        : 'bg-yellow-500/15 text-yellow-200 border border-yellow-500/30';
+    const masterStatusLabel = masterArchived ? 'Archived' : (masterPublished ? 'Published' : 'Draft');
     const toggleSeries = () => {
       setSeriesExpanded((prev) => ({
         ...prev,
@@ -2408,6 +2435,9 @@ export default function EventsModule(){
             <span className="text-xs font-semibold px-2 py-1 rounded-full bg-blue-500/15 text-blue-200 border border-blue-500/30">
               Recurring Series
             </span>
+            <span className={`text-xs font-semibold px-2 py-1 rounded-full ${masterStatusClasses}`}>
+              {masterStatusLabel}
+            </span>
             <span className="text-xs font-semibold px-2 py-1 rounded-full bg-cyan-500/15 text-cyan-100 border border-cyan-500/30">
               {seriesItem.categoryLabel}
             </span>
@@ -2425,20 +2455,58 @@ export default function EventsModule(){
           </p>
         </div>
         <div className="mt-4 flex flex-wrap justify-between gap-2">
-          <button
-            type="button"
-            onClick={toggleSeries}
-            className="px-4 py-2 rounded bg-amber-400 text-gray-900 text-sm font-semibold border border-amber-200 hover:bg-amber-300 transition"
-          >
-            {expanded ? 'Hide Dates' : 'Show Dates'}
-          </button>
-          <button
-            type="button"
-            onClick={() => openEdit(master)}
-            className="px-3 py-2 rounded bg-blue-600 text-white text-sm hover:bg-blue-700"
-          >
-            Edit Series
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={toggleSeries}
+              className="px-4 py-2 rounded bg-amber-400 text-gray-900 text-sm font-semibold border border-amber-200 hover:bg-amber-300 transition"
+            >
+              {expanded ? 'Hide Dates' : 'Show Dates'}
+            </button>
+            {masterArchived ? (
+              <button
+                type="button"
+                onClick={() => restoreEvent(master, 'draft')}
+                className="px-3 py-2 rounded bg-blue-600 text-white text-sm hover:bg-blue-700"
+              >
+                Restore Draft
+              </button>
+            ) : masterPublished ? (
+              <button
+                type="button"
+                onClick={() => unpublishEvent(master)}
+                className="px-3 py-2 rounded bg-yellow-600 text-white text-sm hover:bg-yellow-500"
+              >
+                Unpublish Series
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => publishEvent(master)}
+                className="px-3 py-2 rounded bg-green-600 text-white text-sm hover:bg-green-700"
+              >
+                Publish Series
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {!masterArchived && (
+              <button
+                type="button"
+                onClick={() => archiveEvent(master)}
+                className="px-3 py-2 rounded bg-red-600/80 text-white text-sm hover:bg-red-600"
+              >
+                Archive Series
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => openEdit(master)}
+              className="px-3 py-2 rounded bg-blue-600 text-white text-sm hover:bg-blue-700"
+            >
+              Edit Series
+            </button>
+          </div>
         </div>
         <div className="mt-4 p-3 rounded-lg border border-gray-800 bg-gray-950/60 text-sm text-gray-200">
           <p className="text-xs uppercase tracking-wide text-gray-500">Seat requests</p>
