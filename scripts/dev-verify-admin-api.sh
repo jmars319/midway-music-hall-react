@@ -41,6 +41,18 @@ require_backend_health_once || {
   exit 1
 }
 
+log_step "[admin-api] verifying CORS allowlist behavior"
+cors_allowed_headers="$(curl -sS -D - -o /dev/null -H "Origin: ${ADMIN_ORIGIN}" "${API_BASE}/health")"
+if ! printf '%s' "$cors_allowed_headers" | grep -Fqi "Access-Control-Allow-Origin: ${ADMIN_ORIGIN}"; then
+  log_error "[admin-api] expected matched origin to receive Access-Control-Allow-Origin"
+  exit 1
+fi
+cors_denied_headers="$(curl -sS -D - -o /dev/null -H 'Origin: https://untrusted.example' "${API_BASE}/health")"
+if printf '%s' "$cors_denied_headers" | grep -qi '^Access-Control-Allow-Origin:'; then
+  log_error "[admin-api] unexpected Access-Control-Allow-Origin for untrusted origin"
+  exit 1
+fi
+
 json_field() {
   local json="$1"
   local field="$2"
@@ -114,6 +126,19 @@ PY
 }
 
 admin_login
+
+log_step "[admin-api] verifying untrusted origins are rejected for admin mutations"
+csrf_probe_status="$(curl -sS -o "${TMP_DIR}/csrf-probe.json" -w '%{http_code}' \
+  -b "$ADMIN_COOKIE_JAR" \
+  -H 'Origin: https://untrusted.example' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{"current_password":"x","new_password":"y","confirm_password":"y"}' \
+  "${API_BASE}/admin/change-password")"
+if [ "$csrf_probe_status" != "403" ]; then
+  log_error "[admin-api] expected 403 for admin mutation from untrusted origin, got ${csrf_probe_status}"
+  exit 1
+fi
 
 layout_name="Dev Verify Layout $(date +%s)"
 layout_payload=$(cat <<JSON
@@ -238,5 +263,49 @@ curl -fsS \
   -H "Origin: ${ADMIN_ORIGIN}" \
   -H 'Accept: application/json' \
   "${API_BASE}/events/${created_event_id}" >/dev/null
+
+log_step "[admin-api] verifying forgiving login throttle"
+throttle_identifier="verify-throttle-$(date +%s)@example.com"
+throttle_payload=$(python3 - "$throttle_identifier" <<'PY'
+import json
+import sys
+print(json.dumps({"email": sys.argv[1], "password": "definitely-wrong"}))
+PY
+)
+for attempt in $(seq 1 10); do
+  status_code="$(curl -sS -o "${TMP_DIR}/throttle-${attempt}.json" -w '%{http_code}' \
+    -H "Origin: ${ADMIN_ORIGIN}" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d "$throttle_payload" \
+    "${API_BASE}/login")"
+  if [ "$status_code" != "401" ]; then
+    log_error "[admin-api] expected 401 on failed login attempt ${attempt}, got ${status_code}"
+    exit 1
+  fi
+done
+status_code="$(curl -sS -o "${TMP_DIR}/throttle-blocked.json" -w '%{http_code}' \
+  -H "Origin: ${ADMIN_ORIGIN}" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d "$throttle_payload" \
+  "${API_BASE}/login")"
+if [ "$status_code" != "429" ]; then
+  log_error "[admin-api] expected 429 after generous failed-login threshold, got ${status_code}"
+  exit 1
+fi
+retry_after="$(python3 - <<'PY' "${TMP_DIR}/throttle-blocked.json"
+import json
+import sys
+with open(sys.argv[1], 'r', encoding='utf-8') as fh:
+    payload = json.load(fh)
+value = int(payload.get('retry_after_seconds') or 0)
+print(value)
+PY
+)"
+if [ "$retry_after" -le 0 ]; then
+  log_error "[admin-api] expected retry_after_seconds on throttled login response"
+  exit 1
+fi
 
 log_success "[admin-api] verification flow completed successfully"

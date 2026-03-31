@@ -18,11 +18,25 @@ if (php_sapi_name() !== 'cli') {
 Env::load(__DIR__ . '/../.env');
 $uploadDir = Env::get('UPLOAD_DIR', 'uploads');
 $absUploads = realpath(__DIR__ . '/../' . trim($uploadDir, '/')) ?: (__DIR__ . '/../' . trim($uploadDir, '/'));
+$resolveAppPath = static function ($value, string $defaultPath): string {
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return $defaultPath;
+    }
+    $isAbsolute = $raw[0] === '/'
+        || preg_match('/^[A-Za-z]:[\\\\\\/]/', $raw) === 1;
+    if ($isAbsolute) {
+        return $raw;
+    }
+    return rtrim(dirname(__DIR__, 2), '/') . '/' . ltrim($raw, '/');
+};
+$storageDir = $resolveAppPath(Env::get('APP_STORAGE_DIR', ''), dirname(__DIR__, 2) . '/storage');
 define('UPLOADS_DIR', $absUploads);
 define('UPLOADS_RESPONSIVE_DIR', $absUploads . '/variants');
 define('UPLOADS_RESPONSIVE_OPTIMIZED_DIR', UPLOADS_RESPONSIVE_DIR . '/optimized');
 define('UPLOADS_RESPONSIVE_WEBP_DIR', UPLOADS_RESPONSIVE_DIR . '/webp');
-define('UPLOADS_MANIFEST_DIR', $absUploads . '/manifests');
+define('UPLOADS_MANIFEST_DIR', $resolveAppPath(Env::get('IMAGE_MANIFEST_DIR', ''), rtrim($storageDir, '/') . '/image-manifests'));
+define('LEGACY_UPLOADS_MANIFEST_DIR', $absUploads . '/manifests');
 define('RESPONSIVE_IMAGE_WIDTH_PROFILES', [
     'icon' => [32, 48, 64, 96, 128, 160, 192, 256],
     'thumb' => [96, 128, 160, 192, 240, 320, 480],

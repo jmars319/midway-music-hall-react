@@ -100,7 +100,7 @@ export default function ArchivePage({ onAdminClick, onNavigate }) {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <Navigation />
-      <main className="py-12">
+      <main id="main" role="main" tabIndex={-1} className="py-12">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <header className="mb-10 text-center">
             <p className="text-sm uppercase tracking-widest text-purple-300">Event Archive</p>

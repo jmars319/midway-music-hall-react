@@ -73,7 +73,7 @@ export default function GatheringPlacePage({ onAdminClick, onNavigate }) {
       <AnnouncementBanner />
       <AnnouncementPopup />
 
-      <main id="main" role="main">
+      <main id="main" role="main" tabIndex={-1}>
         <Hero variant="tgp" ctaTarget="schedule" />
 
         <section id="schedule" className="py-12">

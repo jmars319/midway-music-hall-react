@@ -37,7 +37,8 @@ export default function LoginPage({ onLogin, onBack }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-900 py-12">
-      <div className="max-w-md w-full bg-gray-800 rounded-xl p-6 border border-purple-500/20">
+      <a href="#main" className="skip-link">Skip to content</a>
+      <main id="main" role="main" tabIndex={-1} className="max-w-md w-full bg-gray-800 rounded-xl p-6 border border-purple-500/20">
         <div className="flex justify-center mb-4">
           <BrandImage
             variant="logo"
@@ -47,7 +48,7 @@ export default function LoginPage({ onLogin, onBack }) {
             height={80}
           />
         </div>
-        <h2 className="text-2xl font-bold text-white mb-2">Admin Login</h2>
+        <h1 className="text-2xl font-bold text-white mb-2">Admin Login</h1>
         {/* Demo credentials removed for security */}
 
         {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500 text-red-300 rounded" role="alert" aria-live="assertive">{error}</div>}
@@ -87,7 +88,7 @@ export default function LoginPage({ onLogin, onBack }) {
             </button>
           </div>
         </form>
-      </div>
+      </main>
     </div>
   );
 }

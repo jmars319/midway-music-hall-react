@@ -26,6 +26,7 @@ scripts=(
   ./scripts/dev-verify-recurring-events-api.sh
   ./scripts/dev-verify-recurring-backcompat.sh
   ./scripts/dev-verify-event-images.sh
+  ./scripts/dev-verify-public-surface.sh
   ./scripts/dev-verify-clearable-fields.sh
   ./scripts/dev-verify-event-reschedule.sh
   ./scripts/dev-verify-announcement-banner.sh

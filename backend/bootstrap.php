@@ -20,6 +20,22 @@ ini_set('display_errors', $debug ? '1' : '0');
 
 date_default_timezone_set('UTC');
 
+$defaultTrustedOrigins = 'https://midwaymusichall.net,https://www.midwaymusichall.net,http://localhost:3000,http://127.0.0.1:3000';
+define('DEFAULT_TRUSTED_WEB_ORIGINS', $defaultTrustedOrigins);
+
+$resolveAppPath = static function ($value, string $defaultPath): string {
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return $defaultPath;
+    }
+    $isAbsolute = $raw[0] === '/'
+        || preg_match('/^[A-Za-z]:[\\\\\\/]/', $raw) === 1;
+    if ($isAbsolute) {
+        return $raw;
+    }
+    return rtrim(dirname(__DIR__), '/') . '/' . ltrim($raw, '/');
+};
+
 $uploadDir = Env::get('UPLOAD_DIR', 'uploads');
 $absUploadDir = __DIR__ . '/' . trim($uploadDir, '/');
 if (!is_dir($absUploadDir)) {
@@ -39,8 +55,11 @@ if (!is_dir($webpDir)) {
 $responsiveDir = $absUploadDir . '/variants';
 $responsiveOptimizedDir = $responsiveDir . '/optimized';
 $responsiveWebpDir = $responsiveDir . '/webp';
-$manifestDir = $absUploadDir . '/manifests';
-foreach ([$responsiveDir, $responsiveOptimizedDir, $responsiveWebpDir, $manifestDir] as $dir) {
+$storageDir = $resolveAppPath(Env::get('APP_STORAGE_DIR', ''), dirname(__DIR__) . '/storage');
+$manifestDir = $resolveAppPath(Env::get('IMAGE_MANIFEST_DIR', ''), rtrim($storageDir, '/') . '/image-manifests');
+$legacyManifestDir = $absUploadDir . '/manifests';
+$loginThrottleDir = rtrim($storageDir, '/') . '/login-throttle';
+foreach ([$responsiveDir, $responsiveOptimizedDir, $responsiveWebpDir, $storageDir, $manifestDir, $loginThrottleDir] as $dir) {
     if (!is_dir($dir)) {
         mkdir($dir, 0775, true);
     }
@@ -53,6 +72,9 @@ define('UPLOADS_RESPONSIVE_DIR', $responsiveDir);
 define('UPLOADS_RESPONSIVE_OPTIMIZED_DIR', $responsiveOptimizedDir);
 define('UPLOADS_RESPONSIVE_WEBP_DIR', $responsiveWebpDir);
 define('UPLOADS_MANIFEST_DIR', $manifestDir);
+define('LEGACY_UPLOADS_MANIFEST_DIR', $legacyManifestDir);
+define('APP_STORAGE_DIR', $storageDir);
+define('ADMIN_LOGIN_THROTTLE_DIR', $loginThrottleDir);
 
 define('IMAGE_MAX_DIMENSION', (int) Env::get('IMAGE_MAX_DIMENSION', 2000));
 define('IMAGE_JPEG_QUALITY', (int) Env::get('IMAGE_JPEG_QUALITY', 85));
@@ -78,14 +100,28 @@ define('RESPONSIVE_IMAGE_WIDTHS', $responsiveUnion);
 
 define('LAYOUT_HISTORY_MAX', (int) Env::get('LAYOUT_HISTORY_MAX', 200));
 define('LAYOUT_HISTORY_RETENTION_DAYS', (int) Env::get('LAYOUT_HISTORY_RETENTION_DAYS', 90));
+define('ADMIN_LOGIN_THROTTLE_WINDOW_SECONDS', max(60, (int) Env::get('ADMIN_LOGIN_THROTTLE_WINDOW_SECONDS', 15 * 60)));
+define('ADMIN_LOGIN_THROTTLE_MAX_FAILURES', max(3, (int) Env::get('ADMIN_LOGIN_THROTTLE_MAX_FAILURES', 10)));
+define('ADMIN_LOGIN_THROTTLE_IP_MAX_FAILURES', max(10, (int) Env::get('ADMIN_LOGIN_THROTTLE_IP_MAX_FAILURES', 30)));
+define('ADMIN_LOGIN_THROTTLE_BACKOFF_SECONDS', [30, 120, 600]);
+
+$forwardedProtoRaw = trim((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+$forwardedProto = strtolower(trim(explode(',', $forwardedProtoRaw)[0] ?? ''));
+$isSecureRequest = in_array($forwardedProto, ['https'], true)
+    || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
 
 $sessionCookie = Env::get('ADMIN_SESSION_COOKIE', 'mmh_admin');
 $sessionLifetime = max(3600, (int) Env::get('ADMIN_SESSION_LIFETIME', 60 * 60 * 24 * 7));
 $sessionIdle = max(900, (int) Env::get('ADMIN_SESSION_IDLE_TIMEOUT', 60 * 60 * 4));
-$sessionSecure = filter_var(Env::get('ADMIN_SESSION_COOKIE_SECURE', false), FILTER_VALIDATE_BOOL);
+$sessionSecureEnv = Env::get('ADMIN_SESSION_COOKIE_SECURE', null);
+$sessionSecure = $sessionSecureEnv === null
+    ? $isSecureRequest
+    : filter_var($sessionSecureEnv, FILTER_VALIDATE_BOOL);
 define('ADMIN_SESSION_LIFETIME', $sessionLifetime);
 define('ADMIN_SESSION_IDLE_TIMEOUT', $sessionIdle);
 if (session_status() === PHP_SESSION_NONE) {
+    ini_set('session.use_only_cookies', '1');
+    ini_set('session.use_strict_mode', '1');
     session_name($sessionCookie);
     session_set_cookie_params([
         'lifetime' => ADMIN_SESSION_LIFETIME,
@@ -98,7 +134,7 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 $requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
-$configuredOrigins = Env::get('CORS_ALLOW_ORIGINS', Env::get('CORS_ALLOW_ORIGIN', 'https://midwaymusichall.net,http://localhost:3000'));
+$configuredOrigins = Env::get('CORS_ALLOW_ORIGINS', Env::get('CORS_ALLOW_ORIGIN', DEFAULT_TRUSTED_WEB_ORIGINS));
 $originList = array_values(array_filter(array_map('trim', explode(',', (string) $configuredOrigins))));
 $matchedOrigin = null;
 if ($requestOrigin && $originList) {
@@ -109,18 +145,14 @@ if ($requestOrigin && $originList) {
         }
     }
 }
-if (!$matchedOrigin) {
-    $matchedOrigin = $originList[0] ?? '*';
-}
-$allowOrigin = $matchedOrigin ?: '*';
-$sendCredentials = $allowOrigin !== '*';
-header('Access-Control-Allow-Origin: ' . $allowOrigin);
-if ($allowOrigin !== '*') {
+$allowOrigin = $matchedOrigin;
+if ($allowOrigin !== null) {
+    header('Access-Control-Allow-Origin: ' . $allowOrigin);
     header('Vary: Origin');
 }
 header('Access-Control-Allow-Methods: GET,POST,PUT,PATCH,DELETE,OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
-if ($sendCredentials) {
+if ($allowOrigin !== null) {
     header('Access-Control-Allow-Credentials: true');
 }
 
@@ -141,18 +173,17 @@ $cspDirectives = [
     "base-uri 'self'"
 ];
 $cspPolicy = implode('; ', $cspDirectives);
-$cspMode = strtolower((string) Env::get('CSP_MODE', 'report-only'));
+$cspMode = strtolower((string) Env::get('CSP_MODE', $debug ? 'report-only' : 'enforce'));
 if ($cspMode === 'enforce') {
     header('Content-Security-Policy: ' . $cspPolicy);
 } else {
     header('Content-Security-Policy-Report-Only: ' . $cspPolicy);
 }
-$isHttps = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
 $hstsEnabledEnv = Env::get('HSTS_ENABLED', null);
 $hstsEnabled = $hstsEnabledEnv !== null
     ? filter_var($hstsEnabledEnv, FILTER_VALIDATE_BOOL)
     : filter_var(Env::get('FORCE_STRICT_TRANSPORT', false), FILTER_VALIDATE_BOOL);
-if ($hstsEnabled && $isHttps) {
+if ($hstsEnabled && $isSecureRequest) {
     $maxAge = max(0, (int) Env::get('HSTS_MAX_AGE', 63072000));
     $includeSubdomains = filter_var(Env::get('HSTS_INCLUDE_SUBDOMAINS', true), FILTER_VALIDATE_BOOL);
     $preload = filter_var(Env::get('HSTS_PRELOAD', false), FILTER_VALIDATE_BOOL);

@@ -63,6 +63,26 @@ function process_image_variants(string $sourcePath, string $originalFilename, st
 
     $image = create_image_resource($sourcePath, $type);
     if (!$image) {
+        $manifestPath = persist_image_manifest($originalFilename, [
+            'version' => MANIFEST_VERSION,
+            'generated_at' => gmdate(DateTimeInterface::ATOM),
+            'original' => '/uploads/' . ltrim($originalFilename, '/'),
+            'relative' => ltrim($originalFilename, '/'),
+            'intrinsic_width' => $width,
+            'intrinsic_height' => $height,
+            'mime' => $mime,
+            'variants' => [
+                'optimized' => [],
+                'webp' => [],
+            ],
+            'srcset' => [
+                'optimized' => null,
+                'webp' => null,
+            ],
+            'derived_files' => [],
+            'optimization_status' => 'skipped',
+            'processing_notes' => 'Unsupported image format',
+        ]);
         return [
             'intrinsic_width' => $width,
             'intrinsic_height' => $height,
@@ -71,7 +91,7 @@ function process_image_variants(string $sourcePath, string $originalFilename, st
             'optimized_srcset' => null,
             'webp_srcset' => null,
             'fallback_original' => '/uploads/' . ltrim($originalFilename, '/'),
-            'manifest_path' => null,
+            'manifest_path' => $manifestPath,
             'derived_files' => [],
             'optimization_status' => 'skipped',
             'processing_notes' => 'Unsupported image format',
@@ -300,30 +320,47 @@ function persist_image_manifest(string $filename, array $payload): ?string
         return null;
     }
     $manifestPath = rtrim(UPLOADS_MANIFEST_DIR, '/') . '/' . $baseName . '.json';
-    $payload['manifest_path'] = $manifestPath;
+    unset($payload['manifest_path']);
     @file_put_contents($manifestPath, json_encode($payload, JSON_PRETTY_PRINT));
     return $manifestPath;
 }
 
-function load_image_manifest(string $fileUrl): ?array
+function image_manifest_candidate_paths(string $fileUrl): array
 {
     $relative = relative_upload_path($fileUrl);
     if (!$relative) {
-        return null;
+        return [];
     }
     $baseName = pathinfo($relative, PATHINFO_FILENAME);
     if ($baseName === '') {
-        return null;
+        return [];
     }
-    $manifestPath = rtrim(UPLOADS_MANIFEST_DIR, '/') . '/' . $baseName . '.json';
-    if (!is_file($manifestPath)) {
-        return null;
+    $paths = [];
+    $primary = rtrim(UPLOADS_MANIFEST_DIR, '/') . '/' . $baseName . '.json';
+    $paths[] = $primary;
+    if (defined('LEGACY_UPLOADS_MANIFEST_DIR')) {
+        $legacy = rtrim(LEGACY_UPLOADS_MANIFEST_DIR, '/') . '/' . $baseName . '.json';
+        if ($legacy !== $primary) {
+            $paths[] = $legacy;
+        }
     }
-    $decoded = json_decode(file_get_contents($manifestPath), true);
-    if (!is_array($decoded)) {
-        return null;
+    return $paths;
+}
+
+function load_image_manifest(string $fileUrl): ?array
+{
+    foreach (image_manifest_candidate_paths($fileUrl) as $manifestPath) {
+        if (!is_file($manifestPath)) {
+            continue;
+        }
+        $decoded = json_decode((string) file_get_contents($manifestPath), true);
+        if (!is_array($decoded)) {
+            continue;
+        }
+        $decoded['_manifest_path'] = $manifestPath;
+        return $decoded;
     }
-    return $decoded;
+    return null;
 }
 
 function relative_upload_path(string $fileUrl): ?string
@@ -491,13 +528,14 @@ function delete_image_with_variants(string $fileUrl): void
         }
     }
     $manifestPath = null;
-    if ($manifest && !empty($manifest['manifest_path'])) {
-        $manifestPath = $manifest['manifest_path'];
+    if ($manifest && !empty($manifest['_manifest_path'])) {
+        $manifestPath = $manifest['_manifest_path'];
     } else {
-        $baseName = pathinfo($relative, PATHINFO_FILENAME);
-        $candidate = rtrim(UPLOADS_MANIFEST_DIR, '/') . '/' . $baseName . '.json';
-        if (is_file($candidate)) {
-            $manifestPath = $candidate;
+        foreach (image_manifest_candidate_paths('/uploads/' . ltrim($relative, '/')) as $candidate) {
+            if (is_file($candidate)) {
+                $manifestPath = $candidate;
+                break;
+            }
         }
     }
     $filesToDelete = array_filter(array_merge([$originalPath], $derivedFiles, [$manifestPath]));

@@ -100,6 +100,7 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
 
   return (
     <div className="h-screen flex bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+      <a href="#admin-main" className="skip-link">Skip to content</a>
       {/* Sidebar */}
       <aside className={`flex-shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 transition-all duration-200 ${collapsed ? 'w-16' : 'w-64'} overflow-hidden`}>
         <div className="h-full flex flex-col">
@@ -186,7 +187,7 @@ export default function AdminPanel({ user = null, onLogout = () => {}, onBackToS
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 flex flex-col min-h-0 bg-gray-50 dark:bg-gray-900">
+      <main id="admin-main" role="main" tabIndex={-1} className="flex-1 flex flex-col min-h-0 bg-gray-50 dark:bg-gray-900">
         <header className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <h1 className="text-2xl font-semibold">{(MENU.find(m => m.key === active) || MENU[0]).label}</h1>

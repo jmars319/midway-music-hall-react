@@ -5,8 +5,14 @@ import useSiteContent from '../hooks/useSiteContent';
 import { formatPhoneHref, CONTACT_LINK_CLASSES } from '../utils/contactLinks';
 
 const scrollToSection = (id) => {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return;
   const el = document.getElementById(id);
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  const hash = id ? `#${id}` : '';
+  window.location.href = `/${hash}`;
 };
 
 export default function Footer({ onAdminClick, onNavigate }){
@@ -69,9 +75,9 @@ export default function Footer({ onAdminClick, onNavigate }){
               <button type="button" onClick={() => scrollToSection('lessons')} className={quickLinkButtonClasses}>Lessons</button>
               <button type="button" onClick={() => scrollToSection('beach-series')} className={quickLinkButtonClasses}>Beach Series</button>
               <a href="/thegatheringplace" className={quickLinkButtonClasses}>The Gathering Place</a>
-              <button type="button" onClick={() => onNavigate && onNavigate('archive')} className={quickLinkButtonClasses}>Past Events Archive</button>
-              <button type="button" onClick={() => onNavigate && onNavigate('privacy')} className={quickLinkButtonClasses}>Privacy Policy</button>
-              <button type="button" onClick={() => onNavigate && onNavigate('terms')} className={quickLinkButtonClasses}>Terms of Service</button>
+              <a href="/archive" className={quickLinkButtonClasses}>Past Events Archive</a>
+              <a href="/privacy" className={quickLinkButtonClasses}>Privacy Policy</a>
+              <a href="/terms" className={quickLinkButtonClasses}>Terms of Service</a>
             </div>
           </div>
 

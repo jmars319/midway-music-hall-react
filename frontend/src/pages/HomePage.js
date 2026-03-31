@@ -512,7 +512,7 @@ export default function HomePage({ onAdminClick, onNavigate }) {
       <Navigation />
       <AnnouncementPopup />
 
-      <main id="main" role="main">
+      <main id="main" role="main" tabIndex={-1}>
         <Hero topOverlay={<AnnouncementBanner variant="overlay" />} />
         <FirstTimeHere />
         <FeaturedEvents events={featuredEvents} loading={loadingEvents} />

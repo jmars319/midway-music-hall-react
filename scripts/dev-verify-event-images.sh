@@ -14,6 +14,8 @@ ADMIN_LOGIN_PASSWORD="${MMH_VERIFY_LOGIN_PASSWORD:-${MMH_VERIFY_ADMIN_PASSWORD:-
 created_event_id=""
 created_media_id=""
 tmp_image="${TMP_DIR}/event-image.png"
+manifest_dir="${MMH_VERIFY_IMAGE_MANIFEST_DIR:-${ROOT_DIR}/storage/image-manifests}"
+public_manifest_dir="${ROOT_DIR}/backend/uploads/manifests"
 
 cleanup() {
   if [ -n "$created_event_id" ]; then
@@ -91,6 +93,9 @@ PY
 
 admin_login
 
+private_manifest_count_before="$(find "$manifest_dir" -maxdepth 1 -type f -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
+public_manifest_count_before="$(find "$public_manifest_dir" -maxdepth 1 -type f -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
+
 json_field() {
   local json="$1"
   local field="$2"
@@ -124,10 +129,22 @@ print(int(mid))' <<<"$upload_response")
 media_file_url=$(python3 -c 'import json,sys
 payload=json.load(sys.stdin)
 media=payload.get("media") or {}
-url=media.get("optimized_path") or media.get("file_url")
+url=media.get("file_url") or media.get("optimized_path")
 if not url:
     raise SystemExit("missing media url")
 print(url)' <<<"$upload_response")
+
+log_step "[event-images] verifying manifests are written to private storage"
+private_manifest_count_after="$(find "$manifest_dir" -maxdepth 1 -type f -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
+public_manifest_count_after="$(find "$public_manifest_dir" -maxdepth 1 -type f -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$private_manifest_count_after" -le "$private_manifest_count_before" ]; then
+  log_error "[event-images] expected a new manifest in private storage after upload"
+  exit 1
+fi
+if [ "$public_manifest_count_after" -ne "$public_manifest_count_before" ]; then
+  log_error "[event-images] manifest count changed in public uploads/manifests"
+  exit 1
+fi
 
 event_date="$(date -u +%F)"
 door_time="${event_date} 18:00:00"

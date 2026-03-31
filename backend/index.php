@@ -483,6 +483,19 @@ function output_upload_error(string $message): void
     Response::error($message, 400);
 }
 
+function public_image_variants(array $variants): array
+{
+    $sanitized = [];
+    foreach ($variants as $variant) {
+        if (!is_array($variant)) {
+            continue;
+        }
+        unset($variant['path']);
+        $sanitized[] = $variant;
+    }
+    return $sanitized;
+}
+
 function save_uploaded_file(array $file): ?array
 {
     if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
@@ -537,8 +550,8 @@ function save_uploaded_file(array $file): ?array
         'webp_srcset' => $responsive['webp_srcset'] ?? null,
         'fallback_original' => $responsive['fallback_original'] ?? ('/uploads/' . $filename),
         'responsive_variants' => [
-            'optimized' => $responsive['optimized_variants'] ?? [],
-            'webp' => $responsive['webp_variants'] ?? [],
+            'optimized' => public_image_variants($responsive['optimized_variants'] ?? []),
+            'webp' => public_image_variants($responsive['webp_variants'] ?? []),
         ],
         'manifest_path' => $responsive['manifest_path'] ?? null,
         'derived_files' => $responsive['derived_files'] ?? [],
@@ -3764,6 +3777,9 @@ function ensure_admins_column_exists(string $column, string $alterSql): void
 
 function start_admin_session(array $user): array
 {
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_regenerate_id(true);
+    }
     $expiresAt = time() + ADMIN_SESSION_LIFETIME;
     $_SESSION['admin_user'] = $user;
     $_SESSION['admin_expires_at'] = $expiresAt;
@@ -3820,6 +3836,169 @@ function destroy_admin_session(): void
         setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'] ?? '', $params['secure'] ?? false, $params['httponly'] ?? true);
     }
     session_destroy();
+}
+
+function admin_login_client_ip(): string
+{
+    $remoteAddr = trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+    return $remoteAddr !== '' ? $remoteAddr : 'unknown';
+}
+
+function admin_login_throttle_identifier(string $identifier): string
+{
+    $normalized = strtolower(trim($identifier));
+    return $normalized !== '' ? $normalized : '_blank';
+}
+
+function admin_login_ip_bucket_identifier(): string
+{
+    return '__ip_only__';
+}
+
+function admin_login_throttle_retention_seconds(): int
+{
+    $backoffSteps = defined('ADMIN_LOGIN_THROTTLE_BACKOFF_SECONDS') && is_array(ADMIN_LOGIN_THROTTLE_BACKOFF_SECONDS)
+        ? array_map('intval', ADMIN_LOGIN_THROTTLE_BACKOFF_SECONDS)
+        : [30, 120, 600];
+    $maxBackoff = 0;
+    foreach ($backoffSteps as $step) {
+        $maxBackoff = max($maxBackoff, (int) $step);
+    }
+    return max(3600, ADMIN_LOGIN_THROTTLE_WINDOW_SECONDS + ($maxBackoff * 2));
+}
+
+function prune_admin_login_throttle_storage(): void
+{
+    static $pruned = false;
+    if ($pruned || !is_dir(ADMIN_LOGIN_THROTTLE_DIR)) {
+        return;
+    }
+    $pruned = true;
+    $cutoff = time() - admin_login_throttle_retention_seconds();
+    foreach (glob(rtrim(ADMIN_LOGIN_THROTTLE_DIR, '/') . '/*.json') ?: [] as $path) {
+        if (!is_string($path) || !is_file($path)) {
+            continue;
+        }
+        $modifiedAt = (int) (@filemtime($path) ?: 0);
+        if ($modifiedAt > 0 && $modifiedAt < $cutoff) {
+            @unlink($path);
+        }
+    }
+}
+
+function admin_login_throttle_file(string $identifier, ?string $clientIp = null): string
+{
+    $clientIp = $clientIp ?? admin_login_client_ip();
+    $key = hash('sha256', admin_login_throttle_identifier($identifier) . '|' . $clientIp);
+    return rtrim(ADMIN_LOGIN_THROTTLE_DIR, '/') . '/' . $key . '.json';
+}
+
+function read_admin_login_throttle_state(string $identifier, ?string $clientIp = null): array
+{
+    prune_admin_login_throttle_storage();
+    $path = admin_login_throttle_file($identifier, $clientIp);
+    if (!is_file($path)) {
+        return ['failures' => [], 'blocked_until' => 0];
+    }
+    $decoded = json_decode((string) @file_get_contents($path), true);
+    if (!is_array($decoded)) {
+        return ['failures' => [], 'blocked_until' => 0];
+    }
+    $failures = array_values(array_filter(array_map('intval', (array) ($decoded['failures'] ?? [])), static fn (int $timestamp): bool => $timestamp > 0));
+    sort($failures, SORT_NUMERIC);
+    return [
+        'failures' => $failures,
+        'blocked_until' => max(0, (int) ($decoded['blocked_until'] ?? 0)),
+    ];
+}
+
+function write_admin_login_throttle_state(string $identifier, array $state, ?string $clientIp = null): void
+{
+    $path = admin_login_throttle_file($identifier, $clientIp);
+    $payload = [
+        'failures' => array_values(array_map('intval', (array) ($state['failures'] ?? []))),
+        'blocked_until' => max(0, (int) ($state['blocked_until'] ?? 0)),
+    ];
+    @file_put_contents($path, json_encode($payload, JSON_PRETTY_PRINT), LOCK_EX);
+}
+
+function prune_admin_login_failures(array $failures, int $now): array
+{
+    $windowStart = $now - ADMIN_LOGIN_THROTTLE_WINDOW_SECONDS;
+    return array_values(array_filter($failures, static fn (int $timestamp): bool => $timestamp >= $windowStart));
+}
+
+function admin_login_throttle_status(string $identifier, ?string $clientIp = null): array
+{
+    $now = time();
+    $state = read_admin_login_throttle_state($identifier, $clientIp);
+    $failures = prune_admin_login_failures($state['failures'] ?? [], $now);
+    $blockedUntil = max(0, (int) ($state['blocked_until'] ?? 0));
+    if ($blockedUntil > 0 && $blockedUntil <= $now) {
+        $blockedUntil = 0;
+    }
+    if ($failures !== ($state['failures'] ?? []) || $blockedUntil !== (int) ($state['blocked_until'] ?? 0)) {
+        write_admin_login_throttle_state($identifier, [
+            'failures' => $failures,
+            'blocked_until' => $blockedUntil,
+        ], $clientIp);
+    }
+    return [
+        'failures' => $failures,
+        'blocked_until' => $blockedUntil,
+        'retry_after_seconds' => $blockedUntil > $now ? ($blockedUntil - $now) : 0,
+    ];
+}
+
+function record_admin_login_failure(string $identifier, ?string $clientIp = null, ?int $maxFailures = null): array
+{
+    $now = time();
+    $status = admin_login_throttle_status($identifier, $clientIp);
+    $failures = $status['failures'];
+    $failures[] = $now;
+    $failures = prune_admin_login_failures($failures, $now);
+    $limit = max(1, (int) ($maxFailures ?? ADMIN_LOGIN_THROTTLE_MAX_FAILURES));
+
+    $blockedUntil = max(0, (int) ($status['blocked_until'] ?? 0));
+    if (count($failures) > $limit) {
+        $overflow = count($failures) - $limit;
+        $steps = defined('ADMIN_LOGIN_THROTTLE_BACKOFF_SECONDS') && is_array(ADMIN_LOGIN_THROTTLE_BACKOFF_SECONDS)
+            ? ADMIN_LOGIN_THROTTLE_BACKOFF_SECONDS
+            : [30, 120, 600];
+        $stepIndex = min(count($steps) - 1, max(0, $overflow - 1));
+        $blockedUntil = max($blockedUntil, $now + (int) $steps[$stepIndex]);
+    }
+
+    write_admin_login_throttle_state($identifier, [
+        'failures' => $failures,
+        'blocked_until' => $blockedUntil,
+    ], $clientIp);
+
+    return [
+        'failures' => $failures,
+        'blocked_until' => $blockedUntil,
+        'retry_after_seconds' => $blockedUntil > $now ? ($blockedUntil - $now) : 0,
+    ];
+}
+
+function clear_admin_login_failures(string $identifier, ?string $clientIp = null): void
+{
+    $path = admin_login_throttle_file($identifier, $clientIp);
+    if (is_file($path)) {
+        @unlink($path);
+    }
+}
+
+function combined_admin_login_throttle_status(string $identifier, ?string $clientIp = null): array
+{
+    $identifierStatus = admin_login_throttle_status($identifier, $clientIp);
+    $ipStatus = admin_login_throttle_status(admin_login_ip_bucket_identifier(), $clientIp);
+    $retryAfter = max((int) ($identifierStatus['retry_after_seconds'] ?? 0), (int) ($ipStatus['retry_after_seconds'] ?? 0));
+    return [
+        'retry_after_seconds' => $retryAfter,
+        'identifier' => $identifierStatus,
+        'ip' => $ipStatus,
+    ];
 }
 
 function request_header_value(Request $request, string $headerName): ?string
@@ -3885,23 +4064,10 @@ function trusted_admin_origins(): array
     $origins = [];
     $configuredOrigins = Env::get(
         'CORS_ALLOW_ORIGINS',
-        Env::get('CORS_ALLOW_ORIGIN', 'https://midwaymusichall.net,http://localhost:3000')
+        Env::get('CORS_ALLOW_ORIGIN', DEFAULT_TRUSTED_WEB_ORIGINS)
     );
     foreach (explode(',', (string) $configuredOrigins) as $candidate) {
         $normalized = normalize_origin_url($candidate);
-        if ($normalized !== null) {
-            $origins[$normalized] = true;
-        }
-    }
-
-    $forwardedProtoRaw = trim((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
-    $forwardedProto = strtolower(trim(explode(',', $forwardedProtoRaw)[0] ?? ''));
-    $requestScheme = in_array($forwardedProto, ['http', 'https'], true)
-        ? $forwardedProto
-        : ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http');
-    $requestHost = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
-    if ($requestHost !== '') {
-        $normalized = normalize_origin_url($requestScheme . '://' . $requestHost);
         if ($normalized !== null) {
             $origins[$normalized] = true;
         }
@@ -5688,11 +5854,25 @@ $router->add('POST', '/api/login', function (Request $request) {
     $payload = read_json_body($request);
     $email = trim((string) ($payload['email'] ?? ''));
     $password = (string) ($payload['password'] ?? '');
+    $clientIp = admin_login_client_ip();
+    $throttle = combined_admin_login_throttle_status($email, $clientIp);
+    if (($throttle['retry_after_seconds'] ?? 0) > 0) {
+        header('Retry-After: ' . (int) $throttle['retry_after_seconds']);
+        return Response::error(
+            'Too many login attempts. Please wait before trying again.',
+            429,
+            [
+                'reason' => 'login_rate_limited',
+                'retry_after_seconds' => (int) $throttle['retry_after_seconds'],
+            ]
+        );
+    }
 
     ensure_admins_table_exists();
     $stmt = Database::run('SELECT * FROM admins WHERE username = ? OR email = ? LIMIT 1', [$email, $email]);
     $row = $stmt->fetch();
     if ($row && password_verify($password, $row['password_hash'] ?? '')) {
+        clear_admin_login_failures($email, $clientIp);
         $user = sanitize_admin_user($row);
         $session = start_admin_session($user);
         return Response::success([
@@ -5705,6 +5885,25 @@ $router->add('POST', '/api/login', function (Request $request) {
     }
 
     destroy_admin_session();
+    $identifierThrottle = record_admin_login_failure($email, $clientIp, ADMIN_LOGIN_THROTTLE_MAX_FAILURES);
+    $ipThrottle = record_admin_login_failure(admin_login_ip_bucket_identifier(), $clientIp, ADMIN_LOGIN_THROTTLE_IP_MAX_FAILURES);
+    $throttle = [
+        'retry_after_seconds' => max(
+            (int) ($identifierThrottle['retry_after_seconds'] ?? 0),
+            (int) ($ipThrottle['retry_after_seconds'] ?? 0)
+        ),
+    ];
+    if (($throttle['retry_after_seconds'] ?? 0) > 0) {
+        header('Retry-After: ' . (int) $throttle['retry_after_seconds']);
+        return Response::error(
+            'Too many login attempts. Please wait before trying again.',
+            429,
+            [
+                'reason' => 'login_rate_limited',
+                'retry_after_seconds' => (int) $throttle['retry_after_seconds'],
+            ]
+        );
+    }
     Response::error('Invalid credentials', 401);
 });
 

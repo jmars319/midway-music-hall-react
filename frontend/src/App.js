@@ -231,12 +231,15 @@ export default function App() {
   const navigateToTerms = () => setCurrentView('terms');
 
   const handleNavigate = (page) => {
+    if (typeof window !== 'undefined' && (page === 'privacy' || page === 'terms' || page === 'archive')) {
+      const path = page === 'privacy' ? '/privacy' : page === 'terms' ? '/terms' : '/archive';
+      window.location.href = path;
+      return;
+    }
     if (page === 'privacy') {
       navigateToPrivacy();
     } else if (page === 'terms') {
       navigateToTerms();
-    } else if (page === 'archive' && typeof window !== 'undefined') {
-      window.location.href = '/archive';
     } else {
       navigateToHome();
     }
@@ -258,6 +261,8 @@ export default function App() {
   const normalizedPath = pathname.toLowerCase();
   const isGatheringPlaceRoute = normalizedPath === '/thegatheringplace';
   const isArchiveRoute = normalizedPath === '/archive';
+  const isPrivacyRoute = normalizedPath === '/privacy';
+  const isTermsRoute = normalizedPath === '/terms';
 
   if (currentView === 'login') {
     return <LoginPage onLogin={handleLogin} onBack={navigateToHome} />;
@@ -267,28 +272,28 @@ export default function App() {
     return <AdminPanel user={currentUser} onLogout={handleLogout} onBackToSite={navigateToHome} />;
   }
 
-  if (currentView === 'privacy') {
+  if (currentView === 'privacy' || isPrivacyRoute) {
     return <PrivacyPolicy onAdminClick={navigateToAdmin} />;
   }
 
-if (currentView === 'terms') {
-  return <TermsOfService onAdminClick={navigateToAdmin} />;
-}
+  if (currentView === 'terms' || isTermsRoute) {
+    return <TermsOfService onAdminClick={navigateToAdmin} />;
+  }
 
-if (isArchiveRoute && currentView === 'home') {
-  return (
-    <ArchivePage
-      onAdminClick={navigateToAdmin}
-      onNavigate={handleNavigate}
-    />
-  );
-}
+  if (isArchiveRoute && currentView === 'home') {
+    return (
+      <ArchivePage
+        onAdminClick={navigateToAdmin}
+        onNavigate={handleNavigate}
+      />
+    );
+  }
 
-if (isGatheringPlaceRoute && currentView === 'home') {
-  return (
-    <GatheringPlacePage
-      onAdminClick={navigateToAdmin}
-      onNavigate={handleNavigate}
+  if (isGatheringPlaceRoute && currentView === 'home') {
+    return (
+      <GatheringPlacePage
+        onAdminClick={navigateToAdmin}
+        onNavigate={handleNavigate}
       />
     );
   }

@@ -1,0 +1,135 @@
+{
+  "privacy": {
+    "title": "Privacy Policy",
+    "metaDescription": "Read the Midway Music Hall privacy policy for website submissions, seat requests, and artist suggestions.",
+    "lastUpdated": "March 30, 2026",
+    "sections": [
+      {
+        "heading": "Information We Collect",
+        "paragraphs": [
+          "When you submit seat requests or artist suggestions through this website, we collect your name and contact information, including email and phone details when you provide them, so we can process your request and communicate about events."
+        ]
+      },
+      {
+        "heading": "How We Use Your Information",
+        "paragraphs": [
+          "We use the information you provide to:"
+        ],
+        "bullets": [
+          "Process seat reservations and ticket requests",
+          "Review and respond to artist suggestions",
+          "Communicate with you about events and your requests",
+          "Improve our services and customer experience"
+        ]
+      },
+      {
+        "heading": "Information Sharing",
+        "paragraphs": [
+          "We do not sell, trade, or share your personal information with third parties for marketing purposes. Your information is used solely for the purposes stated above and is kept confidential."
+        ]
+      },
+      {
+        "heading": "Data Security",
+        "paragraphs": [
+          "We implement reasonable security measures to protect your personal information from unauthorized access, alteration, or disclosure."
+        ]
+      },
+      {
+        "heading": "Your Rights",
+        "paragraphs": [
+          "You have the right to request access to, correction of, or deletion of your personal information. To exercise these rights, please contact us through the information provided on this site."
+        ]
+      },
+      {
+        "heading": "Changes to This Policy",
+        "paragraphs": [
+          "We may update this Privacy Policy from time to time. We will notify you of material changes by posting the updated Privacy Policy on this page."
+        ]
+      },
+      {
+        "heading": "Contact Us",
+        "paragraphs": [
+          "If you have any questions about this Privacy Policy, please contact Midway Music Hall through the information provided on this site."
+        ]
+      }
+    ]
+  },
+  "terms": {
+    "title": "Terms of Service",
+    "metaDescription": "Read the Midway Music Hall terms covering attendance, reservations, cancellations, and use of the website.",
+    "lastUpdated": "March 30, 2026",
+    "sections": [
+      {
+        "heading": "Agreement to Terms",
+        "paragraphs": [
+          "By accessing and using this website, and by attending events at Midway Music Hall or The Gathering Place, you accept and agree to be bound by these terms."
+        ]
+      },
+      {
+        "heading": "Venue Rules and Conduct",
+        "paragraphs": [
+          "When attending events at Midway Music Hall, you agree to:"
+        ],
+        "bullets": [
+          "Respect other patrons, staff, and performers",
+          "Follow venue rules and instructions from staff",
+          "Refrain from disruptive or dangerous behavior",
+          "Comply with age restrictions for specific events",
+          "Not bring outside food or beverages unless explicitly permitted"
+        ],
+        "followupParagraphs": [
+          "We reserve the right to refuse service or remove any patron who violates these rules without refund."
+        ]
+      },
+      {
+        "heading": "Ticket Sales and Reservations",
+        "paragraphs": [
+          "Seat requests submitted through our website are subject to availability and confirmation. Submission of a request does not guarantee seating. We will contact you to confirm your reservation.",
+          "Ticket sales are final unless an event is canceled by the venue, in which case ticket holders will be notified about refund or credit options when applicable."
+        ]
+      },
+      {
+        "heading": "Event Changes and Cancellations",
+        "paragraphs": [
+          "Midway Music Hall reserves the right to change event dates, times, performers, or availability when needed."
+        ]
+      },
+      {
+        "heading": "Photography and Recording",
+        "paragraphs": [
+          "Professional recording equipment and video cameras are not permitted without prior authorization. By attending our events, you consent to being photographed or recorded for promotional purposes."
+        ]
+      },
+      {
+        "heading": "Limitation of Liability",
+        "paragraphs": [
+          "Attendance at events is at your own risk. Midway Music Hall is not responsible for lost, stolen, or damaged personal property."
+        ]
+      },
+      {
+        "heading": "Artist Suggestions",
+        "paragraphs": [
+          "Artist suggestions submitted through our website are reviewed but do not guarantee booking. We reserve the right to select performers at our discretion based on availability, fit, and business considerations."
+        ]
+      },
+      {
+        "heading": "Use of Website",
+        "paragraphs": [
+          "You agree not to misuse this website, including attempting to gain unauthorized access, interfering with the proper functioning of the site, or submitting false or misleading information."
+        ]
+      },
+      {
+        "heading": "Changes to Terms",
+        "paragraphs": [
+          "We may update these Terms of Service from time to time by publishing a revised version on this page. Your continued use of the website following those changes constitutes acceptance of the updated terms."
+        ]
+      },
+      {
+        "heading": "Contact Information",
+        "paragraphs": [
+          "If you have any questions about these Terms of Service, please contact Midway Music Hall through the information provided on this site."
+        ]
+      }
+    ]
+  }
+}
