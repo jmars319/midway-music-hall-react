@@ -6,11 +6,12 @@ import { buildSeatLookupMap, describeSeatSelection, isSeatRow, seatIdsForRow, re
 import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { buildSeatLegendItems, buildSeatStatusMap } from '../utils/seatingTheme';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
-import { getSeatRowFrame, resolveTableShapeForRow } from '../utils/tableLayoutGeometry';
+import { DEFAULT_LAYOUT_CANVAS } from '../utils/layoutCanvasPresets';
+import { getSeatRowRenderFrame, resolveTableShapeForRow } from '../utils/tableLayoutGeometry';
 
 const DEFAULT_STAGE_POSITION = { x: 50, y: 8 };
 const DEFAULT_STAGE_SIZE = { width: 200, height: 80 };
-const DEFAULT_CANVAS = { width: 1200, height: 800 };
+const DEFAULT_CANVAS = { width: DEFAULT_LAYOUT_CANVAS.width, height: DEFAULT_LAYOUT_CANVAS.height };
 
 /**
  * SeatingChart
@@ -540,7 +541,7 @@ export default function SeatingChart({
           <div
             ref={seatingSurfaceRef}
             className="relative bg-gray-900 rounded-xl p-6 border border-purple-500/20 overflow-auto min-h-[360px]"
-            style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
+            style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', overscrollBehavior: 'contain' }}
           >
             <div
               className="relative mx-auto"
@@ -627,7 +628,7 @@ export default function SeatingChart({
                 const rowKey = row.id || `${row.section_name}-${row.row_label}`;
                 const rotation = row.rotation || 0;
                 const elementType = (row.element_type || 'table').toLowerCase();
-                const seatFrame = getSeatRowFrame({ ...row, element_type: elementType }, { size: 60 });
+                const seatFrame = getSeatRowRenderFrame({ ...row, element_type: elementType }, { size: 60 });
                 const width = seatFrame.width;
                 const height = seatFrame.height;
                 const labels = resolveRowHeaderLabels(row);
@@ -704,7 +705,7 @@ export default function SeatingChart({
                 <button
                   type="button"
                   onClick={() => setMapScale((prev) => Math.max(0.6, Number((prev - 0.12).toFixed(2)) || 1))}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded border border-purple-500/40 bg-gray-800 text-white hover:bg-gray-700"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded border border-purple-500/40 bg-gray-800 text-white hover:bg-gray-700"
                   aria-label="Zoom out seating chart"
                 >
                   -
@@ -712,7 +713,7 @@ export default function SeatingChart({
                 <button
                   type="button"
                   onClick={() => setMapScale((prev) => Math.min(2.5, Number((prev + 0.12).toFixed(2)) || 1))}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded border border-purple-500/40 bg-gray-800 text-white hover:bg-gray-700"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded border border-purple-500/40 bg-gray-800 text-white hover:bg-gray-700"
                   aria-label="Zoom in seating chart"
                 >
                   +

@@ -1,4 +1,6 @@
 const DEFAULT_TABLE_SIZE = 60;
+const CHAIR_RENDER_PADDING = { x: 6, y: 8 };
+const DEFAULT_RENDER_PADDING = { x: 10, y: 14 };
 
 export const TABLE_SHAPE_ALIASES = {
   'table-8-rect': 'table-8',
@@ -391,5 +393,27 @@ export const getSeatRowFrame = (row = {}, options = {}) => {
     height: Number.isFinite(heightOverride) && heightOverride > 0
       ? Math.max(heightOverride, footprint.height)
       : footprint.height,
+  };
+};
+
+export const getSeatRowRenderPadding = (row = {}) => {
+  const shape = resolveTableShapeForRow(row);
+  if (shape === 'chair') {
+    return { ...CHAIR_RENDER_PADDING };
+  }
+  return { ...DEFAULT_RENDER_PADDING };
+};
+
+export const getSeatRowRenderFrame = (row = {}, options = {}) => {
+  const baseFrame = getSeatRowFrame(row, options);
+  const padding = getSeatRowRenderPadding(row);
+  return {
+    ...baseFrame,
+    innerWidth: baseFrame.width,
+    innerHeight: baseFrame.height,
+    renderPaddingX: padding.x,
+    renderPaddingY: padding.y,
+    width: roundValue(baseFrame.width + (padding.x * 2)),
+    height: roundValue(baseFrame.height + (padding.y * 2)),
   };
 };

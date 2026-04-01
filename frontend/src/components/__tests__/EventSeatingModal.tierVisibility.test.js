@@ -257,7 +257,7 @@ describe('EventSeatingModal tier visibility', () => {
     const reservedSeat = document.querySelector('button[data-seat-id="Main Floor-Table 2-1"]');
     expect(reservedSeat).not.toBeNull();
     expect(reservedSeat.dataset.seatState).toBe('reserved');
-    expect(reservedSeat.className).toContain('bg-red-600');
+    expect(reservedSeat.firstChild.className).toContain('bg-red-600');
 
     const vipSeat = document.querySelector('button[data-seat-id="Main Floor-Table 1-1"]');
     const standardSeat = document.querySelector('button[data-seat-id="Main Floor-Table 2-2"]');
@@ -269,7 +269,7 @@ describe('EventSeatingModal tier visibility', () => {
 
     const selectedVipSeat = document.querySelector('button[data-seat-id="Main Floor-Table 1-1"]');
     expect(selectedVipSeat.dataset.seatState).toBe('selected');
-    expect(selectedVipSeat.className).toContain('bg-purple-600');
+    expect(selectedVipSeat.firstChild.className).toContain('bg-purple-600');
     expect(document.body.textContent).toContain('Selected pricing');
     expect(document.body.textContent).toContain('1A');
     expect(document.body.textContent).toContain('2B');
@@ -279,6 +279,38 @@ describe('EventSeatingModal tier visibility', () => {
     expect(document.body.textContent).toContain('$20.00');
     expect(document.body.textContent).toContain('Running total');
     expect(document.body.textContent).toContain('$50.00');
+  });
+
+  test('scales on a native scroll surface and expands sparse seat hit targets', async () => {
+    await renderModal({
+      event: buildTieredEvent(),
+      response: buildTieredSeatingResponse(),
+    });
+
+    const openChartButton = document.querySelector('button[aria-label="Open full seating chart"]');
+    expect(openChartButton).not.toBeNull();
+
+    await click(openChartButton);
+
+    let mapSurface = document.querySelector('[data-seat-map-surface="true"]');
+    expect(mapSurface).not.toBeNull();
+    expect(mapSurface.getAttribute('data-seat-map-scale')).toBe('1');
+
+    const scrollRegion = document.querySelector('.seat-map-scroll[role="region"]');
+    expect(scrollRegion).not.toBeNull();
+    expect(scrollRegion.getAttribute('tabindex')).toBe('0');
+
+    const zoomInButton = document.querySelector('button[aria-label="Zoom in seating map"]');
+    expect(zoomInButton).not.toBeNull();
+    await click(zoomInButton);
+
+    mapSurface = document.querySelector('[data-seat-map-surface="true"]');
+    expect(Number(mapSurface.getAttribute('data-seat-map-scale'))).toBeGreaterThan(1);
+    expect(parseFloat(mapSurface.style.width)).toBeGreaterThan(960);
+
+    const sparseSeat = document.querySelector('button[data-seat-id="Main Floor-Table 1-1"]');
+    expect(sparseSeat).not.toBeNull();
+    expect(Number(sparseSeat.getAttribute('data-seat-hit-size'))).toBeGreaterThan(18);
   });
 
   test('keeps flat-priced events free of tier surfaces while still showing live totals', async () => {

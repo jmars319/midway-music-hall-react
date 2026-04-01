@@ -58,6 +58,30 @@ const parseSelectedSeatList = (value) => {
   return [];
 };
 
+const getSeatTargetSizeMap = (metrics = {}, interactive = false) => {
+  const seats = Array.isArray(metrics?.seats) ? metrics.seats : [];
+  return seats.reduce((map, seat) => {
+    if (!interactive) {
+      map.set(seat.number, seat.size);
+      return map;
+    }
+    let nearestCenterDistance = Infinity;
+    seats.forEach((otherSeat) => {
+      if (otherSeat.number === seat.number) return;
+      nearestCenterDistance = Math.min(
+        nearestCenterDistance,
+        Math.hypot(seat.x - otherSeat.x, seat.y - otherSeat.y)
+      );
+    });
+    const preferredTarget = Math.max(seat.size + 6, 24);
+    const safeMaximum = Number.isFinite(nearestCenterDistance)
+      ? Math.max(seat.size, nearestCenterDistance - 2)
+      : 32;
+    map.set(seat.number, Math.round(Math.min(32, Math.max(seat.size, Math.min(preferredTarget, safeMaximum)))));
+    return map;
+  }, new Map());
+};
+
 // TableComponent - Flexible seating visualization
 // Props:
 // - row: seating row object from backend
@@ -91,6 +115,10 @@ export default function TableComponent({
   const layoutMetrics = useMemo(
     () => getTableLayoutMetrics(normalizedShape, { size }),
     [normalizedShape, size]
+  );
+  const seatTargetSizeMap = useMemo(
+    () => getSeatTargetSizeMap(layoutMetrics, interactive),
+    [interactive, layoutMetrics]
   );
   
   const rowReservedList = useMemo(() => parseSelectedSeatList(row.selected_seats), [row.selected_seats]);
@@ -145,7 +173,12 @@ export default function TableComponent({
     }
     const visualClass =
       visual.statusKey === 'available' ? seatTypeClass(row.seat_type) : visual.className;
-    return { className: `absolute flex items-center justify-center rounded-full ${cursor} ${visualClass}`, status, visual };
+    return {
+      containerClassName: `absolute flex items-center justify-center rounded-full ${cursor}`,
+      visualClassName: `relative z-10 flex items-center justify-center rounded-full ${visualClass}`,
+      status,
+      visual,
+    };
   };
 
   const getSeatCue = (statusKey) => {
@@ -168,9 +201,10 @@ export default function TableComponent({
     const seatId = buildSeatId(row, seatNum);
     const seatLabel = formatSeatLabel(buildSeatLabel(row, seatNum));
     const displayLabel = seatLabel.length > 4 ? seatLabel.slice(0, 4) : seatLabel;
-    const { className, status, visual } = getSeatClasses(seatId);
+    const { containerClassName, visualClassName, status, visual } = getSeatClasses(seatId);
     const pointerEventsValue = interactive ? 'auto' : 'none';
     const cueText = getSeatCue(visual.statusKey);
+    const hitSize = seatTargetSizeMap.get(seatNum) || seatSize;
     const statusOverlayStyles = {
       reserved: 'repeating-linear-gradient(135deg, rgba(0,0,0,0.28), rgba(0,0,0,0.28) 3px, rgba(255,255,255,0.04) 3px, rgba(255,255,255,0.04) 6px)',
       pending: 'repeating-linear-gradient(45deg, rgba(0,0,0,0.18), rgba(0,0,0,0.18) 3px, rgba(255,255,255,0.05) 3px, rgba(255,255,255,0.05) 6px)',
@@ -180,12 +214,16 @@ export default function TableComponent({
       left: x, 
       top: y, 
       transform: 'translate(-50%, -50%)', 
-      width: seatSize, 
-      height: seatSize,
+      width: hitSize,
+      height: hitSize,
       pointerEvents: pointerEventsValue,
       zIndex: 5,
       touchAction: 'manipulation',
       WebkitTapHighlightColor: 'transparent',
+    };
+    const seatVisualStyle = {
+      width: seatSize,
+      height: seatSize,
       backgroundImage: statusOverlayStyles[visual.statusKey] || 'none',
       outline: visual.statusKey === 'selected' ? '2px solid rgba(255,255,255,0.9)' : undefined,
       outlineOffset: visual.statusKey === 'selected' ? '1px' : undefined,
@@ -216,22 +254,26 @@ export default function TableComponent({
         <button 
           key={seatId} 
           onClick={handleClick} 
-          className={className} 
+          className={containerClassName} 
           style={style}
           disabled={Boolean(disabledReason)}
           type="button"
           aria-disabled={Boolean(disabledReason)}
+          aria-pressed={status.isSelected}
           data-seat-id={seatId}
           data-seat-state={visual.statusKey}
           data-seat-table={row?.row_label || row?.section_name || 'table'}
+          data-seat-hit-size={String(hitSize)}
           title={titleText}
           aria-label={titleText}
         >
-          <span
-            className="text-[9px] font-bold relative z-10 inline-flex items-center justify-center"
-            style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)', ...(textRotationStyle || {}) }}
-          >
-            {displayLabel}
+          <span className={visualClassName} style={seatVisualStyle}>
+            <span
+              className="text-[9px] font-bold inline-flex items-center justify-center"
+              style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)', ...(textRotationStyle || {}) }}
+            >
+              {displayLabel}
+            </span>
           </span>
           <span
             className="absolute -top-1 -right-1 rounded-full bg-black/65 px-1 text-[8px] font-bold text-white leading-tight"
@@ -247,17 +289,19 @@ export default function TableComponent({
     return (
       <div
         key={seatId}
-        className={className}
+        className={containerClassName}
         style={style}
         title={titleText}
         data-seat-id={seatId}
         data-seat-state={visual.statusKey}
       >
-        <span
-          className="text-[9px] font-bold inline-flex items-center justify-center"
-          style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)', ...(textRotationStyle || {}) }}
-        >
-          {displayLabel}
+        <span className={visualClassName} style={seatVisualStyle}>
+          <span
+            className="text-[9px] font-bold inline-flex items-center justify-center"
+            style={{ textShadow: '0 0 4px rgba(0,0,0,0.7)', ...(textRotationStyle || {}) }}
+          >
+            {displayLabel}
+          </span>
         </span>
         <span
           className="absolute -top-1 -right-1 rounded-full bg-black/65 px-1 text-[8px] font-bold text-white leading-tight"
@@ -328,12 +372,13 @@ export default function TableComponent({
         {layoutMetrics.seats.map((seat) => {
           const seatId = buildSeatId(row, seat.number);
           const classes = getSeatClasses(seatId);
+          const hitSize = seatTargetSizeMap.get(seat.number) || seat.size;
           const style = {
             left: seat.x,
             top: seat.y,
             transform: 'translate(-50%, -50%)',
-            width: seat.size,
-            height: seat.size,
+            width: hitSize,
+            height: hitSize,
             cursor: interactive ? 'pointer' : 'default',
             pointerEvents: interactive ? 'auto' : 'none',
             touchAction: 'manipulation',
@@ -345,18 +390,22 @@ export default function TableComponent({
               <button
                 key={seatId}
                 onClick={() => onToggleSeat && onToggleSeat(seatId)}
-                className={classes.className}
+                className={classes.containerClassName}
                 style={style}
                 disabled={getSeatStatus(seatId).isReserved}
               >
-                <Users className="h-3 w-3" />
+                <span className={classes.visualClassName} style={{ width: seat.size, height: seat.size }}>
+                  <Users className="h-3 w-3" />
+                </span>
               </button>
             );
           }
 
           return (
-            <div key={seatId} className={classes.className} style={style}>
-              <Users className="h-3 w-3" />
+            <div key={seatId} className={classes.containerClassName} style={style}>
+              <span className={classes.visualClassName} style={{ width: seat.size, height: seat.size }}>
+                <Users className="h-3 w-3" />
+              </span>
             </div>
           );
         })}

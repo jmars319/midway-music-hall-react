@@ -11,9 +11,10 @@ import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
 import { loadPayPalHostedButtonsSdk } from '../utils/paypalHostedButtons';
 import { formatEventDateTimeLabel, formatEventPriceDisplay, formatEventRunSummary, isMultiDayEvent } from '../utils/eventFormat';
 import { buildEventPricingLegend, getFlatSeatPrice, resolveRowPricingTier, resolveSeatPricingTier } from '../utils/eventPricing';
+import { DEFAULT_LAYOUT_CANVAS } from '../utils/layoutCanvasPresets';
 import { buildTierBodyStyle, buildTierGroupStyle, buildTierSwatchStyle, withAlpha } from '../utils/seatingTierTheme';
 import ReservationBanner from './ReservationBanner';
-import { getSeatRowFrame, resolveTableShapeForRow } from '../utils/tableLayoutGeometry';
+import { getSeatRowRenderFrame, resolveTableShapeForRow } from '../utils/tableLayoutGeometry';
 
 const ALWAYS_USE_SEAT_CHART_OVERLAY = true;
 
@@ -34,6 +35,7 @@ const getLandmarkLabel = (row = {}) => (
 );
 
 const COMPACT_TIER_ROW_SHAPES = new Set(['chair', 'table-2', 'high-top-2']);
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 const normalizeTierRowShape = (row = {}) => {
   const raw = String(row?.table_shape || row?.seat_type || row?.element_type || '').trim().toLowerCase();
@@ -87,9 +89,13 @@ export default function EventSeatingModal({ event, onClose }) {
   const [paypalRenderError, setPaypalRenderError] = useState('');
   const [stagePosition, setStagePosition] = useState({ x: 50, y: 10 });
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
-  const [canvasSettings, setCanvasSettings] = useState({ width: 1200, height: 800 });
+  const [canvasSettings, setCanvasSettings] = useState({
+    width: DEFAULT_LAYOUT_CANVAS.width,
+    height: DEFAULT_LAYOUT_CANVAS.height,
+  });
   const [seatingEnabled, setSeatingEnabled] = useState(() => Number(event.seating_enabled) === 1);
-  const [mapTransform, setMapTransform] = useState({ scale: 1, translateX: 0, translateY: 0 });
+  const [mapScale, setMapScale] = useState(1);
+  const [mapViewportSize, setMapViewportSize] = useState({ width: 0, height: 0 });
   const canvasContainerRef = useRef(null);
   const mapViewportRef = useRef(null);
   const seatSelectionContentRef = useRef(null);
@@ -101,6 +107,8 @@ export default function EventSeatingModal({ event, onClose }) {
   const largeMapOverlayRef = useRef(null);
   const largeMapCloseButtonRef = useRef(null);
   const errorResetTimer = useRef(null);
+  const pendingViewportFocusRef = useRef(null);
+  const mapViewportSyncFrameRef = useRef(null);
   const seatDebug = useSeatDebugLogger('event-modal');
   const { log: seatDebugLog, enabled: seatDebugEnabled } = seatDebug;
   useSeatDebugProbe(canvasContainerRef, seatDebug);
@@ -247,8 +255,12 @@ export default function EventSeatingModal({ event, onClose }) {
       total: lineItems.length ? Number(total.toFixed(2)) : null,
     };
   }, [event, flatSeatPrice, pricingLegendItems.length, pricingTierDisplayMap, seatLabelMap, seatRows, selectedSeats]);
-  const canvasWidth = canvasSettings?.width || 1200;
-  const canvasHeight = canvasSettings?.height || 800;
+  const canvasWidth = canvasSettings?.width || DEFAULT_LAYOUT_CANVAS.width;
+  const canvasHeight = canvasSettings?.height || DEFAULT_LAYOUT_CANVAS.height;
+  const scaledCanvasWidth = Math.round(canvasWidth * mapScale);
+  const scaledCanvasHeight = Math.round(canvasHeight * mapScale);
+  const scaledCanvasOffsetX = Math.max(0, Math.round((mapViewportSize.width - scaledCanvasWidth) / 2));
+  const scaledCanvasOffsetY = Math.max(0, Math.round((mapViewportSize.height - scaledCanvasHeight) / 2));
   const hasPositions = useMemo(
     () =>
       seatRows.some(
@@ -284,8 +296,9 @@ export default function EventSeatingModal({ event, onClose }) {
     setShowLargeMap(false);
     setShowLargeMapLegend(false);
     setOverlayOnlySeatChart(false);
-    setMapTransform({ scale: 1, translateX: 0, translateY: 0 });
+    setMapScale(1);
     mapFitRequestedRef.current = false;
+    pendingViewportFocusRef.current = null;
   }, [event.id]);
 
   useEffect(() => {
@@ -339,13 +352,118 @@ export default function EventSeatingModal({ event, onClose }) {
     });
   }, [showLargeMap]);
 
+  const updateViewportMeasurements = useCallback(() => {
+    const viewport = mapViewportRef.current;
+    const scrollContainer = canvasContainerRef.current;
+    if (!viewport && !scrollContainer) return;
+    const width = scrollContainer?.clientWidth || viewport?.clientWidth || 0;
+    const height = scrollContainer?.clientHeight || viewport?.clientHeight || 0;
+    setMapViewportSize((prev) => (
+      prev.width === width && prev.height === height
+        ? prev
+        : { width, height }
+    ));
+  }, []);
+
+  useEffect(() => {
+    updateViewportMeasurements();
+    const viewport = mapViewportRef.current;
+    if (!viewport || typeof ResizeObserver === 'undefined') {
+      return undefined;
+    }
+    const observer = new ResizeObserver(() => {
+      updateViewportMeasurements();
+    });
+    observer.observe(viewport);
+    return () => {
+      observer.disconnect();
+    };
+  }, [showLargeMap, updateViewportMeasurements]);
+
+  const syncViewportToFocus = useCallback((focusX, focusY, scale = mapScale) => {
+    const scrollContainer = canvasContainerRef.current;
+    const viewport = mapViewportRef.current;
+    if (!scrollContainer || !viewport) return;
+    const viewportWidth = scrollContainer.clientWidth || viewport.clientWidth || 0;
+    const viewportHeight = scrollContainer.clientHeight || viewport.clientHeight || 0;
+    if (!viewportWidth || !viewportHeight) return;
+    const scaledWidth = canvasWidth * scale;
+    const scaledHeight = canvasHeight * scale;
+    const maxScrollLeft = Math.max(0, scaledWidth - viewportWidth);
+    const maxScrollTop = Math.max(0, scaledHeight - viewportHeight);
+    scrollContainer.scrollLeft = clamp((focusX * scale) - (viewportWidth / 2), 0, maxScrollLeft);
+    scrollContainer.scrollTop = clamp((focusY * scale) - (viewportHeight / 2), 0, maxScrollTop);
+  }, [canvasHeight, canvasWidth, mapScale]);
+
+  useEffect(() => {
+    if (!pendingViewportFocusRef.current) return undefined;
+    const pending = pendingViewportFocusRef.current;
+    if (Math.abs(pending.scale - mapScale) > 0.001) return undefined;
+    if (mapViewportSyncFrameRef.current) {
+      cancelAnimationFrame(mapViewportSyncFrameRef.current);
+    }
+    mapViewportSyncFrameRef.current = requestAnimationFrame(() => {
+      mapViewportSyncFrameRef.current = requestAnimationFrame(() => {
+        mapViewportSyncFrameRef.current = null;
+        syncViewportToFocus(pending.focusX, pending.focusY, pending.scale);
+        pendingViewportFocusRef.current = null;
+      });
+    });
+    return () => {
+      if (mapViewportSyncFrameRef.current) {
+        cancelAnimationFrame(mapViewportSyncFrameRef.current);
+        mapViewportSyncFrameRef.current = null;
+      }
+    };
+  }, [mapScale, mapViewportSize.height, mapViewportSize.width, syncViewportToFocus]);
+
+  const queueViewportFocus = useCallback((focusX, focusY, scale) => {
+    pendingViewportFocusRef.current = { focusX, focusY, scale };
+    if (Math.abs(scale - mapScale) <= 0.001) {
+      if (mapViewportSyncFrameRef.current) {
+        cancelAnimationFrame(mapViewportSyncFrameRef.current);
+      }
+      mapViewportSyncFrameRef.current = requestAnimationFrame(() => {
+        mapViewportSyncFrameRef.current = requestAnimationFrame(() => {
+          mapViewportSyncFrameRef.current = null;
+          syncViewportToFocus(focusX, focusY, scale);
+          pendingViewportFocusRef.current = null;
+        });
+      });
+      return;
+    }
+    setMapScale(scale);
+  }, [mapScale, syncViewportToFocus]);
+
+  const getViewportFocusPoint = useCallback(() => {
+    const scrollContainer = canvasContainerRef.current;
+    const viewport = mapViewportRef.current;
+    if (!scrollContainer || !viewport) {
+      return { focusX: canvasWidth / 2, focusY: canvasHeight / 2 };
+    }
+    const viewportWidth = scrollContainer.clientWidth || viewport.clientWidth || 0;
+    const viewportHeight = scrollContainer.clientHeight || viewport.clientHeight || 0;
+    const scaledWidth = canvasWidth * mapScale;
+    const scaledHeight = canvasHeight * mapScale;
+    const focusX = scaledWidth > viewportWidth
+      ? (scrollContainer.scrollLeft + (viewportWidth / 2)) / mapScale
+      : canvasWidth / 2;
+    const focusY = scaledHeight > viewportHeight
+      ? (scrollContainer.scrollTop + (viewportHeight / 2)) / mapScale
+      : canvasHeight / 2;
+    return {
+      focusX: clamp(focusX, 0, canvasWidth),
+      focusY: clamp(focusY, 0, canvasHeight),
+    };
+  }, [canvasHeight, canvasWidth, mapScale]);
+
   const fitSeatsToViewport = useCallback((mode = 'fit') => {
     if (!hasPositions) return;
     const viewport = mapViewportRef.current;
     const scrollContainer = canvasContainerRef.current;
     if (!viewport || !scrollContainer) return;
-    const viewportWidth = viewport.clientWidth || 0;
-    const viewportHeight = viewport.clientHeight || 0;
+    const viewportWidth = scrollContainer.clientWidth || viewport.clientWidth || 0;
+    const viewportHeight = scrollContainer.clientHeight || viewport.clientHeight || 0;
     if (!viewportWidth || !viewportHeight) return;
     const positionedRows = activeRows.filter(
       (row) => row?.pos_x !== null && row?.pos_x !== undefined && row?.pos_y !== null && row?.pos_y !== undefined
@@ -357,7 +475,7 @@ export default function EventSeatingModal({ event, onClose }) {
           const x = ((Number(row.pos_x) || 0) / 100) * canvasWidth;
           const y = ((Number(row.pos_y) || 0) / 100) * canvasHeight;
           const rowFrame = isSeatRow(row)
-            ? getSeatRowFrame(row, { size: 60 })
+            ? getSeatRowRenderFrame(row, { size: 60 })
             : {
                 width: Number(row?.width) || 160,
                 height: Number(row?.height) || 120,
@@ -384,37 +502,31 @@ export default function EventSeatingModal({ event, onClose }) {
         const stageRight = stageX + stageW / 2;
         const stageTop = stageY - stageH / 2;
         const stageBottom = stageY + stageH / 2;
-        if (bounds) {
-          bounds = {
-            minX: Math.min(bounds.minX, stageLeft),
-            maxX: Math.max(bounds.maxX, stageRight),
-            minY: Math.min(bounds.minY, stageTop),
-            maxY: Math.max(bounds.maxY, stageBottom),
-          };
-        } else {
-          bounds = {
-            minX: stageLeft,
-            maxX: stageRight,
-            minY: stageTop,
-            maxY: stageBottom,
-          };
-        }
+        bounds = bounds
+          ? {
+              minX: Math.min(bounds.minX, stageLeft),
+              maxX: Math.max(bounds.maxX, stageRight),
+              minY: Math.min(bounds.minY, stageTop),
+              maxY: Math.max(bounds.maxY, stageBottom),
+            }
+          : {
+              minX: stageLeft,
+              maxX: stageRight,
+              minY: stageTop,
+              maxY: stageBottom,
+            };
       }
     }
-    const padding = mode === 'fit' ? 140 : 120;
-    const targetWidth = bounds ? Math.max(260, bounds.maxX - bounds.minX + padding * 2) : canvasWidth;
-    const targetHeight = bounds ? Math.max(220, bounds.maxY - bounds.minY + padding * 2) : canvasHeight;
+    const padding = mode === 'fit' ? 150 : 130;
+    const targetWidth = bounds ? Math.max(260, bounds.maxX - bounds.minX + (padding * 2)) : canvasWidth;
+    const targetHeight = bounds ? Math.max(220, bounds.maxY - bounds.minY + (padding * 2)) : canvasHeight;
     const fitScale = Math.min(viewportWidth / targetWidth, viewportHeight / targetHeight);
     const minScale = mode === 'default' ? 0.9 : 0.2;
     const scale = Math.min(Math.max(fitScale, minScale), 2.2);
     const focusX = bounds ? (bounds.minX + bounds.maxX) / 2 : canvasWidth / 2;
     const focusY = bounds ? (bounds.minY + bounds.maxY) / 2 : canvasHeight / 2;
-    const translateX = viewportWidth / 2 - focusX * scale;
-    const translateY = viewportHeight / 2 - focusY * scale;
-    scrollContainer.scrollTop = 0;
-    scrollContainer.scrollLeft = 0;
-    setMapTransform({ scale, translateX, translateY });
-  }, [activeRows, canvasHeight, canvasWidth, hasPositions, stagePosition, stageSize]);
+    queueViewportFocus(focusX, focusY, scale);
+  }, [activeRows, canvasHeight, canvasWidth, hasPositions, queueViewportFocus, stagePosition, stageSize]);
 
   const scheduleFitToViewport = useCallback(() => {
     if (!mapFitRequestedRef.current) return;
@@ -435,12 +547,16 @@ export default function EventSeatingModal({ event, onClose }) {
   }, [fitSeatsToViewport]);
 
   const handleZoomIn = useCallback(() => {
-    setMapTransform((prev) => ({ ...prev, scale: Math.min(2.5, Number((prev.scale + 0.12).toFixed(2)) || 1) }));
-  }, []);
+    const { focusX, focusY } = getViewportFocusPoint();
+    const nextScale = Math.min(2.5, Number((mapScale + 0.12).toFixed(2)) || 1);
+    queueViewportFocus(focusX, focusY, nextScale);
+  }, [getViewportFocusPoint, mapScale, queueViewportFocus]);
 
   const handleZoomOut = useCallback(() => {
-    setMapTransform((prev) => ({ ...prev, scale: Math.max(0.2, Number((prev.scale - 0.12).toFixed(2)) || 1) }));
-  }, []);
+    const { focusX, focusY } = getViewportFocusPoint();
+    const nextScale = Math.max(0.2, Number((mapScale - 0.12).toFixed(2)) || 1);
+    queueViewportFocus(focusX, focusY, nextScale);
+  }, [getViewportFocusPoint, mapScale, queueViewportFocus]);
 
   const openLargeMapOverlay = useCallback(() => {
     setShowLargeMap(true);
@@ -474,6 +590,10 @@ export default function EventSeatingModal({ event, onClose }) {
     if (seatSizingDebounceRef.current) {
       clearTimeout(seatSizingDebounceRef.current);
       seatSizingDebounceRef.current = null;
+    }
+    if (mapViewportSyncFrameRef.current) {
+      cancelAnimationFrame(mapViewportSyncFrameRef.current);
+      mapViewportSyncFrameRef.current = null;
     }
   }, []);
 
@@ -625,8 +745,8 @@ export default function EventSeatingModal({ event, onClose }) {
         }
         if (data.canvasSettings) {
           setCanvasSettings({
-            width: data.canvasSettings.width || 1200,
-            height: data.canvasSettings.height || 800
+            width: data.canvasSettings.width || DEFAULT_LAYOUT_CANVAS.width,
+            height: data.canvasSettings.height || DEFAULT_LAYOUT_CANVAS.height
           });
         }
       } else {
@@ -1037,22 +1157,39 @@ export default function EventSeatingModal({ event, onClose }) {
   const renderSeatWorkspace = ({ expanded = false } = {}) => {
     const mapCanvas = (
       <div
-        className={`${expanded ? 'h-full' : 'seat-map-viewport seatingMapViewport'} seat-map-text-lock bg-gray-900 rounded-xl border border-purple-500/20`}
+        className={`${expanded ? 'h-full seatingMapViewport' : 'seat-map-viewport seatingMapViewport'} seat-map-text-lock bg-gray-900 rounded-xl border border-purple-500/20`}
         ref={mapViewportRef}
       >
         <div
           className="seat-map-scroll seatingMapCanvasWrapper relative w-full h-full"
           ref={canvasContainerRef}
+          role="region"
+          aria-label="Scrollable seating chart"
+          tabIndex={0}
         >
           <div
-            className="relative mx-auto"
+            className="relative"
+            data-seat-map-surface="true"
+            data-seat-map-scale={String(mapScale)}
+              style={{
+                width: scaledCanvasWidth,
+                height: scaledCanvasHeight,
+                minWidth: scaledCanvasWidth,
+                minHeight: scaledCanvasHeight,
+                marginLeft: `${scaledCanvasOffsetX}px`,
+                marginTop: `${scaledCanvasOffsetY}px`,
+                transformOrigin: 'top left',
+              }}
+            >
+            <div
+              className="relative"
               style={{
                 width: canvasWidth,
                 height: canvasHeight,
                 minWidth: canvasWidth,
                 minHeight: canvasHeight,
                 transformOrigin: 'top left',
-                transform: `translate(${mapTransform.translateX}px, ${mapTransform.translateY}px) scale(${mapTransform.scale})`
+                transform: `scale(${mapScale})`,
               }}
             >
             <div
@@ -1081,7 +1218,7 @@ export default function EventSeatingModal({ event, onClose }) {
 	                const tierVisual = tier ? pricingTierDisplayMap.get(tier.id) || null : null;
 	                const showTierRowSurface = tierVisual && shouldRenderTierRowSurface(row);
 	                const tierRowSurfaceFrame = showTierRowSurface ? resolveCompactTierRowSurfaceFrame(row) : null;
-	                const seatFrame = getSeatRowFrame(row, { size: 60 });
+	                const seatFrame = getSeatRowRenderFrame(row, { size: 60 });
 
 	                return (
 	                  <div
@@ -1147,6 +1284,7 @@ export default function EventSeatingModal({ event, onClose }) {
                   </div>
                 );
               })}
+            </div>
           </div>
         </div>
         {!seatingEnabled && (
@@ -1277,7 +1415,7 @@ export default function EventSeatingModal({ event, onClose }) {
           {mapCanvas}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-gray-400 flex-1 min-w-[200px]">
-              Drag or pinch inside the map to explore available seats.
+              Scroll or drag inside the map after zooming to explore available seats.
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-indigo-100 border border-indigo-500/40 rounded-md">

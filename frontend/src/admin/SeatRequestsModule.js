@@ -10,7 +10,8 @@ import { buildEventRunDisplayLabel, formatEventRunText, isMultiDayEventRun, reso
 import { getSeatReasonMessage, getAdminReservationFailureMessage } from '../utils/reservationReasonMessages';
 import { filterUnavailableSeats } from '../utils/seatAvailability';
 import { useSeatDebugLogger, useSeatDebugProbe } from '../hooks/useSeatDebug';
-import { getSeatRowFrame, resolveTableShapeForRow } from '../utils/tableLayoutGeometry';
+import { DEFAULT_LAYOUT_CANVAS } from '../utils/layoutCanvasPresets';
+import { getSeatRowRenderFrame, resolveTableShapeForRow } from '../utils/tableLayoutGeometry';
 
 const OPEN_STATUSES = ['new', 'contacted', 'waiting'];
 const FINAL_STATUSES = ['confirmed', 'declined', 'closed', 'spam'];
@@ -1454,15 +1455,18 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
   const [holdSeats, setHoldSeats] = useState([]);
   const [stagePosition, setStagePosition] = useState({ x: 50, y: 10 });
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
-  const [canvasSettings, setCanvasSettings] = useState({ width: 1200, height: 800 });
+  const [canvasSettings, setCanvasSettings] = useState({
+    width: DEFAULT_LAYOUT_CANVAS.width,
+    height: DEFAULT_LAYOUT_CANVAS.height,
+  });
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [form, setForm] = useState({ name: '', phone: '', email: '', notes: '', status: 'confirmed' });
   const [loadingLayout, setLoadingLayout] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const canvasWidth = canvasSettings?.width || 1200;
-  const canvasHeight = canvasSettings?.height || 800;
+  const canvasWidth = canvasSettings?.width || DEFAULT_LAYOUT_CANVAS.width;
+  const canvasHeight = canvasSettings?.height || DEFAULT_LAYOUT_CANVAS.height;
   const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const seatMapRef = useRef(null);
@@ -1537,8 +1541,8 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
         if (data.stageSize) setStageSize(data.stageSize);
         if (data.canvasSettings) {
           setCanvasSettings({
-            width: data.canvasSettings.width || 1200,
-            height: data.canvasSettings.height || 800,
+            width: data.canvasSettings.width || DEFAULT_LAYOUT_CANVAS.width,
+            height: data.canvasSettings.height || DEFAULT_LAYOUT_CANVAS.height,
           });
         }
       } else if (!preserveError) {
@@ -1719,7 +1723,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
               <div
                 ref={seatMapRef}
                 className="relative h-[420px] bg-gray-100 dark:bg-gray-900 rounded-xl overflow-auto border border-purple-500/20"
-                style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
+                style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', overscrollBehavior: 'contain' }}
               >
                 {(!selectedEventId || loadingLayout) && (
                   <div className="absolute inset-0 flex items-center justify-center text-gray-500">
@@ -1796,7 +1800,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                       const seatIds = seatIdsForRow(row);
                       const reservedForRow = seatIds.filter((seatId) => reservedSeatSet.has(seatId));
                       const pendingForRow = seatIds.filter((seatId) => pendingSeatSet.has(seatId));
-                      const seatFrame = getSeatRowFrame(row, { size: 60 });
+                      const seatFrame = getSeatRowRenderFrame(row, { size: 60 });
                       return (
                         <div
                           key={`${row.id}-${row.row_label}`}

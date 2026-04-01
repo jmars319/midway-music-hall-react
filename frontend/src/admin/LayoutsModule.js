@@ -5,10 +5,11 @@ import { API_BASE } from '../apiConfig';
 import TableComponent from '../components/TableComponent';
 import SeatingChart from '../components/SeatingChart';
 import { buildSeatLabel, normalizeSeatLabels, resolveRowHeaderLabels } from '../utils/seatLabelUtils';
+import { DEFAULT_LAYOUT_CANVAS, LAYOUT_CANVAS_PRESETS } from '../utils/layoutCanvasPresets';
 import {
   DEFAULT_TABLE_SHAPE,
   TABLE_SHAPE_OPTIONS,
-  getSeatRowFrame,
+  getSeatRowRenderFrame,
   normalizeTableShapeValue,
   resolveTableShapeForRow,
 } from '../utils/tableLayoutGeometry';
@@ -17,7 +18,7 @@ const isDevBuild = process.env.NODE_ENV !== 'production';
 
 const DEFAULT_STAGE_POSITION = { x: 50, y: 10 };
 const DEFAULT_STAGE_SIZE = { width: 200, height: 80 };
-const DEFAULT_CANVAS = { preset: 'standard', width: 1200, height: 800 };
+const DEFAULT_CANVAS = DEFAULT_LAYOUT_CANVAS;
 
 const normalizeStagePosition = (stagePosition) => ({
   x: typeof stagePosition?.x === 'number' ? stagePosition.x : DEFAULT_STAGE_POSITION.x,
@@ -69,11 +70,7 @@ const createInitialFormState = (overrides = {}) => ({
 const seatTypes = ['general', 'premium', 'vip', 'accessible'];
 const tableShapes = TABLE_SHAPE_OPTIONS;
 
-const canvasPresets = [
-  { key: 'standard', label: 'Standard (120′ × 80′)', width: 1200, height: 800 },
-  { key: 'wide', label: 'Wide Room (150′ × 90′)', width: 1500, height: 900 },
-  { key: 'deep', label: 'Deep Room (100′ × 140′)', width: 1000, height: 1400 }
-];
+const canvasPresets = LAYOUT_CANVAS_PRESETS;
 
 const quickObjects = [
   { key: 'rect-6', label: 'Rect Table (6)', element_type: 'table', table_shape: 'table-6', total_seats: 6, seat_type: 'general' },
@@ -91,7 +88,7 @@ const quickObjects = [
   { key: 'pole', label: 'Pole / Column', element_type: 'marker', width: 30, height: 30, color: '#9ca3af' }
 ];
 
-const buildSeatFrame = (row = {}) => getSeatRowFrame(row, { size: 60 });
+const buildSeatFrame = (row = {}) => getSeatRowRenderFrame(row, { size: 60 });
 const canPreviewSeatObject = (row = {}) => {
   const type = String(row?.element_type || '').trim().toLowerCase();
   const normalizedShape = normalizeTableShapeValue(row?.table_shape || row?.seat_type || '');
@@ -139,9 +136,9 @@ export default function LayoutsModule() {
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
   const [, setResizingStage] = useState(false);
   const [canvasSettings, setCanvasSettings] = useState({
-    preset: canvasPresets[0].key,
-    width: canvasPresets[0].width,
-    height: canvasPresets[0].height
+    preset: DEFAULT_CANVAS.preset,
+    width: DEFAULT_CANVAS.width,
+    height: DEFAULT_CANVAS.height
   });
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });

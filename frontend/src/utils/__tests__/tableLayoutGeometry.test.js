@@ -2,6 +2,7 @@ import {
   getTableFootprint,
   getTableLayoutMetrics,
   getTableShapeSeatCount,
+  getSeatRowRenderFrame as getSeatRowSurfaceFrame,
   normalizeTableShapeValue,
 } from '../tableLayoutGeometry';
 
@@ -51,5 +52,22 @@ describe('tableLayoutGeometry', () => {
       expect(bottomSide).toHaveLength(totalSeats / 2);
       expect(getMinimumSeatClearance(metrics)).toBeGreaterThanOrEqual(-0.001);
     });
+  });
+
+  test('adds compatibility breathing room around rendered chair and table rows', () => {
+    const tableBase = getTableFootprint('table-6');
+    const tableFrame = getSeatRowSurfaceFrame({ element_type: 'table', table_shape: 'table-6' });
+    const chairBase = getTableFootprint('chair');
+    const chairFrame = getSeatRowSurfaceFrame({ element_type: 'chair', table_shape: 'chair' });
+
+    expect(tableFrame.innerWidth).toBe(tableBase.width);
+    expect(tableFrame.innerHeight).toBe(tableBase.height);
+    expect(tableFrame.width - tableBase.width).toBe(20);
+    expect(tableFrame.height - tableBase.height).toBe(28);
+
+    expect(chairFrame.innerWidth).toBe(chairBase.width);
+    expect(chairFrame.innerHeight).toBe(chairBase.height);
+    expect(chairFrame.width - chairBase.width).toBe(12);
+    expect(chairFrame.height - chairBase.height).toBe(16);
   });
 });

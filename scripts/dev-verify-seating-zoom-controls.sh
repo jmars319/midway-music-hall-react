@@ -193,10 +193,14 @@ Manual QA checklist (pass/fail):
    Pass: zoom decreases, then map recenters/resets predictably.
 6. Tap/click 'Open large map'.
    Pass: overlay is on top; underlying modal is not interactable.
-7. Repeat steps 3-5 in large map mode, then tap/click 'Exit large map'.
+7. In large map mode, zoom in twice and swipe/scroll across the map.
+   Pass: the chart pans naturally while zoomed; it does not feel locked in place.
+8. Select seats on two nearby tables while still zoomed in.
+   Pass: the tables are visually separated enough to target the intended seats without overlap confusion.
+9. Tap/click 'Exit large map'.
    Pass: selected seat state is preserved after exit.
-8. Mobile device checks (Android + iOS): repeat steps 3-7.
-   Pass: controls remain reachable and do not block panning.
+10. Mobile device checks (Android + iOS): repeat steps 3-9.
+   Pass: controls remain reachable, zoomed panning works, and the seat targets are usable by touch.
 
 If any step fails, mark this verify as failed.
 GUIDE
