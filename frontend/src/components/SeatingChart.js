@@ -664,9 +664,9 @@ export default function SeatingChart({
                     )}
                     <div
                       className="flex h-full w-full items-center justify-center"
-                      style={{ pointerEvents: 'auto' }}
+                      style={{ pointerEvents: 'none' }}
                     >
-                      <div style={{ transform: `rotate(${rotation}deg)` }}>
+                      <div style={{ transform: `rotate(${rotation}deg)`, pointerEvents: 'none' }}>
                         <TableComponent
                           row={row}
                           tableShape={resolveTableShapeForRow(row)}

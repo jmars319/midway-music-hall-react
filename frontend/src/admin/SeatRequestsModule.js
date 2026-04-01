@@ -1817,8 +1817,8 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
                           <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-xs font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap z-20 pointer-events-none">
                             {row.section_name} - {row.row_label}
                           </div>
-                          <div className="flex h-full w-full items-center justify-center" style={{ pointerEvents: 'auto' }}>
-                            <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
+                          <div className="flex h-full w-full items-center justify-center" style={{ pointerEvents: 'none' }}>
+                            <div style={{ transform: `rotate(${row.rotation || 0}deg)`, pointerEvents: 'none' }}>
                               <TableComponent
                                 row={row}
                                 tableShape={resolveTableShapeForRow(row)}

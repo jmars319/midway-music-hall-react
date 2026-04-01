@@ -363,6 +363,7 @@ export default function TableComponent({
           background: '#10b981',
           borderRadius: 8,
           border: '2px dashed #059669',
+          pointerEvents: 'none',
           ...(tierVisual?.surfaceStyle || {}),
         }}
         >
@@ -372,6 +373,7 @@ export default function TableComponent({
         {layoutMetrics.seats.map((seat) => {
           const seatId = buildSeatId(row, seat.number);
           const classes = getSeatClasses(seatId);
+          const seatStatus = getSeatStatus(seatId);
           const hitSize = seatTargetSizeMap.get(seat.number) || seat.size;
           const style = {
             left: seat.x,
@@ -392,7 +394,9 @@ export default function TableComponent({
                 onClick={() => onToggleSeat && onToggleSeat(seatId)}
                 className={classes.containerClassName}
                 style={style}
-                disabled={getSeatStatus(seatId).isReserved}
+                disabled={seatStatus.isReserved}
+                aria-pressed={seatStatus.isSelected}
+                data-seat-hit-size={String(hitSize)}
               >
                 <span className={classes.visualClassName} style={{ width: seat.size, height: seat.size }}>
                   <Users className="h-3 w-3" />
@@ -414,7 +418,14 @@ export default function TableComponent({
   }
 
   return (
-    <div style={{ width: layoutMetrics.width, height: layoutMetrics.height, position: 'relative' }}>
+    <div
+      style={{
+        width: layoutMetrics.width,
+        height: layoutMetrics.height,
+        position: 'relative',
+        pointerEvents: 'none',
+      }}
+    >
       {layoutMetrics.surface
         ? renderTableCenter(
             layoutMetrics.surface.width,

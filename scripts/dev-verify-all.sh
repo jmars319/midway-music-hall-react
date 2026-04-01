@@ -35,6 +35,7 @@ scripts=(
   ./scripts/dev-verify-seat-request-event-name-sync.sh
   ./scripts/dev-verify-seat-marker-print.sh
   ./scripts/dev-verify-seat-label-utils.sh
+  ./scripts/dev-verify-seating-hit-layering.sh
   ./scripts/dev-verify-seating-zoom-controls.sh
   ./scripts/dev-verify-seating-overlay-gating.sh
   ./scripts/dev-verify-payment-post-submit.sh

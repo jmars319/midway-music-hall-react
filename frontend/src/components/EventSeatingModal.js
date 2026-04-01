@@ -1251,8 +1251,8 @@ export default function EventSeatingModal({ event, onClose }) {
 	                        }}
 	                      />
 	                    )}
-                    <div className="relative flex h-full w-full items-center justify-center" style={{ pointerEvents: 'auto' }}>
-                      <div style={{ transform: `rotate(${row.rotation || 0}deg)` }}>
+                    <div className="relative flex h-full w-full items-center justify-center" style={{ pointerEvents: 'none' }}>
+                      <div style={{ transform: `rotate(${row.rotation || 0}deg)`, pointerEvents: 'none' }}>
                         <TableComponent
                           row={row}
                           tableShape={resolveTableShapeForRow(row)}
