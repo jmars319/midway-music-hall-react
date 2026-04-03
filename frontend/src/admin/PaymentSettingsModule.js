@@ -9,6 +9,7 @@ const MARKUP_PATTERN = /<[^>]*>/;
 const PAYPAL_BUTTON_ID_PATTERN = /^[A-Za-z0-9]{5,64}$/;
 
 const normalizeProviderType = (value) => {
+  if (value === 'square') return 'square';
   if (value === 'paypal_hosted_button') return 'paypal_hosted_button';
   if (value === 'paypal_orders') return 'paypal_orders';
   return 'external_link';
@@ -317,6 +318,7 @@ export default function PaymentSettingsModule(){
                     disabled={savingKey === key || !isProviderTypeAvailable}
                   >
                     <option value="external_link">External link</option>
+                    <option value="square">Square hosted checkout</option>
                     <option value="paypal_hosted_button" disabled={!isPaypalModeAvailable}>PayPal hosted button</option>
                     <option value="paypal_orders">PayPal Orders (scaffold)</option>
                   </select>
@@ -388,6 +390,10 @@ export default function PaymentSettingsModule(){
                       </div>
                     )}
                   </>
+                ) : data.provider_type === 'square' ? (
+                  <div className="md:col-span-2 rounded-md border border-emerald-500/40 bg-emerald-900/20 px-3 py-3 text-sm text-emerald-100">
+                    Square checkout uses backend-authoritative seat request totals after the guest submits the request. Configure the Square backend environment values before enabling this provider.
+                  </div>
                 ) : (
                   <div className="md:col-span-2 rounded-md border border-indigo-500/40 bg-indigo-900/20 px-3 py-3 text-sm text-indigo-100">
                     PayPal Orders is scaffolded only in this phase. Customer-facing payment capture is not enabled yet.

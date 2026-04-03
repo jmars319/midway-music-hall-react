@@ -307,7 +307,9 @@ const normalizePaymentConfig = (config = {}) => ({
     ? 'paypal_hosted_button'
     : config.provider_type === 'paypal_orders'
       ? 'paypal_orders'
-      : 'external_link',
+      : config.provider_type === 'square'
+        ? 'square'
+        : 'external_link',
   provider_label: config.provider_label || '',
   button_text: config.button_text || 'Pay Online',
   payment_url: config.payment_url || '',
@@ -5762,7 +5764,14 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                         <div className="grid grid-cols-1 gap-3 text-sm text-gray-300 md:grid-cols-2">
                           <div>
                             <p className="text-xs uppercase tracking-wide text-gray-400">Provider</p>
-                            <p className="font-medium text-white">{activePaymentConfig.provider_label || 'Custom link'}</p>
+                            <p className="font-medium text-white">
+                              {activePaymentConfig.provider_label
+                                || (activePaymentConfig.provider_type === 'square'
+                                  ? 'Square'
+                                  : activePaymentConfig.provider_type === 'paypal_hosted_button' || activePaymentConfig.provider_type === 'paypal_orders'
+                                    ? 'PayPal'
+                                    : 'Custom link')}
+                            </p>
                           </div>
                           <div>
                             <p className="text-xs uppercase tracking-wide text-gray-400">Type</p>
@@ -5771,6 +5780,8 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                                 ? 'PayPal hosted button'
                                 : activePaymentConfig.provider_type === 'paypal_orders'
                                   ? 'PayPal Orders (scaffold)'
+                                  : activePaymentConfig.provider_type === 'square'
+                                    ? 'Square hosted checkout'
                                   : 'External link'}
                             </p>
                           </div>
@@ -5797,6 +5808,11 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                             <div className="md:col-span-2">
                               <p className="text-xs uppercase tracking-wide text-gray-400">Orders scaffold</p>
                               <p className="text-white">Dynamic amount capture is planned but not enabled in production yet.</p>
+                            </div>
+                          ) : activePaymentConfig.provider_type === 'square' ? (
+                            <div className="md:col-span-2">
+                              <p className="text-xs uppercase tracking-wide text-gray-400">Hosted checkout</p>
+                              <p className="text-white">Square checkout starts after the customer submits the seat request and uses backend-authoritative totals.</p>
                             </div>
                           ) : (
                             <div className="md:col-span-2">

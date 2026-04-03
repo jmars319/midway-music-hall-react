@@ -86,6 +86,10 @@ export default function EventSeatingModal({ event, onClose }) {
   const [submittedSeatCount, setSubmittedSeatCount] = useState(0);
   const [submittedTotalAmount, setSubmittedTotalAmount] = useState(null);
   const [submittedCurrency, setSubmittedCurrency] = useState('USD');
+  const [submittedSeatRequestId, setSubmittedSeatRequestId] = useState(null);
+  const [submittedPaymentSummary, setSubmittedPaymentSummary] = useState(null);
+  const [squareCheckoutStarting, setSquareCheckoutStarting] = useState(false);
+  const [paymentLaunchError, setPaymentLaunchError] = useState('');
   const [paypalRenderError, setPaypalRenderError] = useState('');
   const [stagePosition, setStagePosition] = useState({ x: 50, y: 10 });
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
@@ -291,6 +295,7 @@ export default function EventSeatingModal({ event, onClose }) {
     setSubmittedSeatCount(0);
     setSubmittedTotalAmount(null);
     setSubmittedCurrency('USD');
+    setSubmittedPaymentSummary(null);
     setSuccessMessage('');
     setErrorMessage('');
     setShowLargeMap(false);
@@ -848,6 +853,11 @@ export default function EventSeatingModal({ event, onClose }) {
     setSubmittedSeatCount(0);
     setSubmittedTotalAmount(null);
     setSubmittedCurrency('USD');
+    setSubmittedSeatRequestId(null);
+    setSubmittedPaymentSummary(null);
+    setSquareCheckoutStarting(false);
+    setPaymentLaunchError('');
+    setPaymentPanelDismissed(false);
   };
 
   const handleBackToSeats = () => {
@@ -857,6 +867,11 @@ export default function EventSeatingModal({ event, onClose }) {
     setSubmittedSeatCount(0);
     setSubmittedTotalAmount(null);
     setSubmittedCurrency('USD');
+    setSubmittedSeatRequestId(null);
+    setSubmittedPaymentSummary(null);
+    setSquareCheckoutStarting(false);
+    setPaymentLaunchError('');
+    setPaymentPanelDismissed(false);
     setSuccessMessage('');
     setForm({
       customerName: '',
@@ -875,6 +890,8 @@ export default function EventSeatingModal({ event, onClose }) {
     e.preventDefault();
     setSubmitting(true);
     setErrorMessage('');
+    setPaymentLaunchError('');
+    setSquareCheckoutStarting(false);
     seatDebugLog('reservation-submit-start', {
       eventId: event.id,
       seatIds: selectedSeats.slice(),
@@ -906,6 +923,7 @@ export default function EventSeatingModal({ event, onClose }) {
       if (data.success) {
         const submittedCount = selectedSeats.length;
         const apiSeatRequest = data.seat_request || {};
+        const apiSeatRequestId = Number(apiSeatRequest.id);
         const apiSeatCount = Number(apiSeatRequest.total_seats);
         const apiTotalAmountRaw = normalizeFiniteNumber(apiSeatRequest.total_amount);
         const computedAmount = apiTotalAmountRaw !== null ? Number(apiTotalAmountRaw.toFixed(2)) : null;
@@ -917,6 +935,11 @@ export default function EventSeatingModal({ event, onClose }) {
             ? apiSeatRequest.currency.trim().toUpperCase()
             : 'USD'
         );
+        setSubmittedSeatRequestId(Number.isFinite(apiSeatRequestId) && apiSeatRequestId > 0 ? apiSeatRequestId : null);
+        setSubmittedPaymentSummary(apiSeatRequest.payment_summary && typeof apiSeatRequest.payment_summary === 'object'
+          ? apiSeatRequest.payment_summary
+          : null);
+        setPaymentPanelDismissed(false);
         setSuccessMessage('Request submitted successfully! We will contact you soon.');
         setSelectedSeats([]);
         setShowContactForm(true);
@@ -958,13 +981,22 @@ export default function EventSeatingModal({ event, onClose }) {
     ? 'paypal_hosted_button'
     : paymentOption?.provider_type === 'paypal_orders'
       ? 'paypal_orders'
-      : 'external_link';
+      : paymentOption?.provider_type === 'square'
+        ? 'square'
+        : 'external_link';
   const paymentSeatCount = postSubmitPaymentReady ? submittedSeatCount : selectedSeats.length;
   const showPaymentPanel = postSubmitPaymentReady && paymentOption && !paymentPanelDismissed;
-  const paymentOverLimit = showPaymentPanel && paymentSeatCount > paymentSeatLimit;
+  const paymentCanOffer = submittedPaymentSummary?.can_offer_payment ?? (
+    submittedTotalAmount !== null && /^[A-Z]{3}$/.test(submittedCurrency || '')
+  );
+  const paymentBlockReason = typeof submittedPaymentSummary?.reason_message === 'string'
+    ? submittedPaymentSummary.reason_message
+    : '';
+  const paymentOverLimit = showPaymentPanel && paymentCanOffer && paymentSeatCount > paymentSeatLimit;
   const paymentAvailableNotice = Boolean(paymentOption?.enabled ?? paymentOption);
   const paypalContainerId = `paypal-container-${event.id}`;
   const amountDueCurrency = /^[A-Z]{3}$/.test(submittedCurrency || '') ? submittedCurrency : 'USD';
+  const paymentProviderLabel = paymentOption?.provider_label || (paymentProviderType === 'square' ? 'Square' : 'our partner');
   const amountDueLabel = submittedTotalAmount !== null
     ? new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -974,14 +1006,60 @@ export default function EventSeatingModal({ event, onClose }) {
     }).format(submittedTotalAmount)
     : '';
 
+  const handleStartSquareCheckout = async () => {
+    if (!submittedSeatRequestId || squareCheckoutStarting) {
+      return;
+    }
+    setSquareCheckoutStarting(true);
+    setPaymentLaunchError('');
+    try {
+      const res = await fetch(`${API_BASE}/seat-requests/${submittedSeatRequestId}/payment/start`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        if (data?.payment_summary && typeof data.payment_summary === 'object') {
+          setSubmittedPaymentSummary(data.payment_summary);
+        }
+        setPaymentLaunchError(data?.message || 'Unable to start Square checkout right now.');
+        return;
+      }
+      if (data?.payment_summary && typeof data.payment_summary === 'object') {
+        setSubmittedPaymentSummary(data.payment_summary);
+      }
+      const checkoutUrl = typeof data?.checkout_url === 'string' ? data.checkout_url.trim() : '';
+      if (!checkoutUrl) {
+        setPaymentLaunchError('Square checkout did not return a launch URL.');
+        return;
+      }
+      if (data?.launch_target === 'same_tab') {
+        window.location.assign(checkoutUrl);
+        return;
+      }
+      const popup = window.open(checkoutUrl, '_blank', 'noopener,noreferrer');
+      if (!popup) {
+        window.location.assign(checkoutUrl);
+      }
+    } catch (error) {
+      console.error('Square checkout launch failed', error);
+      setPaymentLaunchError('Unable to start Square checkout right now. Please try again or contact staff.');
+    } finally {
+      setSquareCheckoutStarting(false);
+    }
+  };
+
   useEffect(() => {
     if (!showPaymentPanel) {
       setPaypalRenderError('');
+      setPaymentLaunchError('');
     }
   }, [showPaymentPanel]);
 
   useEffect(() => {
-    if (!showPaymentPanel || paymentOverLimit || paymentProviderType !== 'paypal_hosted_button') {
+    if (!showPaymentPanel || !paymentCanOffer || paymentOverLimit || paymentProviderType !== 'paypal_hosted_button') {
       return undefined;
     }
     const paypalConfig = paymentOption?.paypal || {};
@@ -1023,7 +1101,7 @@ export default function EventSeatingModal({ event, onClose }) {
       cancelled = true;
       clearContainer();
     };
-  }, [paymentOption, paymentOverLimit, paymentProviderType, paypalContainerId, showPaymentPanel]);
+  }, [paymentCanOffer, paymentOption, paymentOverLimit, paymentProviderType, paypalContainerId, showPaymentPanel]);
 
   const renderLandmark = (row = {}) => {
     const landmarkKey = row.id || `${row.element_type || 'marker'}-${row.pos_x}-${row.pos_y}`;
@@ -1625,7 +1703,7 @@ export default function EventSeatingModal({ event, onClose }) {
                           <p className="text-xs text-gray-300">
                             {paymentOverLimit
                               ? 'Reach out to staff to pay for larger parties.'
-                              : `You can complete payment with ${paymentOption.provider_label || 'our partner'} now.`}
+                              : `You can complete payment with ${paymentProviderLabel} now.`}
                           </p>
                         </div>
                         <button
@@ -1636,13 +1714,31 @@ export default function EventSeatingModal({ event, onClose }) {
                           Hide
                         </button>
                       </div>
-                      {paymentOverLimit ? (
+                      {!paymentCanOffer ? (
+                        <p className="text-sm text-gray-100">
+                          {paymentBlockReason || 'Online payment is not available for this request yet.'}
+                        </p>
+                      ) : paymentOverLimit ? (
                         <p className="text-sm text-gray-100">
                           {paymentOption.over_limit_message || 'Please call the box office to arrange payment for larger groups.'}
                         </p>
                       ) : (
                         <>
-                          {paymentProviderType === 'paypal_hosted_button' ? (
+                          {paymentProviderType === 'square' ? (
+                            <div className="space-y-2">
+                              <button
+                                type="button"
+                                onClick={handleStartSquareCheckout}
+                                disabled={squareCheckoutStarting || !submittedSeatRequestId}
+                                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:bg-emerald-900/60 disabled:text-emerald-200/80"
+                              >
+                                {squareCheckoutStarting ? 'Opening Square...' : (paymentOption.button_text || 'Pay with Square')}
+                              </button>
+                              {paymentLaunchError && (
+                                <p className="text-xs text-amber-200">{paymentLaunchError}</p>
+                              )}
+                            </div>
+                          ) : paymentProviderType === 'paypal_hosted_button' ? (
                             <div className="space-y-2">
                               <div id={paypalContainerId} className="min-h-[40px]" />
                               {paypalRenderError && (

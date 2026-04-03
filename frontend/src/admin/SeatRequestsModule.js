@@ -21,7 +21,7 @@ const STATUS_FILTERS = [
   { value: 'all', label: 'All statuses' },
   { value: 'new', label: 'New' },
   { value: 'contacted', label: 'Contacted' },
-  { value: 'waiting', label: 'Waiting for payment' },
+  { value: 'waiting', label: 'Waiting / pending confirmation' },
   { value: 'confirmed', label: 'Confirmed / Reserved' },
   { value: 'declined', label: 'Declined' },
   { value: 'closed', label: 'Closed / Released' },
@@ -43,7 +43,7 @@ const STATUS_BADGES = {
 const STATUS_HELP_TEXT = {
   new: 'New request awaiting outreach (24-hour hold).',
   contacted: 'You have contacted the guest and are awaiting next steps.',
-  waiting: 'Waiting on payment or guest confirmation.',
+  waiting: 'Waiting on payment or staff confirmation.',
   confirmed: 'Seats are finalized and committed to this guest.',
   declined: 'Unable to accommodate the request.',
   closed: 'Conversation closed or guest released seats.',
@@ -120,8 +120,54 @@ const describeHoldWindow = (value) => {
 };
 
 const normalizeStatus = (status) => (status || 'new').toLowerCase();
+const normalizePaymentStatus = (status) => {
+  const value = String(status || '').trim().toLowerCase();
+  if (!value) return '';
+  if (['captured', 'completed', 'succeeded', 'settled'].includes(value)) return 'paid';
+  if (['processing', 'started', 'created', 'authorized', 'approved'].includes(value)) return 'pending';
+  if (['stale'].includes(value)) return 'invalidated';
+  if (['declined'].includes(value)) return 'failed';
+  if (['canceled', 'voided'].includes(value)) return 'cancelled';
+  return value;
+};
 const isOpenStatus = (status) => OPEN_STATUSES.includes(normalizeStatus(status));
 const isFinalStatus = (status) => FINAL_STATUSES.includes(normalizeStatus(status));
+const isPaidPendingConfirmationRequest = (request = {}) => (
+  Boolean(request.payment_paid_pending_confirmation)
+  || (!isFinalStatus(request.status) && normalizePaymentStatus(request.payment_status_normalized || request.payment_status) === 'paid')
+);
+const paymentStateCopy = (request = {}) => {
+  const normalized = normalizePaymentStatus(request.payment_status_normalized || request.payment_status);
+  if (isPaidPendingConfirmationRequest(request)) {
+    return {
+      label: 'Paid / pending confirmation',
+      detail: 'Payment is complete. The reservation stays attached to this request until staff confirms it.',
+      className: 'bg-emerald-500/15 text-emerald-100 border border-emerald-500/30',
+    };
+  }
+  if (normalized === 'pending') {
+    return {
+      label: 'Payment in progress',
+      detail: 'A payment attempt has started but is not complete yet.',
+      className: 'bg-sky-500/15 text-sky-100 border border-sky-500/30',
+    };
+  }
+  if (normalized === 'invalidated') {
+    return {
+      label: 'Payment invalidated',
+      detail: 'Seats or pricing changed, so previous payment references were cleared.',
+      className: 'bg-amber-500/15 text-amber-100 border border-amber-500/30',
+    };
+  }
+  if (normalized === 'failed') {
+    return {
+      label: 'Payment failed',
+      detail: 'The last payment attempt did not complete successfully.',
+      className: 'bg-rose-500/15 text-rose-100 border border-rose-500/30',
+    };
+  }
+  return null;
+};
 
 const parseSeats = (selectedSeats) => {
   if (!selectedSeats) return [];
@@ -984,10 +1030,14 @@ export default function SeatRequestsModule() {
               const displaySeats = buildDisplaySeatList(req).map((seat) => normalizeDisplaySeat(seat));
               const status = normalizeStatus(req.status);
               const badge = STATUS_BADGES[status] || 'bg-gray-500/15 text-gray-200 border border-gray-500/30';
-              const expiredHold = isHoldExpired(req.hold_expires_at) && isOpenStatus(status);
+              const paidPendingConfirmation = isPaidPendingConfirmationRequest(req);
+              const paymentState = paymentStateCopy(req);
+              const expiredHold = !paidPendingConfirmation && isHoldExpired(req.hold_expires_at) && isOpenStatus(status);
               const isExpired = status === 'expired';
               const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
-              const holdDisplay = req.hold_expires_at
+              const holdDisplay = paidPendingConfirmation
+                ? 'Does not expire after payment'
+                : req.hold_expires_at
                 ? formatDateTime(req.hold_expires_at)
                 : (isFinalStatus(status) ? 'Released' : 'Not set');
               const routing = resolveRoutingInfo(req);
@@ -1044,17 +1094,32 @@ export default function SeatRequestsModule() {
                         {STATUS_HELP_TEXT[status]}
                       </p>
                     )}
+                    {paymentState && (
+                      <>
+                        <span className={`mt-2 px-3 py-1 rounded-full text-[11px] font-semibold inline-flex items-center gap-1 ${paymentState.className}`}>
+                          {paymentState.label}
+                        </span>
+                        <p className="mt-1 text-[11px] text-gray-400 max-w-[240px]">
+                          {paymentState.detail}
+                        </p>
+                      </>
+                    )}
                   </td>
                   <td className="px-4 py-3 align-top text-sm text-gray-300">
                     <div>Hold: {holdDisplay}</div>
-                    {req.hold_expires_at && (
+                    {req.hold_expires_at && !paidPendingConfirmation && (
                       <div className={`text-xs ${expiredHold ? 'text-red-400' : 'text-green-400'}`}>
                         {describeHoldWindow(req.hold_expires_at)}
                       </div>
                     )}
+                    {paidPendingConfirmation && (
+                      <div className="text-xs text-emerald-300">
+                        Payment completed. Waiting on staff confirmation.
+                      </div>
+                    )}
                     <div className="text-xs text-gray-500 mt-1">Created {formatDateTime(req.created_at)}</div>
                     <div className="text-xs text-gray-500">Updated {formatDateTime(req.updated_at)}</div>
-                    {(isOpenStatus(status) || status === 'expired') && (
+                    {(isOpenStatus(status) || status === 'expired') && !paidPendingConfirmation && (
                       <div className="flex flex-wrap gap-2 mt-2">
                         <button
                           type="button"
@@ -1271,6 +1336,8 @@ export default function SeatRequestsModule() {
 
       {selectedRequest && editForm && (() => {
         const detailRouting = resolveRoutingInfo(selectedRequest || {});
+        const detailPaymentState = paymentStateCopy(selectedRequest || {});
+        const detailPaidPendingConfirmation = isPaidPendingConfirmationRequest(selectedRequest || {});
         return (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-900 rounded-2xl max-w-4xl w-full border border-purple-500/30 shadow-2xl">
@@ -1294,6 +1361,13 @@ export default function SeatRequestsModule() {
                   <p className="text-sm text-gray-400">{detailRouting.label}</p>
                 </div>
               </div>
+              {detailPaymentState && (
+                <div className={`rounded-xl border p-4 ${detailPaymentState.className}`}>
+                  <p className="text-xs uppercase tracking-wide opacity-80">Payment state</p>
+                  <p className="mt-1 text-lg font-semibold">{detailPaymentState.label}</p>
+                  <p className="mt-1 text-sm opacity-90">{detailPaymentState.detail}</p>
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Customer name</label>
@@ -1344,29 +1418,36 @@ export default function SeatRequestsModule() {
                       value={editForm.hold_expires_at || ''}
                       onChange={handleDetailChange}
                       className="w-full px-3 py-2 bg-gray-800 text-white rounded"
+                      disabled={detailPaidPendingConfirmation}
                     />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => extendHoldInModal(24)}
-                        className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded flex items-center gap-1"
-                      >
-                        <Clock className="h-4 w-4" /> +24h
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setEditForm((prev) => ({
-                            ...prev,
-                            hold_expires_at: '',
-                            status: 'expired',
-                          }))
-                        }
-                        className="px-3 py-2 bg-red-600/30 hover:bg-red-600/60 text-red-200 rounded text-sm"
-                      >
-                        Expire now
-                      </button>
-                    </div>
+                    {detailPaidPendingConfirmation ? (
+                      <div className="px-3 py-2 rounded bg-emerald-950/40 border border-emerald-500/20 text-sm text-emerald-200">
+                        Payment completed. This request should stay open until staff confirms it.
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => extendHoldInModal(24)}
+                          className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded flex items-center gap-1"
+                        >
+                          <Clock className="h-4 w-4" /> +24h
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditForm((prev) => ({
+                              ...prev,
+                              hold_expires_at: '',
+                              status: 'expired',
+                            }))
+                          }
+                          className="px-3 py-2 bg-red-600/30 hover:bg-red-600/60 text-red-200 rounded text-sm"
+                        >
+                          Expire now
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1713,7 +1794,7 @@ function ManualReservationModal({ events = [], onClose = () => {}, onCreated = (
               >
                 <option value="confirmed">Finalize immediately</option>
                 <option value="new">New hold (24h)</option>
-                <option value="waiting">Waiting for payment</option>
+                <option value="waiting">Waiting / pending confirmation</option>
               </select>
             </div>
           </div>
