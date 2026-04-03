@@ -44,6 +44,34 @@ if ! rg -n "Amount due" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js"
   log_error "post-submit amount due display token is missing"
   exit 1
 fi
+if ! rg -n "paymentProviderType === 'square'" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
+  log_error "Square post-submit payment branch is missing from EventSeatingModal"
+  exit 1
+fi
+if ! rg -n 'seat-requests/\$\{submittedSeatRequestId\}/payment/start' "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
+  log_error "Square payment start route is not used by EventSeatingModal"
+  exit 1
+fi
+if ! rg -n "Opening Square|Pay with Square" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
+  log_error "Square launch action copy is missing from EventSeatingModal"
+  exit 1
+fi
+if ! rg -n 'option value=\"square\"' "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js" >/dev/null; then
+  log_error "Square provider option is missing from PaymentSettingsModule"
+  exit 1
+fi
+if ! rg -n "Square hosted checkout" "$ROOT_DIR/frontend/src/admin/EventsModule.js" >/dev/null; then
+  log_error "Square provider summary is missing from EventsModule"
+  exit 1
+fi
+if ! rg -n "Paid / pending confirmation" "$ROOT_DIR/frontend/src/admin/SeatRequestsModule.js" >/dev/null; then
+  log_error "paid / pending confirmation admin label is missing"
+  exit 1
+fi
+if ! rg -n "Does not expire after payment" "$ROOT_DIR/frontend/src/admin/SeatRequestsModule.js" >/dev/null; then
+  log_error "non-expiring paid request admin copy is missing"
+  exit 1
+fi
 
 json_field() {
   local json="$1"
@@ -180,13 +208,16 @@ fi
 log_success "[payment-post-submit] API and source gates look valid"
 cat <<'CHECKLIST'
 [payment-post-submit] MANUAL CHECKLIST
-1. Open the verification event created by this script on the public site.
-2. Select seats and continue to contact form.
-3. Confirm no actionable payment button is visible before submitting.
-4. Submit the seat request.
-5. Confirm success state appears and payment panel is now actionable.
-6. Confirm "Amount due" appears when total_amount is present in the response.
-7. Confirm over-limit copy still appears when seat count exceeds configured payment limit.
+1. In admin payment settings, choose `Square hosted checkout` for a sandbox category and save it.
+2. Open the verification event created by this script on the public site.
+3. Select seats and continue to contact form.
+4. Confirm no actionable payment button is visible before submitting.
+5. Submit the seat request.
+6. If Square sandbox is configured, confirm the post-submit panel shows a Square launch action and opens Square checkout.
+7. If Square sandbox is not configured, confirm the panel shows the backend block reason and does not show a misleading pay-now action.
+8. Confirm "Amount due" appears when total_amount is present in the response.
+9. Confirm over-limit copy still appears when seat count exceeds configured payment limit.
+10. Open Seat Requests admin and confirm paid requests remain visibly distinct as "Paid / pending confirmation" and show "Does not expire after payment."
 CHECKLIST
 if [ "$KEEP_FIXTURES" != "1" ]; then
   log_info "[payment-post-submit] temporary verification event will be deleted on exit; rerun with MMH_VERIFY_KEEP_FIXTURES=1 for manual walkthroughs"

@@ -40,6 +40,7 @@ scripts=(
   ./scripts/dev-verify-seating-overlay-gating.sh
   ./scripts/dev-verify-payment-post-submit.sh
   ./scripts/dev-verify-payment-orders-scaffold.sh
+  ./scripts/dev-verify-payment-authority-foundation.sh
   ./scripts/dev-verify-seat-request-amount.sh
   ./scripts/dev-verify-tiered-event-pricing.sh
   ./scripts/dev-verify-seating-tier-visibility.sh
