@@ -62,9 +62,22 @@ ALERTS_EMAIL_TO=support@jamarq.digital
 CORS_ALLOW_ORIGINS=https://midwaymusichall.net
 ADMIN_SESSION_COOKIE_SECURE=true
 PAYPAL_SDK_CLIENT_ID=your-paypal-client-id-if-used
+SQUARE_ENVIRONMENT=production
+SQUARE_ACCESS_TOKEN=your-square-access-token
+SQUARE_LOCATION_ID=your-square-location-id
+SQUARE_CHECKOUT_REDIRECT_URL=https://midwaymusichall.net/
+SQUARE_WEBHOOK_SIGNATURE_KEY=your-square-webhook-signature-key
+SQUARE_WEBHOOK_NOTIFICATION_URL=https://midwaymusichall.net/api/webhooks/square
 ```
 
 Use `backend/.env.production.example` as the canonical key list. Older names like `DB_PASS` are not read by the backend.
+
+Square production notes:
+- `SQUARE_ACCESS_TOKEN` must be a server-side token for the same Square account and location you intend to use.
+- `SQUARE_LOCATION_ID` must match the location used for checkout links.
+- `SQUARE_WEBHOOK_NOTIFICATION_URL` must exactly match the public webhook URL configured in Square, including `https://` and path.
+- `SQUARE_WEBHOOK_SIGNATURE_KEY` must be the signature key from that Square webhook subscription.
+- `SQUARE_CHECKOUT_REDIRECT_URL` is optional but recommended if you want buyers returned to MMH after Square-hosted checkout.
 
 ## Database setup (phpMyAdmin)
 1. Create DB + user in cPanel and grant All Privileges.
@@ -106,6 +119,7 @@ Keep `SEND_EMAILS=false` until all checks pass.
 7. Update Site Content or a category, refresh public site, then revert.
 8. Upload and delete a test image in Media Manager.
 9. `/robots.txt`, `/sitemap.xml`, `/manifest.json` load over HTTPS.
+10. If Square is enabled, submit a test seat request, launch Square checkout, complete one payment, and confirm the request stays `Paid / pending confirmation` without auto-confirming seats.
 
 ## Regression checklist (when time allows)
 - Verify event publish/unpublish/archiving on admin list and public site.

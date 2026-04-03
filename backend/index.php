@@ -2992,6 +2992,40 @@ function payment_settings_table_has_column(PDO $pdo, string $column): bool
     return $cache[$key];
 }
 
+function payment_settings_provider_type_supports(PDO $pdo, string $providerType): bool
+{
+    static $cache = [];
+    $normalized = normalize_payment_provider_type($providerType);
+    if (array_key_exists($normalized, $cache)) {
+        return $cache[$normalized];
+    }
+    if (!payment_settings_table_has_column($pdo, 'provider_type')) {
+        $cache[$normalized] = false;
+        return false;
+    }
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM payment_settings LIKE 'provider_type'");
+        $column = $stmt->fetch() ?: [];
+        $type = strtolower(trim((string) ($column['Type'] ?? $column['type'] ?? '')));
+        if ($type === '') {
+            $cache[$normalized] = false;
+            return false;
+        }
+        if (!str_starts_with($type, 'enum(')) {
+            $cache[$normalized] = true;
+            return true;
+        }
+        preg_match_all("/'([^']+)'/", $type, $matches);
+        $cache[$normalized] = in_array($normalized, $matches[1] ?? [], true);
+    } catch (Throwable $error) {
+        $cache[$normalized] = false;
+        if (APP_DEBUG) {
+            error_log('payment_settings_provider_type_supports failure: ' . $error->getMessage());
+        }
+    }
+    return $cache[$normalized];
+}
+
 function payment_settings_has_disallowed_markup(?string $value): bool
 {
     if ($value === null) {
@@ -3003,19 +3037,24 @@ function payment_settings_has_disallowed_markup(?string $value): bool
 function normalize_payment_provider_type($value): string
 {
     $providerType = strtolower(trim((string) ($value ?? 'external_link')));
-    if (!in_array($providerType, ['external_link', 'paypal_hosted_button', 'paypal_orders'], true)) {
+    if (!in_array($providerType, ['external_link', 'paypal_hosted_button', 'paypal_orders', 'square'], true)) {
         return 'external_link';
     }
     return $providerType;
 }
 
-function normalize_paypal_currency($value): string
+function normalize_currency_code($value): ?string
 {
     $currency = strtoupper(trim((string) ($value ?? 'USD')));
     if (!preg_match('/^[A-Z]{3,8}$/', $currency)) {
-        return 'USD';
+        return null;
     }
     return $currency;
+}
+
+function normalize_paypal_currency($value): string
+{
+    return normalize_currency_code($value) ?? 'USD';
 }
 
 function normalize_paypal_hosted_button_id($value): ?string
@@ -3034,6 +3073,343 @@ function resolve_paypal_sdk_client_id(): ?string
 {
     $envClientId = trim((string) Env::get('PAYPAL_SDK_CLIENT_ID', ''));
     return $envClientId !== '' ? $envClientId : null;
+}
+
+function resolve_square_environment(): string
+{
+    $fallback = strtolower(trim((string) Env::get('APP_ENV', 'development'))) === 'production'
+        ? 'production'
+        : 'sandbox';
+    $environment = strtolower(trim((string) Env::get('SQUARE_ENVIRONMENT', $fallback)));
+    return $environment === 'production' ? 'production' : 'sandbox';
+}
+
+function resolve_square_access_token(): ?string
+{
+    $token = trim((string) Env::get('SQUARE_ACCESS_TOKEN', ''));
+    return $token !== '' ? $token : null;
+}
+
+function resolve_square_location_id(): ?string
+{
+    $locationId = trim((string) Env::get('SQUARE_LOCATION_ID', ''));
+    return $locationId !== '' ? $locationId : null;
+}
+
+function resolve_square_api_base_url(): string
+{
+    $override = trim((string) Env::get('SQUARE_API_BASE_URL', ''));
+    if ($override !== '') {
+        return rtrim($override, '/');
+    }
+    return resolve_square_environment() === 'production'
+        ? 'https://connect.squareup.com'
+        : 'https://connect.squareupsandbox.com';
+}
+
+function resolve_square_api_version(): string
+{
+    $version = trim((string) Env::get('SQUARE_API_VERSION', '2026-01-22'));
+    return $version !== '' ? $version : '2026-01-22';
+}
+
+function resolve_square_checkout_redirect_url(): ?string
+{
+    $redirectUrl = trim((string) Env::get('SQUARE_CHECKOUT_REDIRECT_URL', ''));
+    return $redirectUrl !== '' ? $redirectUrl : null;
+}
+
+function resolve_square_webhook_signature_key(): ?string
+{
+    $signatureKey = trim((string) Env::get('SQUARE_WEBHOOK_SIGNATURE_KEY', ''));
+    return $signatureKey !== '' ? $signatureKey : null;
+}
+
+function resolve_square_webhook_notification_url(): ?string
+{
+    $notificationUrl = trim((string) Env::get('SQUARE_WEBHOOK_NOTIFICATION_URL', ''));
+    return $notificationUrl !== '' ? $notificationUrl : null;
+}
+
+function square_provider_is_configured(): bool
+{
+    return resolve_square_access_token() !== null
+        && resolve_square_location_id() !== null;
+}
+
+function square_extract_error_message(array $payload, string $fallback = 'Square request failed'): string
+{
+    $errors = $payload['errors'] ?? null;
+    if (!is_array($errors) || !$errors) {
+        return $fallback;
+    }
+    $first = $errors[0] ?? null;
+    if (!is_array($first)) {
+        return $fallback;
+    }
+    $parts = array_values(array_filter([
+        trim((string) ($first['category'] ?? '')),
+        trim((string) ($first['code'] ?? '')),
+        trim((string) ($first['detail'] ?? '')),
+    ]));
+    if (!$parts) {
+        return $fallback;
+    }
+    return implode(': ', $parts);
+}
+
+function square_api_request(string $method, string $path, ?array $payload = null): array
+{
+    $accessToken = resolve_square_access_token();
+    if ($accessToken === null) {
+        throw new RuntimeException('Square access token is not configured');
+    }
+
+    $encodedPayload = $payload !== null ? json_encode($payload) : null;
+    if ($payload !== null && $encodedPayload === false) {
+        throw new RuntimeException('Unable to encode Square request payload');
+    }
+
+    $ch = curl_init(resolve_square_api_base_url() . $path);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array_values(array_filter([
+        'Authorization: Bearer ' . $accessToken,
+        'Square-Version: ' . resolve_square_api_version(),
+        'Accept: application/json',
+        $payload !== null ? 'Content-Type: application/json' : null,
+    ])));
+    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+    if ($payload !== null) {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $encodedPayload);
+    }
+
+    $responseBody = curl_exec($ch);
+    $curlError = curl_error($ch);
+    $statusCode = (int) (curl_getinfo($ch, CURLINFO_HTTP_CODE) ?: 0);
+
+    if ($responseBody === false) {
+        throw new RuntimeException('Square API request failed: ' . ($curlError ?: 'unknown cURL error'));
+    }
+
+    $decoded = json_decode((string) $responseBody, true);
+    return [
+        'status' => $statusCode,
+        'body' => (string) $responseBody,
+        'json' => is_array($decoded) ? $decoded : null,
+    ];
+}
+
+function square_payment_link_payload_from_response(?array $payload): ?array
+{
+    if (!$payload) {
+        return null;
+    }
+    $paymentLink = $payload['payment_link'] ?? null;
+    if (!is_array($paymentLink)) {
+        return null;
+    }
+    $paymentLinkId = normalize_nullable_text($paymentLink['id'] ?? null);
+    $checkoutUrl = normalize_nullable_text($paymentLink['url'] ?? null);
+    $orderId = normalize_nullable_text($paymentLink['order_id'] ?? null);
+    if ($orderId === null) {
+        $orders = $payload['related_resources']['orders'] ?? [];
+        if (is_array($orders) && isset($orders[0]) && is_array($orders[0])) {
+            $orderId = normalize_nullable_text($orders[0]['id'] ?? null);
+        }
+    }
+    if ($paymentLinkId === null || $checkoutUrl === null || $orderId === null) {
+        return null;
+    }
+    return [
+        'payment_link_id' => $paymentLinkId,
+        'checkout_url' => $checkoutUrl,
+        'order_id' => $orderId,
+    ];
+}
+
+function build_square_checkout_reference_id(int $seatRequestId): string
+{
+    return substr('seatreq-' . $seatRequestId, 0, 40);
+}
+
+function build_square_checkout_item_name(array $seatRequest): string
+{
+    $eventName = trim((string) ($seatRequest['event_artist_name'] ?? $seatRequest['event_title'] ?? ''));
+    if ($eventName === '') {
+        $eventName = 'Midway Music Hall seat request';
+    }
+    return substr($eventName, 0, 255);
+}
+
+function square_money_amount_from_decimal($amount): int
+{
+    $normalized = normalize_nullable_decimal($amount);
+    if ($normalized === null || (float) $normalized <= 0) {
+        throw new RuntimeException('Square amount must be a positive decimal');
+    }
+    return (int) round($normalized * 100);
+}
+
+function square_create_payment_link(array $seatRequest): array
+{
+    $seatRequestId = (int) ($seatRequest['id'] ?? 0);
+    if ($seatRequestId <= 0) {
+        throw new RuntimeException('Invalid seat request id');
+    }
+
+    $locationId = resolve_square_location_id();
+    if ($locationId === null) {
+        throw new RuntimeException('Square location id is not configured');
+    }
+
+    $currency = normalize_currency_code($seatRequest['currency'] ?? null);
+    if ($currency === null) {
+        throw new RuntimeException('Square currency is invalid');
+    }
+
+    $lineItemName = build_square_checkout_item_name($seatRequest);
+    $amountCents = square_money_amount_from_decimal($seatRequest['total_amount'] ?? null);
+    $body = [
+        'idempotency_key' => hash('sha256', 'square-checkout:' . $seatRequestId . ':' . normalize_nullable_decimal($seatRequest['total_amount'] ?? null) . ':' . $currency),
+        'order' => [
+            'location_id' => $locationId,
+            'reference_id' => build_square_checkout_reference_id($seatRequestId),
+            'line_items' => [[
+                'name' => $lineItemName,
+                'quantity' => '1',
+                'base_price_money' => [
+                    'amount' => $amountCents,
+                    'currency' => $currency,
+                ],
+            ]],
+        ],
+        'payment_note' => substr('MMH seat request #' . $seatRequestId, 0, 500),
+    ];
+
+    $redirectUrl = resolve_square_checkout_redirect_url();
+    if ($redirectUrl !== null) {
+        $body['checkout_options'] = [
+            'redirect_url' => $redirectUrl,
+        ];
+    }
+
+    $response = square_api_request('POST', '/v2/online-checkout/payment-links', $body);
+    if ($response['status'] < 200 || $response['status'] >= 300) {
+        throw new RuntimeException(square_extract_error_message($response['json'] ?? [], 'Square checkout creation failed'));
+    }
+
+    $paymentLink = square_payment_link_payload_from_response($response['json']);
+    if ($paymentLink === null) {
+        throw new RuntimeException('Square checkout response was missing payment link details');
+    }
+
+    return $paymentLink;
+}
+
+function square_retrieve_payment_link(string $paymentLinkId): ?array
+{
+    $trimmedId = trim($paymentLinkId);
+    if ($trimmedId === '') {
+        return null;
+    }
+    $response = square_api_request('GET', '/v2/online-checkout/payment-links/' . rawurlencode($trimmedId));
+    if ($response['status'] === 404) {
+        return null;
+    }
+    if ($response['status'] < 200 || $response['status'] >= 300) {
+        throw new RuntimeException(square_extract_error_message($response['json'] ?? [], 'Unable to retrieve Square checkout link'));
+    }
+    return square_payment_link_payload_from_response($response['json']);
+}
+
+function square_delete_payment_link(string $paymentLinkId): bool
+{
+    $trimmedId = trim($paymentLinkId);
+    if ($trimmedId === '') {
+        return false;
+    }
+    $response = square_api_request('DELETE', '/v2/online-checkout/payment-links/' . rawurlencode($trimmedId));
+    if (in_array($response['status'], [200, 202, 204, 404], true)) {
+        return true;
+    }
+    throw new RuntimeException(square_extract_error_message($response['json'] ?? [], 'Unable to delete Square checkout link'));
+}
+
+function seat_request_has_square_pending_checkout(array $seatRequest): bool
+{
+    return strtolower(trim((string) ($seatRequest['payment_provider'] ?? ''))) === 'square'
+        && seat_request_payment_is_pending_status($seatRequest['payment_status'] ?? null)
+        && normalize_nullable_text($seatRequest['payment_capture_id'] ?? null) !== null;
+}
+
+function cancel_seat_request_provider_payment_session(array $seatRequest): bool
+{
+    if (strtolower(trim((string) ($seatRequest['payment_provider'] ?? ''))) !== 'square') {
+        return false;
+    }
+    if (seat_request_payment_is_paid_status($seatRequest['payment_status'] ?? null)) {
+        return false;
+    }
+    $paymentLinkId = normalize_nullable_text($seatRequest['payment_capture_id'] ?? null);
+    if ($paymentLinkId === null) {
+        return false;
+    }
+    square_delete_payment_link($paymentLinkId);
+    return true;
+}
+
+function clear_pending_square_checkout_state(PDO $pdo, int $seatRequestId, array $existing, string $reason = 'request_closed', ?string $updatedBy = null): bool
+{
+    if (!seat_request_has_square_pending_checkout($existing)) {
+        return false;
+    }
+    try {
+        cancel_seat_request_provider_payment_session($existing);
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('clear_pending_square_checkout_state cleanup failure: ' . $error->getMessage());
+        }
+    }
+    apply_seat_request_payment_update($pdo, $seatRequestId, [
+        'payment_provider' => null,
+        'payment_status' => 'invalidated',
+        'payment_order_id' => null,
+        'payment_capture_id' => null,
+        'updated_by' => $updatedBy ?? 'system',
+    ]);
+    record_audit('seat_request.square_checkout_cleared', 'seat_request', $seatRequestId, [
+        'reason' => $reason,
+    ]);
+    return true;
+}
+
+function square_webhook_signature_is_valid(Request $request): bool
+{
+    $signatureKey = resolve_square_webhook_signature_key();
+    $notificationUrl = resolve_square_webhook_notification_url();
+    $signatureHeader = request_header_value($request, 'X-Square-HmacSha256-Signature');
+    if ($signatureKey === null || $notificationUrl === null || $signatureHeader === null) {
+        return false;
+    }
+    $expected = base64_encode(hash_hmac('sha256', $notificationUrl . $request->raw(), $signatureKey, true));
+    return hash_equals($expected, $signatureHeader);
+}
+
+function square_extract_payment_from_webhook(array $payload): ?array
+{
+    $candidates = [
+        $payload['data']['object']['payment'] ?? null,
+        $payload['data']['object']['object']['payment'] ?? null,
+        $payload['payment'] ?? null,
+    ];
+    foreach ($candidates as $candidate) {
+        if (is_array($candidate)) {
+            return $candidate;
+        }
+    }
+    return null;
 }
 
 function fetch_payment_settings_rows(PDO $pdo): array
@@ -3129,7 +3505,7 @@ function resolve_event_payment_option(array $event, array $lookup): ?array
         'scope' => $candidate['scope'] ?? 'category',
         'category_id' => $candidate['category_id'] ?? null,
         'provider_type' => $providerType,
-        'supports_dynamic_amount' => $providerType === 'paypal_orders',
+        'supports_dynamic_amount' => in_array($providerType, ['paypal_orders', 'square'], true),
         'provider_label' => $candidate['provider_label'] ?? null,
         'button_text' => $buttonText,
         'limit_seats' => $limitSeats,
@@ -3159,6 +3535,11 @@ function resolve_event_payment_option(array $event, array $lookup): ?array
         $base['currency'] = normalize_paypal_currency($candidate['paypal_currency'] ?? 'USD');
         return $base;
     }
+    if ($providerType === 'square') {
+        $base['currency'] = 'USD';
+        $base['square_checkout_enabled'] = true;
+        return $base;
+    }
     $paymentUrl = trim((string) ($candidate['payment_url'] ?? ''));
     if ($paymentUrl === '') {
         return null;
@@ -3166,6 +3547,248 @@ function resolve_event_payment_option(array $event, array $lookup): ?array
     $base['payment_url'] = $paymentUrl;
     $base['payment_url'] = $paymentUrl;
     return $base;
+}
+
+function build_seat_request_payment_summary(array $seatRequest, ?array $paymentOption = null): array
+{
+    $paymentStatus = normalize_seat_request_payment_status($seatRequest['payment_status'] ?? null);
+    $status = normalize_seat_request_status($seatRequest['status'] ?? null);
+    $seatCount = isset($seatRequest['total_seats']) && is_numeric($seatRequest['total_seats'])
+        ? max(0, (int) $seatRequest['total_seats'])
+        : count(parse_selected_seats($seatRequest['selected_seats'] ?? []));
+    $amount = normalize_nullable_decimal($seatRequest['total_amount'] ?? null);
+    $currency = normalize_currency_code($seatRequest['currency'] ?? null);
+    $providerType = $paymentOption ? normalize_payment_provider_type($paymentOption['provider_type'] ?? 'external_link') : null;
+    $limitSeats = isset($paymentOption['limit_seats']) && is_numeric($paymentOption['limit_seats'])
+        ? max(1, (int) $paymentOption['limit_seats'])
+        : 0;
+    $paidPendingConfirmation = seat_request_is_paid_pending_confirmation($seatRequest);
+    $expiresNormally = in_array($status, open_seat_request_statuses(), true)
+        && !empty($seatRequest['hold_expires_at'])
+        && !$paidPendingConfirmation;
+
+    $reasonCode = null;
+    $reasonMessage = null;
+    $canStartPayment = false;
+    if (seat_request_is_payment_terminal_status($status)) {
+        $reasonCode = 'REQUEST_NOT_OPEN_FOR_PAYMENT';
+        $reasonMessage = 'Online payment is not available for this request state.';
+    } elseif (seat_request_payment_is_paid_status($paymentStatus)) {
+        $reasonCode = 'PAYMENT_ALREADY_COMPLETED';
+        $reasonMessage = 'This request has already been paid and is pending staff confirmation.';
+    } elseif (seat_request_payment_is_pending_status($paymentStatus)) {
+        $reasonCode = 'PAYMENT_ALREADY_IN_PROGRESS';
+        $reasonMessage = 'A payment attempt is already in progress for this request.';
+    } elseif (!$paymentOption || empty($paymentOption['enabled'])) {
+        $reasonCode = 'PAYMENT_NOT_CONFIGURED';
+        $reasonMessage = 'Online payment is not configured for this event.';
+    } elseif ($providerType === 'square' && !square_provider_is_configured()) {
+        $reasonCode = 'PAYMENT_PROVIDER_UNAVAILABLE';
+        $reasonMessage = 'Square online payment is not configured right now. Please contact staff for help with payment.';
+    } elseif ($amount === null || (float) $amount <= 0) {
+        $reasonCode = 'PAYMENT_AMOUNT_INVALID';
+        $reasonMessage = 'Online payment is unavailable until this request has a valid total amount.';
+    } elseif ($currency === null) {
+        $reasonCode = 'PAYMENT_CURRENCY_INVALID';
+        $reasonMessage = 'Online payment is unavailable until this request has a valid currency.';
+    } elseif ($limitSeats > 0 && $seatCount > $limitSeats) {
+        $reasonCode = 'PAYMENT_SEAT_LIMIT_EXCEEDED';
+        $reasonMessage = $paymentOption['over_limit_message'] ?? 'Please contact our staff to arrange payment for larger groups.';
+    } else {
+        $canStartPayment = true;
+    }
+
+    return [
+        'provider_type' => $providerType,
+        'provider_label' => $paymentOption['provider_label'] ?? null,
+        'payment_status' => $paymentStatus,
+        'total_amount' => $amount,
+        'currency' => $currency,
+        'seat_count' => $seatCount,
+        'limit_seats' => $limitSeats > 0 ? $limitSeats : null,
+        'paid_pending_confirmation' => $paidPendingConfirmation,
+        'expires_normally' => $expiresNormally,
+        'can_offer_payment' => $canStartPayment,
+        'can_start_payment' => $canStartPayment,
+        'reason_code' => $reasonCode,
+        'reason_message' => $reasonMessage,
+    ];
+}
+
+function hydrate_seat_request_payment_details(array &$row, ?array $paymentOption = null): void
+{
+    $summary = build_seat_request_payment_summary($row, $paymentOption);
+    $row['payment_status_normalized'] = $summary['payment_status'];
+    $row['payment_paid_pending_confirmation'] = $summary['paid_pending_confirmation'];
+    $row['payment_expires_normally'] = $summary['expires_normally'];
+    $row['payment_summary'] = $summary;
+}
+
+function load_seat_request_payment_context(PDO $pdo, int $seatRequestId, bool $forUpdate = false): ?array
+{
+    $paymentEnabledSelect = events_table_has_column($pdo, 'payment_enabled')
+        ? 'e.payment_enabled'
+        : '0 AS payment_enabled';
+    $lockClause = $forUpdate ? ' FOR UPDATE' : '';
+    $stmt = $pdo->prepare(
+        "SELECT
+            sr.*,
+            e.category_id,
+            e.title AS event_title,
+            e.artist_name AS event_artist_name,
+            {$paymentEnabledSelect},
+            COALESCE(NULLIF(TRIM(e.status), ''), 'draft') AS event_status,
+            COALESCE(NULLIF(TRIM(e.visibility), ''), 'private') AS event_visibility
+        FROM seat_requests sr
+        INNER JOIN events e ON e.id = sr.event_id
+        WHERE sr.id = ? LIMIT 1{$lockClause}"
+    );
+    $stmt->execute([$seatRequestId]);
+    $seatRequest = $stmt->fetch();
+    if (!$seatRequest) {
+        return null;
+    }
+    $paymentOption = resolve_event_payment_option($seatRequest, load_payment_settings_lookup($pdo));
+    hydrate_seat_request_payment_details($seatRequest, $paymentOption);
+    return [
+        'seat_request' => $seatRequest,
+        'payment_option' => $paymentOption,
+    ];
+}
+
+function apply_seat_request_payment_update(PDO $pdo, int $seatRequestId, array $changes): ?array
+{
+    $updatableColumns = [];
+    if (layout_table_has_column($pdo, 'seat_requests', 'payment_provider') && array_key_exists('payment_provider', $changes)) {
+        $updatableColumns['payment_provider'] = normalize_nullable_text($changes['payment_provider']);
+    }
+    if (layout_table_has_column($pdo, 'seat_requests', 'payment_status') && array_key_exists('payment_status', $changes)) {
+        $updatableColumns['payment_status'] = normalize_seat_request_payment_status($changes['payment_status']);
+    }
+    if (layout_table_has_column($pdo, 'seat_requests', 'payment_order_id') && array_key_exists('payment_order_id', $changes)) {
+        $updatableColumns['payment_order_id'] = normalize_nullable_text($changes['payment_order_id']);
+    }
+    if (layout_table_has_column($pdo, 'seat_requests', 'payment_capture_id') && array_key_exists('payment_capture_id', $changes)) {
+        $updatableColumns['payment_capture_id'] = normalize_nullable_text($changes['payment_capture_id']);
+    }
+    if (!$updatableColumns && !layout_table_has_column($pdo, 'seat_requests', 'payment_updated_at')) {
+        return null;
+    }
+
+    $fields = [];
+    $values = [];
+    foreach ($updatableColumns as $field => $value) {
+        $fields[] = $field . ' = ?';
+        $values[] = $value;
+    }
+    if (layout_table_has_column($pdo, 'seat_requests', 'payment_updated_at')) {
+        $fields[] = 'payment_updated_at = NOW()';
+    }
+    if (seat_request_payment_is_paid_status($updatableColumns['payment_status'] ?? null)) {
+        $fields[] = 'hold_expires_at = NULL';
+    }
+    $fields[] = 'updated_at = NOW()';
+    if (array_key_exists('updated_by', $changes)) {
+        $fields[] = 'updated_by = ?';
+        $values[] = normalize_nullable_text($changes['updated_by']) ?? 'system';
+    }
+    $values[] = $seatRequestId;
+    $pdo->prepare('UPDATE seat_requests SET ' . implode(', ', $fields) . ' WHERE id = ?')->execute($values);
+
+    $fetch = $pdo->prepare('SELECT * FROM seat_requests WHERE id = ? LIMIT 1');
+    $fetch->execute([$seatRequestId]);
+    return $fetch->fetch() ?: null;
+}
+
+function invalidate_seat_request_payment_state(PDO $pdo, int $seatRequestId, array $existing, string $reason = 'amount_changed'): bool
+{
+    if (!seat_request_has_payment_references($existing)) {
+        return false;
+    }
+    try {
+        cancel_seat_request_provider_payment_session($existing);
+    } catch (Throwable $error) {
+        if (APP_DEBUG) {
+            error_log('invalidate_seat_request_payment_state cleanup failure: ' . $error->getMessage());
+        }
+    }
+    apply_seat_request_payment_update($pdo, $seatRequestId, [
+        'payment_provider' => null,
+        'payment_status' => 'invalidated',
+        'payment_order_id' => null,
+        'payment_capture_id' => null,
+        'updated_by' => seat_request_admin_actor(),
+    ]);
+    record_audit('seat_request.payment_invalidated', 'seat_request', $seatRequestId, [
+        'reason' => $reason,
+    ]);
+    return true;
+}
+
+function fetch_event_for_seat_request_pricing(PDO $pdo, int $eventId): ?array
+{
+    $hasPricingConfigColumn = events_table_has_column($pdo, 'pricing_config');
+    $pricingSelect = $hasPricingConfigColumn ? ', pricing_config' : '';
+    $stmt = $pdo->prepare(
+        'SELECT id, layout_id, layout_version_id, seating_enabled, ticket_price, door_price, min_ticket_price, max_ticket_price' . $pricingSelect . ' FROM events WHERE id = ? LIMIT 1'
+    );
+    $stmt->execute([$eventId]);
+    return $stmt->fetch() ?: null;
+}
+
+function recompute_seat_request_amount_for_event(PDO $pdo, int $eventId, array $selectedSeats, ?string &$failureReason = null): array
+{
+    $failureReason = null;
+    $event = fetch_event_for_seat_request_pricing($pdo, $eventId);
+    if (!$event) {
+        throw new RuntimeException('Event not found');
+    }
+    [$layoutRowsForPricing] = fetch_layout_for_event($eventId);
+    $totalAmount = resolve_seat_request_total_amount($event, $selectedSeats, $layoutRowsForPricing, $failureReason);
+    return [
+        'total_amount' => $totalAmount,
+        'currency' => 'USD',
+    ];
+}
+
+function seat_request_payment_start_error_http_status(?string $reasonCode): int
+{
+    switch ($reasonCode) {
+        case 'PAYMENT_AMOUNT_INVALID':
+        case 'PAYMENT_CURRENCY_INVALID':
+            return 422;
+        case 'PAYMENT_PROVIDER_UNAVAILABLE':
+            return 503;
+        case 'PAYMENT_NOT_CONFIGURED':
+        case 'REQUEST_NOT_OPEN_FOR_PAYMENT':
+        case 'PAYMENT_ALREADY_COMPLETED':
+        case 'PAYMENT_ALREADY_IN_PROGRESS':
+        case 'PAYMENT_SEAT_LIMIT_EXCEEDED':
+        default:
+            return 409;
+    }
+}
+
+function validate_seat_request_payment_context_for_start(array $seatRequest): ?array
+{
+    $eventStatus = strtolower(trim((string) ($seatRequest['event_status'] ?? 'draft')));
+    $eventVisibility = strtolower(trim((string) ($seatRequest['event_visibility'] ?? 'private')));
+    if ($eventStatus !== 'published' || $eventVisibility !== 'public') {
+        return [
+            'http_status' => 409,
+            'code' => 'EVENT_NOT_PUBLIC_FOR_PAYMENT',
+            'message' => 'Payment is only available for published public events.',
+        ];
+    }
+    $summary = $seatRequest['payment_summary'] ?? build_seat_request_payment_summary($seatRequest);
+    if (!empty($summary['can_start_payment'])) {
+        return null;
+    }
+    return [
+        'http_status' => seat_request_payment_start_error_http_status($summary['reason_code'] ?? null),
+        'code' => $summary['reason_code'] ?? 'PAYMENT_NOT_AVAILABLE',
+        'message' => $summary['reason_message'] ?? 'Payment is not available for this request.',
+    ];
 }
 
 function event_seating_snapshots_table_exists(PDO $pdo): bool
@@ -4199,7 +4822,7 @@ function route_requires_admin_session(Request $request): bool
         if ($path === '/api/seat-requests' && $method === 'POST') {
             return false;
         }
-        if ($method === 'POST' && preg_match('#^/api/seat-requests/[^/]+/payment/(create-order|capture)$#', $path)) {
+        if ($method === 'POST' && preg_match('#^/api/seat-requests/[^/]+/payment/(start|create-order|capture)$#', $path)) {
             return false;
         }
         return true;
@@ -4813,6 +5436,90 @@ function normalize_seat_request_status(?string $status): string
     return $map[$normalized] ?? $normalized ?: 'new';
 }
 
+function seat_request_payment_status_aliases(): array
+{
+    return [
+        'pending' => 'pending',
+        'processing' => 'pending',
+        'started' => 'pending',
+        'created' => 'pending',
+        'authorized' => 'pending',
+        'approved' => 'pending',
+        'paid' => 'paid',
+        'captured' => 'paid',
+        'completed' => 'paid',
+        'succeeded' => 'paid',
+        'settled' => 'paid',
+        'failed' => 'failed',
+        'declined' => 'failed',
+        'refunded' => 'refunded',
+        'cancelled' => 'cancelled',
+        'canceled' => 'cancelled',
+        'voided' => 'cancelled',
+        'invalidated' => 'invalidated',
+        'stale' => 'invalidated',
+    ];
+}
+
+function normalize_seat_request_payment_status(?string $status): ?string
+{
+    if ($status === null) {
+        return null;
+    }
+    $normalized = strtolower(trim($status));
+    if ($normalized === '') {
+        return null;
+    }
+    $map = seat_request_payment_status_aliases();
+    return $map[$normalized] ?? $normalized;
+}
+
+function seat_request_payment_is_paid_status(?string $status): bool
+{
+    return normalize_seat_request_payment_status($status) === 'paid';
+}
+
+function seat_request_payment_is_pending_status(?string $status): bool
+{
+    return normalize_seat_request_payment_status($status) === 'pending';
+}
+
+function seat_request_payment_blocks_expiration(?string $status): bool
+{
+    return seat_request_payment_is_paid_status($status);
+}
+
+function seat_request_has_payment_references(array $row): bool
+{
+    foreach (['payment_provider', 'payment_status', 'payment_order_id', 'payment_capture_id', 'payment_updated_at'] as $field) {
+        if (!array_key_exists($field, $row)) {
+            continue;
+        }
+        $value = $row[$field];
+        if (is_string($value)) {
+            if (trim($value) !== '') {
+                return true;
+            }
+            continue;
+        }
+        if ($value !== null) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function seat_request_is_payment_terminal_status(?string $status): bool
+{
+    return in_array(normalize_seat_request_status($status), ['confirmed', 'declined', 'closed', 'spam', 'expired'], true);
+}
+
+function seat_request_is_paid_pending_confirmation(array $row): bool
+{
+    return !seat_request_is_payment_terminal_status($row['status'] ?? null)
+        && seat_request_payment_is_paid_status($row['payment_status'] ?? null);
+}
+
 function seat_request_admin_actor(): string
 {
     $session = current_admin_session();
@@ -4885,18 +5592,52 @@ function expire_stale_holds(PDO $pdo): void
 {
     $statuses = array_merge(open_seat_request_statuses(), ['hold', 'pending']);
     $placeholders = implode(',', array_fill(0, count($statuses), '?'));
-    $selectSql = "SELECT id FROM seat_requests WHERE status IN ($placeholders) AND hold_expires_at IS NOT NULL AND hold_expires_at < NOW()";
+    $hasPaymentStatus = layout_table_has_column($pdo, 'seat_requests', 'payment_status');
+    $hasPaymentProvider = layout_table_has_column($pdo, 'seat_requests', 'payment_provider');
+    $hasPaymentOrderId = layout_table_has_column($pdo, 'seat_requests', 'payment_order_id');
+    $hasPaymentCaptureId = layout_table_has_column($pdo, 'seat_requests', 'payment_capture_id');
+    $selectColumns = ['id'];
+    if ($hasPaymentStatus) {
+        $selectColumns[] = 'payment_status';
+    }
+    if ($hasPaymentProvider) {
+        $selectColumns[] = 'payment_provider';
+    }
+    if ($hasPaymentOrderId) {
+        $selectColumns[] = 'payment_order_id';
+    }
+    if ($hasPaymentCaptureId) {
+        $selectColumns[] = 'payment_capture_id';
+    }
+    $selectColumnSql = implode(', ', $selectColumns);
+    $selectSql = "SELECT {$selectColumnSql} FROM seat_requests WHERE status IN ($placeholders) AND hold_expires_at IS NOT NULL AND hold_expires_at < NOW()";
     $select = $pdo->prepare($selectSql);
     $select->execute($statuses);
-    $expiredIds = $select->fetchAll(PDO::FETCH_COLUMN);
+    $expiredIds = [];
+    $expiredRows = [];
+    while ($row = $select->fetch()) {
+        if ($hasPaymentStatus && seat_request_payment_blocks_expiration($row['payment_status'] ?? null)) {
+            continue;
+        }
+        $expiredId = (int) ($row['id'] ?? 0);
+        if ($expiredId <= 0) {
+            continue;
+        }
+        $expiredIds[] = $expiredId;
+        $expiredRows[$expiredId] = $row;
+    }
     if (!$expiredIds) {
         return;
     }
-    $updateSql = "UPDATE seat_requests SET status = 'expired', change_note = 'auto-expired hold', hold_expires_at = NULL, updated_at = NOW() WHERE status IN ($placeholders) AND hold_expires_at IS NOT NULL AND hold_expires_at < NOW()";
+    $idPlaceholders = implode(',', array_fill(0, count($expiredIds), '?'));
+    $updateSql = "UPDATE seat_requests SET status = 'expired', change_note = 'auto-expired hold', hold_expires_at = NULL, updated_at = NOW() WHERE id IN ($idPlaceholders)";
     $update = $pdo->prepare($updateSql);
-    $update->execute($statuses);
+    $update->execute($expiredIds);
     foreach ($expiredIds as $expiredId) {
-        record_audit('seat_request.expire', 'seat_request', (int) $expiredId);
+        if (isset($expiredRows[$expiredId])) {
+            clear_pending_square_checkout_state($pdo, $expiredId, $expiredRows[$expiredId], 'auto_expired', 'system');
+        }
+        record_audit('seat_request.expire', 'seat_request', $expiredId);
     }
 }
 
@@ -4951,7 +5692,10 @@ function detect_seat_conflicts(PDO $pdo, int $eventId, array $seatIds): array
     }
     $conflicts = [];
     $now = now_eastern();
-    $stmt = $pdo->prepare("SELECT selected_seats, status, hold_expires_at FROM seat_requests WHERE event_id = ? FOR UPDATE");
+    $selectColumns = layout_table_has_column($pdo, 'seat_requests', 'payment_status')
+        ? 'selected_seats, status, hold_expires_at, payment_status'
+        : 'selected_seats, status, hold_expires_at';
+    $stmt = $pdo->prepare("SELECT {$selectColumns} FROM seat_requests WHERE event_id = ? FOR UPDATE");
     $stmt->execute([$eventId]);
     $holdStatuses = open_seat_request_statuses();
     while ($row = $stmt->fetch()) {
@@ -4964,7 +5708,7 @@ function detect_seat_conflicts(PDO $pdo, int $eventId, array $seatIds): array
             if (!empty($row['hold_expires_at'])) {
                 try {
                     $expiry = new DateTimeImmutable($row['hold_expires_at'], new DateTimeZone('America/New_York'));
-                    if ($expiry < $now) {
+                    if ($expiry < $now && !seat_request_payment_blocks_expiration($row['payment_status'] ?? null)) {
                         $shouldConsider = false;
                     }
                 } catch (Throwable $e) {
@@ -5059,7 +5803,10 @@ function collect_event_seating_snapshot_data(PDO $pdo, int $eventId): array
     $hold = [];
     $now = now_eastern();
     $openStatuses = open_seat_request_statuses();
-    $stmt = $pdo->prepare('SELECT selected_seats, status, hold_expires_at FROM seat_requests WHERE event_id = ?');
+    $selectColumns = layout_table_has_column($pdo, 'seat_requests', 'payment_status')
+        ? 'selected_seats, status, hold_expires_at, payment_status'
+        : 'selected_seats, status, hold_expires_at';
+    $stmt = $pdo->prepare("SELECT {$selectColumns} FROM seat_requests WHERE event_id = ?");
     $stmt->execute([$eventId]);
     while ($row = $stmt->fetch()) {
         $seats = parse_selected_seats($row['selected_seats'] ?? []);
@@ -5076,7 +5823,7 @@ function collect_event_seating_snapshot_data(PDO $pdo, int $eventId): array
             if (!empty($row['hold_expires_at'])) {
                 try {
                     $expiresAt = new DateTimeImmutable($row['hold_expires_at'], new DateTimeZone('America/New_York'));
-                    if ($expiresAt > $now) {
+                    if ($expiresAt > $now && !seat_request_payment_blocks_expiration($row['payment_status'] ?? null)) {
                         $target =& $hold;
                     }
                 } catch (Throwable $e) {
@@ -5370,12 +6117,14 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
 
         $hasCategoryTable = event_categories_table_exists($pdo);
         $hasPricingConfigColumn = events_table_has_column($pdo, 'pricing_config');
+        $hasPaymentEnabledColumn = events_table_has_column($pdo, 'payment_enabled');
         $pricingSelect = $hasPricingConfigColumn ? ', e.pricing_config' : '';
+        $paymentSelect = $hasPaymentEnabledColumn ? ', e.payment_enabled' : ', 0 AS payment_enabled';
         if ($hasCategoryTable) {
-            $eventStmt = $pdo->prepare('SELECT e.id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, e.status, e.visibility, e.seat_request_email_override, e.ticket_price, e.door_price, e.min_ticket_price, e.max_ticket_price' . $pricingSelect . ', ec.slug AS category_slug, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
+            $eventStmt = $pdo->prepare('SELECT e.id, e.category_id, e.title, e.artist_name, e.layout_id, e.layout_version_id, e.seating_enabled, e.start_datetime, e.event_date, e.event_time, e.timezone, e.status, e.visibility, e.seat_request_email_override, e.ticket_price, e.door_price, e.min_ticket_price, e.max_ticket_price' . $pricingSelect . $paymentSelect . ', ec.slug AS category_slug, ec.seat_request_email_to AS category_seat_request_email_to FROM events e LEFT JOIN event_categories ec ON ec.id = e.category_id WHERE e.id = ? LIMIT 1');
             $eventStmt->execute([$eventId]);
         } else {
-            $eventStmt = $pdo->prepare('SELECT id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone, status, visibility, seat_request_email_override, ticket_price, door_price, min_ticket_price, max_ticket_price' . ($hasPricingConfigColumn ? ', pricing_config' : '') . ' FROM events WHERE id = ? LIMIT 1');
+            $eventStmt = $pdo->prepare('SELECT id, category_id, title, artist_name, layout_id, layout_version_id, seating_enabled, start_datetime, event_date, event_time, timezone, status, visibility, seat_request_email_override, ticket_price, door_price, min_ticket_price, max_ticket_price' . ($hasPricingConfigColumn ? ', pricing_config' : '') . ($hasPaymentEnabledColumn ? ', payment_enabled' : ', 0 AS payment_enabled') . ' FROM events WHERE id = ? LIMIT 1');
             $eventStmt->execute([$eventId]);
         }
         $event = $eventStmt->fetch();
@@ -5465,6 +6214,10 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
         $created = $createdStmt->fetch() ?: ['id' => $id];
         if ($created) {
             $created['seat_display_labels'] = build_display_seat_list($created);
+            hydrate_seat_request_payment_details(
+                $created,
+                resolve_event_payment_option($event, load_payment_settings_lookup($pdo))
+            );
         }
         if ($startedTransaction) {
             $pdo->commit();
@@ -6413,6 +7166,8 @@ $router->add('GET', '/api/admin/payment-settings', function () {
             'categories' => $categories,
             'capabilities' => [
                 'provider_type' => payment_settings_table_has_column($pdo, 'provider_type'),
+                'provider_type_square' => payment_settings_provider_type_supports($pdo, 'square'),
+                'provider_type_paypal_orders' => payment_settings_provider_type_supports($pdo, 'paypal_orders'),
                 'paypal_hosted_button_id' => payment_settings_table_has_column($pdo, 'paypal_hosted_button_id'),
                 'paypal_currency' => payment_settings_table_has_column($pdo, 'paypal_currency'),
                 'paypal_enable_venmo' => payment_settings_table_has_column($pdo, 'paypal_enable_venmo'),
@@ -6472,6 +7227,9 @@ $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
         if ($enabled && $providerType === 'paypal_hosted_button' && !$paypalHostedButtonId) {
             return Response::error('paypal_hosted_button_id is required when paypal_hosted_button is enabled', 422);
         }
+        if ($providerType === 'square' && $paymentUrlInput !== '') {
+            return Response::error('payment_url must be empty when provider_type is square', 422);
+        }
         if ($providerType === 'paypal_orders' && $paymentUrlInput !== '') {
             return Response::error('payment_url must be empty when provider_type is paypal_orders', 422);
         }
@@ -6505,6 +7263,9 @@ $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
         $storedPaymentUrl = $providerType === 'external_link' && $paymentUrlInput !== '' ? $paymentUrlInput : null;
 
         $hasProviderTypeColumn = payment_settings_table_has_column($pdo, 'provider_type');
+        if ($hasProviderTypeColumn && !payment_settings_provider_type_supports($pdo, $providerType)) {
+            return Response::error("payment_settings.provider_type does not support '{$providerType}' yet. Run database/20251212_schema_upgrade.sql.", 422);
+        }
         $hasPaypalHostedButtonIdColumn = payment_settings_table_has_column($pdo, 'paypal_hosted_button_id');
         $hasPaypalCurrencyColumn = payment_settings_table_has_column($pdo, 'paypal_currency');
         $hasPaypalEnableVenmoColumn = payment_settings_table_has_column($pdo, 'paypal_enable_venmo');
@@ -8105,7 +8866,10 @@ $router->add('GET', '/api/seating/event/:eventId', function ($request, $params) 
         }
     }
     [$layoutData, $stagePosition, $stageSize, $canvasSettings] = fetch_layout_for_event($eventId);
-    $stmt = $pdo->prepare('SELECT selected_seats, status, hold_expires_at FROM seat_requests WHERE event_id = ?');
+    $selectColumns = layout_table_has_column($pdo, 'seat_requests', 'payment_status')
+        ? 'selected_seats, status, hold_expires_at, payment_status'
+        : 'selected_seats, status, hold_expires_at';
+    $stmt = $pdo->prepare("SELECT {$selectColumns} FROM seat_requests WHERE event_id = ?");
     $stmt->execute([$eventId]);
     $reserved = [];
     $pending = [];
@@ -8119,7 +8883,7 @@ $router->add('GET', '/api/seating/event/:eventId', function ($request, $params) 
         if (in_array($status, $openStatuses, true) && $row['hold_expires_at']) {
             try {
                 $expires = new DateTimeImmutable($row['hold_expires_at'], new DateTimeZone('America/New_York'));
-                if ($expires < $now) {
+                if ($expires < $now && !seat_request_payment_blocks_expiration($row['payment_status'] ?? null)) {
                     continue;
                 }
             } catch (Throwable $e) {
@@ -8502,6 +9266,7 @@ SQL;
             $row['event_run_end_datetime'] = $eventSummary['run_end_datetime'] ?? ($row['event_run_end_datetime'] ?? null);
             $row['event_run_summary'] = format_event_occurrence_summary($eventSummary, 2);
             $row['seat_display_labels'] = build_display_seat_list($row);
+            hydrate_seat_request_payment_details($row);
             $requests[] = $row;
         }
         Response::success(['requests' => $requests]);
@@ -8610,9 +9375,15 @@ $router->add('POST', '/api/seat-requests/:id/approve', function (Request $reques
         }
         $currentStatus = normalize_seat_request_status($requestRow['status'] ?? null);
         if ($currentStatus === 'confirmed') {
-            $pdo->rollBack();
+            if (seat_request_has_square_pending_checkout($requestRow)) {
+                clear_pending_square_checkout_state($pdo, $rid, $requestRow, 'request_already_confirmed', seat_request_admin_actor());
+                $pdo->commit();
+            } else {
+                $pdo->rollBack();
+            }
             return Response::success(['message' => 'Already confirmed']);
         }
+        clear_pending_square_checkout_state($pdo, $rid, $requestRow, 'request_confirmed_without_payment', seat_request_admin_actor());
         $seats = json_decode($requestRow['selected_seats'] ?? '[]', true) ?: [];
         $conflicts = [];
         foreach ($seats as $seatId) {
@@ -8696,10 +9467,28 @@ $router->add('POST', '/api/seat-requests/:id/deny', function (Request $request, 
     $pdo = Database::connection();
     expire_stale_holds($pdo);
     $actor = seat_request_admin_actor();
-    $stmt = $pdo->prepare('UPDATE seat_requests SET status = ?, hold_expires_at = NULL, updated_at = NOW(), updated_by = ?, change_note = ? WHERE id = ?');
-    $stmt->execute(['declined', $actor, 'declined via admin', $params['id']]);
-    if ($stmt->rowCount() === 0) {
-        return Response::error('Seat request not found', 404);
+    try {
+        $pdo->beginTransaction();
+        $rid = (int) ($params['id'] ?? 0);
+        $existingStmt = $pdo->prepare('SELECT * FROM seat_requests WHERE id = ? LIMIT 1 FOR UPDATE');
+        $existingStmt->execute([$rid]);
+        $existing = $existingStmt->fetch();
+        if (!$existing) {
+            $pdo->rollBack();
+            return Response::error('Seat request not found', 404);
+        }
+        clear_pending_square_checkout_state($pdo, $rid, $existing, 'request_declined', $actor);
+        $stmt = $pdo->prepare('UPDATE seat_requests SET status = ?, hold_expires_at = NULL, updated_at = NOW(), updated_by = ?, change_note = ? WHERE id = ?');
+        $stmt->execute(['declined', $actor, 'declined via admin', $rid]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        if (APP_DEBUG) {
+            error_log('POST /api/seat-requests/:id/deny error: ' . $error->getMessage());
+        }
+        return Response::error('Failed to deny request', 500);
     }
     record_audit('seat_request.deny', 'seat_request', (int) $params['id']);
     Response::success();
@@ -8780,6 +9569,211 @@ $router->add('POST', '/api/seat-requests', function (Request $request) {
     }
 });
 
+$router->add('POST', '/api/seat-requests/:id/payment/start', function (Request $request, $params) {
+    try {
+        $pdo = Database::connection();
+        $seatRequestId = (int) ($params['id'] ?? 0);
+        if ($seatRequestId <= 0) {
+            return Response::error('Invalid seat request id', 422);
+        }
+        $pdo->beginTransaction();
+        $context = load_seat_request_payment_context($pdo, $seatRequestId, true);
+        if (!$context) {
+            $pdo->rollBack();
+            return Response::error('Seat request not found', 404);
+        }
+        $seatRequest = $context['seat_request'];
+        $paymentOption = $context['payment_option'];
+        $providerType = normalize_payment_provider_type($paymentOption['provider_type'] ?? null);
+        $validationError = validate_seat_request_payment_context_for_start($seatRequest);
+        if (
+            $providerType === 'square'
+            && $validationError
+            && ($validationError['code'] ?? null) === 'PAYMENT_ALREADY_IN_PROGRESS'
+            && seat_request_has_square_pending_checkout($seatRequest)
+        ) {
+            $existingLinkId = normalize_nullable_text($seatRequest['payment_capture_id'] ?? null);
+            if ($existingLinkId !== null) {
+                try {
+                    $existingLink = square_retrieve_payment_link($existingLinkId);
+                    if ($existingLink && !empty($existingLink['checkout_url'])) {
+                        $pdo->commit();
+                        Response::success([
+                            'provider_type' => 'square',
+                            'seat_request_id' => $seatRequestId,
+                            'checkout_url' => $existingLink['checkout_url'],
+                            'launch_target' => 'new_tab',
+                            'payment_resumed' => true,
+                        ]);
+                        return;
+                    }
+                } catch (Throwable $squareError) {
+                    if (APP_DEBUG) {
+                        error_log('POST /api/seat-requests/:id/payment/start Square resume error: ' . $squareError->getMessage());
+                    }
+                }
+            }
+            invalidate_seat_request_payment_state($pdo, $seatRequestId, $seatRequest, 'square_checkout_session_unavailable');
+            $context = load_seat_request_payment_context($pdo, $seatRequestId, true);
+            $seatRequest = $context['seat_request'] ?? $seatRequest;
+            $paymentOption = $context['payment_option'] ?? $paymentOption;
+            $providerType = normalize_payment_provider_type($paymentOption['provider_type'] ?? null);
+            $validationError = validate_seat_request_payment_context_for_start($seatRequest);
+        }
+        if ($validationError) {
+            $pdo->rollBack();
+            return Response::error($validationError['message'], $validationError['http_status'], [
+                'code' => $validationError['code'],
+                'seat_request_id' => $seatRequestId,
+                'payment_summary' => $seatRequest['payment_summary'] ?? null,
+            ]);
+        }
+        if ($providerType === 'square') {
+            if (!square_provider_is_configured()) {
+                $pdo->rollBack();
+                return Response::error('Square payment is not configured right now.', 503, [
+                    'code' => 'PAYMENT_PROVIDER_UNAVAILABLE',
+                    'provider_type' => 'square',
+                    'seat_request_id' => $seatRequestId,
+                    'payment_summary' => $seatRequest['payment_summary'] ?? null,
+                ]);
+            }
+
+            if (
+                strtolower(trim((string) ($seatRequest['payment_provider'] ?? ''))) === 'square'
+                && !seat_request_payment_is_paid_status($seatRequest['payment_status'] ?? null)
+                && seat_request_has_payment_references($seatRequest)
+            ) {
+                try {
+                    cancel_seat_request_provider_payment_session($seatRequest);
+                } catch (Throwable $squareError) {
+                    if (APP_DEBUG) {
+                        error_log('POST /api/seat-requests/:id/payment/start Square cleanup error: ' . $squareError->getMessage());
+                    }
+                }
+            }
+
+            try {
+                $paymentLink = square_create_payment_link($seatRequest);
+            } catch (Throwable $squareError) {
+                $pdo->rollBack();
+                return Response::error(
+                    APP_DEBUG ? $squareError->getMessage() : 'Square checkout is temporarily unavailable. Please try again or contact staff.',
+                    502,
+                    [
+                        'code' => 'PAYMENT_PROVIDER_REQUEST_FAILED',
+                        'provider_type' => 'square',
+                        'seat_request_id' => $seatRequestId,
+                    ]
+                );
+            }
+            apply_seat_request_payment_update($pdo, $seatRequestId, [
+                'payment_provider' => 'square',
+                'payment_status' => 'pending',
+                'payment_order_id' => $paymentLink['order_id'],
+                'payment_capture_id' => $paymentLink['payment_link_id'],
+                'updated_by' => 'square',
+            ]);
+            record_audit('seat_request.square_checkout_started', 'seat_request', $seatRequestId, [
+                'order_id' => $paymentLink['order_id'],
+                'payment_link_id' => $paymentLink['payment_link_id'],
+            ]);
+            $pdo->commit();
+            Response::success([
+                'provider_type' => 'square',
+                'seat_request_id' => $seatRequestId,
+                'checkout_url' => $paymentLink['checkout_url'],
+                'launch_target' => 'new_tab',
+            ]);
+            return;
+        }
+
+        $pdo->rollBack();
+        Response::error('Payment provider is not enabled yet in this environment', 501, [
+            'code' => 'PAYMENT_NOT_IMPLEMENTED',
+            'provider_type' => $paymentOption['provider_type'] ?? null,
+            'seat_request_id' => $seatRequestId,
+            'payment_summary' => $seatRequest['payment_summary'] ?? null,
+        ]);
+    } catch (Throwable $error) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        if (APP_DEBUG) {
+            error_log('POST /api/seat-requests/:id/payment/start error: ' . $error->getMessage());
+        }
+        Response::error('Failed to start payment', 500);
+    }
+});
+
+$router->add('POST', '/api/webhooks/square', function (Request $request) {
+    try {
+        if (resolve_square_webhook_signature_key() === null || resolve_square_webhook_notification_url() === null) {
+            return Response::error('Square webhook is not configured', 503);
+        }
+        if (!square_webhook_signature_is_valid($request)) {
+            return Response::error('Forbidden', 403);
+        }
+        $payload = json_decode(trim($request->raw()), true);
+        if (!is_array($payload)) {
+            return Response::error('Invalid Square webhook payload', 400);
+        }
+
+        $eventType = strtolower(trim((string) ($payload['type'] ?? '')));
+        if ($eventType === '') {
+            return Response::success(['received' => true]);
+        }
+
+        $payment = square_extract_payment_from_webhook($payload);
+        if (!is_array($payment)) {
+            return Response::success(['received' => true]);
+        }
+
+        $orderId = normalize_nullable_text($payment['order_id'] ?? null);
+        if ($orderId === null) {
+            return Response::success(['received' => true]);
+        }
+
+        $pdo = Database::connection();
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare('SELECT * FROM seat_requests WHERE payment_provider = ? AND payment_order_id = ? LIMIT 1 FOR UPDATE');
+        $stmt->execute(['square', $orderId]);
+        $seatRequest = $stmt->fetch();
+        if (!$seatRequest) {
+            $pdo->commit();
+            return Response::success(['received' => true]);
+        }
+
+        $paymentStatus = strtoupper(trim((string) ($payment['status'] ?? '')));
+        if ($paymentStatus === 'COMPLETED') {
+            $paymentId = normalize_nullable_text($payment['id'] ?? null);
+            apply_seat_request_payment_update($pdo, (int) $seatRequest['id'], [
+                'payment_provider' => 'square',
+                'payment_status' => 'paid',
+                'payment_order_id' => $orderId,
+                'payment_capture_id' => $paymentId,
+                'updated_by' => 'square-webhook',
+            ]);
+            record_audit('seat_request.square_payment_completed', 'seat_request', (int) $seatRequest['id'], [
+                'order_id' => $orderId,
+                'payment_id' => $paymentId,
+                'event_type' => $eventType,
+            ]);
+        }
+
+        $pdo->commit();
+        Response::success(['received' => true]);
+    } catch (Throwable $error) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        if (APP_DEBUG) {
+            error_log('POST /api/webhooks/square error: ' . $error->getMessage());
+        }
+        Response::error('Failed to process Square webhook', 500);
+    }
+});
+
 $router->add('POST', '/api/seat-requests/:id/payment/create-order', function (Request $request, $params) {
     try {
         $pdo = Database::connection();
@@ -8787,25 +9781,27 @@ $router->add('POST', '/api/seat-requests/:id/payment/create-order', function (Re
         if ($seatRequestId <= 0) {
             return Response::error('Invalid seat request id', 422);
         }
-        $stmt = $pdo->prepare("SELECT sr.id, sr.event_id, sr.total_amount, sr.currency, COALESCE(NULLIF(TRIM(e.status), ''), 'draft') AS event_status, COALESCE(NULLIF(TRIM(e.visibility), ''), 'private') AS event_visibility FROM seat_requests sr INNER JOIN events e ON e.id = sr.event_id WHERE sr.id = ? LIMIT 1");
-        $stmt->execute([$seatRequestId]);
-        $seatRequest = $stmt->fetch();
-        if (!$seatRequest) {
+        $context = load_seat_request_payment_context($pdo, $seatRequestId, true);
+        if (!$context) {
             return Response::error('Seat request not found', 404);
         }
-        if (strtolower((string) ($seatRequest['event_status'] ?? 'draft')) !== 'published' || strtolower((string) ($seatRequest['event_visibility'] ?? 'private')) !== 'public') {
-            return Response::error('Payment order creation is only available for published events', 409);
-        }
-        $amountRaw = $seatRequest['total_amount'] ?? null;
-        $amount = is_numeric($amountRaw) ? (float) $amountRaw : null;
-        if ($amount === null || $amount <= 0) {
-            return Response::error('Seat request is missing a valid total_amount', 422);
+        $seatRequest = $context['seat_request'];
+        $paymentOption = $context['payment_option'];
+        $validationError = validate_seat_request_payment_context_for_start($seatRequest);
+        if ($validationError) {
+            return Response::error($validationError['message'], $validationError['http_status'], [
+                'code' => $validationError['code'],
+                'provider_type' => $paymentOption['provider_type'] ?? null,
+                'seat_request_id' => $seatRequestId,
+                'payment_summary' => $seatRequest['payment_summary'] ?? null,
+            ]);
         }
         Response::error('PayPal Orders integration is not enabled yet in this environment', 501, [
             'code' => 'PAYMENT_NOT_IMPLEMENTED',
             'provider_type' => 'paypal_orders',
             'seat_request_id' => $seatRequestId,
             'currency' => normalize_paypal_currency($seatRequest['currency'] ?? 'USD'),
+            'payment_summary' => $seatRequest['payment_summary'] ?? null,
         ]);
     } catch (Throwable $error) {
         if (APP_DEBUG) {
@@ -8822,25 +9818,27 @@ $router->add('POST', '/api/seat-requests/:id/payment/capture', function (Request
         if ($seatRequestId <= 0) {
             return Response::error('Invalid seat request id', 422);
         }
-        $stmt = $pdo->prepare("SELECT sr.id, sr.event_id, sr.total_amount, sr.currency, COALESCE(NULLIF(TRIM(e.status), ''), 'draft') AS event_status, COALESCE(NULLIF(TRIM(e.visibility), ''), 'private') AS event_visibility FROM seat_requests sr INNER JOIN events e ON e.id = sr.event_id WHERE sr.id = ? LIMIT 1");
-        $stmt->execute([$seatRequestId]);
-        $seatRequest = $stmt->fetch();
-        if (!$seatRequest) {
+        $context = load_seat_request_payment_context($pdo, $seatRequestId, true);
+        if (!$context) {
             return Response::error('Seat request not found', 404);
         }
-        if (strtolower((string) ($seatRequest['event_status'] ?? 'draft')) !== 'published' || strtolower((string) ($seatRequest['event_visibility'] ?? 'private')) !== 'public') {
-            return Response::error('Payment capture is only available for published events', 409);
-        }
-        $amountRaw = $seatRequest['total_amount'] ?? null;
-        $amount = is_numeric($amountRaw) ? (float) $amountRaw : null;
-        if ($amount === null || $amount <= 0) {
-            return Response::error('Seat request is missing a valid total_amount', 422);
+        $seatRequest = $context['seat_request'];
+        $paymentOption = $context['payment_option'];
+        $validationError = validate_seat_request_payment_context_for_start($seatRequest);
+        if ($validationError) {
+            return Response::error($validationError['message'], $validationError['http_status'], [
+                'code' => $validationError['code'],
+                'provider_type' => $paymentOption['provider_type'] ?? null,
+                'seat_request_id' => $seatRequestId,
+                'payment_summary' => $seatRequest['payment_summary'] ?? null,
+            ]);
         }
         Response::error('PayPal Orders integration is not enabled yet in this environment', 501, [
             'code' => 'PAYMENT_NOT_IMPLEMENTED',
             'provider_type' => 'paypal_orders',
             'seat_request_id' => $seatRequestId,
             'currency' => normalize_paypal_currency($seatRequest['currency'] ?? 'USD'),
+            'payment_summary' => $seatRequest['payment_summary'] ?? null,
         ]);
     } catch (Throwable $error) {
         if (APP_DEBUG) {
@@ -8861,15 +9859,17 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
     try {
         $pdo = Database::connection();
         expire_stale_holds($pdo);
+        $pdo->beginTransaction();
         $payload = read_json_body($request);
         if (array_key_exists('selectedSeats', $payload) && !array_key_exists('selected_seats', $payload)) {
             $payload['selected_seats'] = $payload['selectedSeats'];
         }
         $requestId = (int) $params['id'];
-        $existingStmt = $pdo->prepare('SELECT id, status FROM seat_requests WHERE id = ? LIMIT 1');
+        $existingStmt = $pdo->prepare('SELECT id, event_id, status, selected_seats, total_amount, currency, payment_provider, payment_status, payment_order_id, payment_capture_id, payment_updated_at FROM seat_requests WHERE id = ? LIMIT 1');
         $existingStmt->execute([$requestId]);
         $existing = $existingStmt->fetch();
         if (!$existing) {
+            $pdo->rollBack();
             return Response::error('Seat request not found', 404);
         }
         $originalStatus = normalize_seat_request_status($existing['status'] ?? 'new');
@@ -8877,12 +9877,17 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
         $fields = [];
         $values = [];
         $metaChanges = [];
+        $paymentInvalidated = false;
+        $existingSeatList = parse_selected_seats($existing['selected_seats'] ?? []);
+        $normalizedExistingSeats = normalize_snapshot_seat_list($existingSeatList);
         if (array_key_exists('status', $payload)) {
             $newStatus = normalize_seat_request_status($payload['status']);
             if (!in_array($newStatus, canonical_seat_request_statuses(), true)) {
+                $pdo->rollBack();
                 return Response::error('Invalid status', 400);
             }
             if ($newStatus === 'confirmed') {
+                $pdo->rollBack();
                 return Response::error('Use the finalize action to confirm seats', 400);
             }
             $targetStatus = $newStatus;
@@ -8896,7 +9901,12 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
                 $fields[] = 'hold_expires_at = NULL';
             } elseif (in_array($newStatus, ['declined', 'closed', 'spam', 'expired'], true)) {
                 $fields[] = 'hold_expires_at = NULL';
-            } elseif (in_array($newStatus, open_seat_request_statuses(), true) && !array_key_exists('hold_expires_at', $payload)) {
+                clear_pending_square_checkout_state($pdo, $requestId, $existing, 'request_status_changed_to_' . $newStatus, seat_request_admin_actor());
+            } elseif (
+                in_array($newStatus, open_seat_request_statuses(), true)
+                && !array_key_exists('hold_expires_at', $payload)
+                && !seat_request_payment_blocks_expiration($existing['payment_status'] ?? null)
+            ) {
                 $fields[] = 'hold_expires_at = ?';
                 $values[] = compute_hold_expiration(now_eastern())->format('Y-m-d H:i:s');
             }
@@ -8904,6 +9914,7 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
         $selectedSeatsPayload = $payload['selected_seats'] ?? null;
         if ($selectedSeatsPayload !== null) {
             if (!is_array($selectedSeatsPayload)) {
+                $pdo->rollBack();
                 return Response::error('selected_seats must be an array of seat labels', 400);
             }
             $seatList = array_values(array_filter(array_map(function ($seat) {
@@ -8912,13 +9923,39 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
                 return $seat !== '';
             }));
             if (in_array($targetStatus, ['confirmed', 'declined', 'closed', 'spam'], true)) {
+                $pdo->rollBack();
                 return Response::error('Seats are locked once a request is finalized. Reopen it first.', 409);
             }
-            $fields[] = 'selected_seats = ?';
-            $values[] = json_encode($seatList);
-            $fields[] = 'total_seats = ?';
-            $values[] = count($seatList);
-            $metaChanges['seats'] = count($seatList);
+            $normalizedNextSeats = normalize_snapshot_seat_list($seatList);
+            if ($normalizedNextSeats !== $normalizedExistingSeats) {
+                $pricingFailure = null;
+                $recomputed = recompute_seat_request_amount_for_event(
+                    $pdo,
+                    (int) ($existing['event_id'] ?? 0),
+                    $seatList,
+                    $pricingFailure
+                );
+                $fields[] = 'selected_seats = ?';
+                $values[] = json_encode($seatList);
+                $fields[] = 'total_seats = ?';
+                $values[] = count($seatList);
+                $fields[] = 'total_amount = ?';
+                $values[] = $recomputed['total_amount'];
+                $fields[] = 'currency = ?';
+                $values[] = $recomputed['currency'];
+                $metaChanges['seats'] = count($seatList);
+                $metaChanges['total_amount'] = [
+                    'from' => normalize_nullable_decimal($existing['total_amount'] ?? null),
+                    'to' => $recomputed['total_amount'],
+                ];
+                if ($pricingFailure !== null) {
+                    $metaChanges['pricing_warning'] = $pricingFailure;
+                }
+                if (seat_request_has_payment_references($existing)) {
+                    $paymentInvalidated = true;
+                    $metaChanges['payment_invalidated'] = true;
+                }
+            }
         }
         foreach (['customer_name','customer_email','customer_phone','special_requests','staff_notes'] as $col) {
             if (array_key_exists($col, $payload)) {
@@ -8941,11 +9978,13 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
                     $fields[] = 'hold_expires_at = ?';
                     $values[] = $expiry->format('Y-m-d H:i:s');
                 } catch (Throwable $e) {
+                    $pdo->rollBack();
                     return Response::error('Invalid hold_expires_at value', 400);
                 }
             }
         }
         if (!$fields) {
+            $pdo->rollBack();
             return Response::error('No valid fields provided', 400);
         }
         $fields[] = 'updated_by = ?';
@@ -8954,11 +9993,18 @@ $router->add('PUT', '/api/seat-requests/:id', function (Request $request, $param
         $sql = 'UPDATE seat_requests SET ' . implode(', ', $fields) . ' WHERE id = ?';
         $stmt = $pdo->prepare($sql);
         $stmt->execute($values);
+        if ($paymentInvalidated) {
+            invalidate_seat_request_payment_state($pdo, $requestId, $existing, 'seat_selection_changed');
+        }
         if (!empty($metaChanges)) {
             record_audit('seat_request.update', 'seat_request', $requestId, $metaChanges);
         }
+        $pdo->commit();
         Response::success();
     } catch (Throwable $e) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         if (APP_DEBUG) {
             error_log('PUT /api/seat-requests/:id error: ' . $e->getMessage());
         }
@@ -8974,9 +10020,34 @@ $router->add('DELETE', '/api/seat-requests/:id', function (Request $request, $pa
     if (!admin_csrf_origin_is_valid($request)) {
         return Response::error('Forbidden', 403);
     }
-    $stmt = Database::run('DELETE FROM seat_requests WHERE id = ?', [$params['id']]);
-    if ($stmt->rowCount() === 0) {
-        return Response::error('Seat request not found', 404);
+    try {
+        $pdo = Database::connection();
+        $pdo->beginTransaction();
+        $existingStmt = $pdo->prepare('SELECT * FROM seat_requests WHERE id = ? LIMIT 1 FOR UPDATE');
+        $existingStmt->execute([(int) ($params['id'] ?? 0)]);
+        $existing = $existingStmt->fetch();
+        if (!$existing) {
+            $pdo->rollBack();
+            return Response::error('Seat request not found', 404);
+        }
+        try {
+            cancel_seat_request_provider_payment_session($existing);
+        } catch (Throwable $error) {
+            if (APP_DEBUG) {
+                error_log('DELETE /api/seat-requests/:id Square cleanup error: ' . $error->getMessage());
+            }
+        }
+        $stmt = $pdo->prepare('DELETE FROM seat_requests WHERE id = ?');
+        $stmt->execute([(int) ($params['id'] ?? 0)]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        if (APP_DEBUG) {
+            error_log('DELETE /api/seat-requests/:id error: ' . $error->getMessage());
+        }
+        return Response::error('Failed to delete seat request', 500);
     }
     record_audit('seat_request.delete', 'seat_request', (int) $params['id']);
     Response::success();
@@ -9580,6 +10651,8 @@ if (APP_DEBUG) {
             $hasArchivedIndex = events_table_has_index($pdo, 'idx_events_archived_at');
             $hasPaymentSettings = payment_settings_table_exists($pdo);
             $hasPaymentProviderType = payment_settings_table_has_column($pdo, 'provider_type');
+            $hasPaymentProviderTypeSquare = payment_settings_provider_type_supports($pdo, 'square');
+            $hasPaymentProviderTypePaypalOrders = payment_settings_provider_type_supports($pdo, 'paypal_orders');
             $hasPaypalHostedButtonId = payment_settings_table_has_column($pdo, 'paypal_hosted_button_id');
             $hasPaypalCurrency = payment_settings_table_has_column($pdo, 'paypal_currency');
             $hasPaypalEnableVenmo = payment_settings_table_has_column($pdo, 'paypal_enable_venmo');
@@ -9602,6 +10675,8 @@ if (APP_DEBUG) {
                 'has_archived_index' => $hasArchivedIndex,
                 'has_payment_settings' => $hasPaymentSettings,
                 'has_payment_provider_type' => $hasPaymentProviderType,
+                'has_payment_provider_type_square' => $hasPaymentProviderTypeSquare,
+                'has_payment_provider_type_paypal_orders' => $hasPaymentProviderTypePaypalOrders,
                 'has_paypal_hosted_button_id' => $hasPaypalHostedButtonId,
                 'has_paypal_currency' => $hasPaypalCurrency,
                 'has_paypal_enable_venmo' => $hasPaypalEnableVenmo,

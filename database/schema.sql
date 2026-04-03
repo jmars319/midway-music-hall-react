@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS payment_settings (
   category_id INT DEFAULT NULL,
   enabled TINYINT(1) NOT NULL DEFAULT 0,
   provider_label VARCHAR(191) DEFAULT NULL,
-  provider_type ENUM('external_link','paypal_hosted_button','paypal_orders') NOT NULL DEFAULT 'external_link',
+  provider_type ENUM('external_link','paypal_hosted_button','paypal_orders','square') NOT NULL DEFAULT 'external_link',
   payment_url VARCHAR(500) DEFAULT NULL,
   paypal_hosted_button_id VARCHAR(64) DEFAULT NULL,
   paypal_currency VARCHAR(8) DEFAULT 'USD',

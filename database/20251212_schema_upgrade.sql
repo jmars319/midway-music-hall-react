@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS payment_settings (
   category_id INT DEFAULT NULL,
   enabled TINYINT(1) NOT NULL DEFAULT 0,
   provider_label VARCHAR(191) DEFAULT NULL,
-  provider_type ENUM('external_link','paypal_hosted_button','paypal_orders') NOT NULL DEFAULT 'external_link',
+  provider_type ENUM('external_link','paypal_hosted_button','paypal_orders','square') NOT NULL DEFAULT 'external_link',
   payment_url VARCHAR(500) DEFAULT NULL,
   paypal_hosted_button_id VARCHAR(64) DEFAULT NULL,
   paypal_currency VARCHAR(8) DEFAULT 'USD',
@@ -139,12 +139,12 @@ CREATE TABLE IF NOT EXISTS payment_settings (
 );
 
 CALL add_constraint_if_missing(@TARGET_DB, 'payment_settings', 'fk_payment_category', 'category_id', 'event_categories', 'id', 'ADD CONSTRAINT fk_payment_category FOREIGN KEY (category_id) REFERENCES event_categories(id) ON DELETE CASCADE');
-CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'provider_type', 'provider_type ENUM(''external_link'',''paypal_hosted_button'',''paypal_orders'') NOT NULL DEFAULT ''external_link'' AFTER provider_label');
+CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'provider_type', 'provider_type ENUM(''external_link'',''paypal_hosted_button'',''paypal_orders'',''square'') NOT NULL DEFAULT ''external_link'' AFTER provider_label');
 CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'paypal_hosted_button_id', 'paypal_hosted_button_id VARCHAR(64) DEFAULT NULL AFTER payment_url');
 CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'paypal_currency', 'paypal_currency VARCHAR(8) DEFAULT ''USD'' AFTER paypal_hosted_button_id');
 CALL add_column_if_missing(@TARGET_DB, 'payment_settings', 'paypal_enable_venmo', 'paypal_enable_venmo TINYINT(1) NOT NULL DEFAULT 0 AFTER paypal_currency');
 ALTER TABLE payment_settings
-  MODIFY COLUMN provider_type ENUM('external_link','paypal_hosted_button','paypal_orders') NOT NULL DEFAULT 'external_link';
+  MODIFY COLUMN provider_type ENUM('external_link','paypal_hosted_button','paypal_orders','square') NOT NULL DEFAULT 'external_link';
 
 -- VERSIONED LAYOUT SNAPSHOTS
 CREATE TABLE IF NOT EXISTS seating_layout_versions (
