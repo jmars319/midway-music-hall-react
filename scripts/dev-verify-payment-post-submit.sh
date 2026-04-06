@@ -72,8 +72,8 @@ if ! rg -n "Midway Music Hall|Go Back|Go Home" "$ROOT_DIR/frontend/src/pages/Pay
   log_error "branded payment status page copy is missing"
   exit 1
 fi
-if ! rg -n "BrandImage" "$ROOT_DIR/frontend/src/pages/PaymentStatusPage.js" >/dev/null; then
-  log_error "payment status page is missing MMH logo branding"
+if ! rg -n "BrandImage" "$ROOT_DIR/frontend/src/components/BrandedStatusPage.js" >/dev/null; then
+  log_error "payment status shell is missing MMH logo branding"
   exit 1
 fi
 if ! rg -n 'option value=\"square\"' "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js" >/dev/null; then

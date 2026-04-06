@@ -11,7 +11,7 @@ require_frontend_home_once || {
 }
 
 log_step "[public-surface] verifying direct-route availability"
-for path in /privacy /terms /archive /thegatheringplace; do
+for path in /privacy /terms /archive /thegatheringplace /lessons /recurring /access-denied /temporarily-unavailable /maintenance /something-went-wrong; do
   if ! curl -fsS --max-time 5 -H 'Accept: text/html' "$(frontend_url)${path}" >/dev/null; then
     log_error "[public-surface] expected ${path} to resolve through the frontend"
     exit 1
@@ -54,6 +54,108 @@ if ! grep -q "normalizedPath === '/terms'" "$ROOT_DIR/frontend/src/App.js"; then
   log_error "[public-surface] App.js is missing direct /terms route handling"
   exit 1
 fi
+if ! grep -q "'/lessons': 'lessons'" "$ROOT_DIR/frontend/src/App.js"; then
+  log_error "[public-surface] App.js is missing direct /lessons route handling"
+  exit 1
+fi
+if ! grep -q "'/recurring': 'recurring-events'" "$ROOT_DIR/frontend/src/App.js"; then
+  log_error "[public-surface] App.js is missing direct /recurring route handling"
+  exit 1
+fi
+if ! grep -q 'return <NotFoundPage' "$ROOT_DIR/frontend/src/App.js"; then
+  log_error "[public-surface] App.js is missing branded not-found route handling"
+  exit 1
+fi
+if ! grep -q 'ErrorDocument 404 /404.html' "$ROOT_DIR/.htaccess"; then
+  log_error "[public-surface] .htaccess is missing branded 404 ErrorDocument handling"
+  exit 1
+fi
+if ! grep -q 'ErrorDocument 403 /403.html' "$ROOT_DIR/.htaccess"; then
+  log_error "[public-surface] .htaccess is missing branded 403 ErrorDocument handling"
+  exit 1
+fi
+if ! grep -q 'ErrorDocument 500 /500.html' "$ROOT_DIR/.htaccess"; then
+  log_error "[public-surface] .htaccess is missing branded 500 ErrorDocument handling"
+  exit 1
+fi
+if ! grep -q 'ErrorDocument 503 /503.html' "$ROOT_DIR/.htaccess"; then
+  log_error "[public-surface] .htaccess is missing branded 503 ErrorDocument handling"
+  exit 1
+fi
+if ! grep -q 'maintenance.enable' "$ROOT_DIR/.htaccess"; then
+  log_error "[public-surface] .htaccess is missing the maintenance mode toggle"
+  exit 1
+fi
+if ! grep -q "!\\^/payment" "$ROOT_DIR/.htaccess"; then
+  log_error "[public-surface] .htaccess maintenance mode is not preserving payment status routes"
+  exit 1
+fi
+if ! grep -Fq 'RewriteRule ^$ index.html [L]' "$ROOT_DIR/.htaccess"; then
+  log_error "[public-surface] .htaccess is missing the explicit public root rewrite"
+  exit 1
+fi
+if ! grep -Fq 'RewriteRule ^(privacy|terms|archive|thegatheringplace|lessons|recurring|recurring-events|login|admin|dashboard|access-denied|temporarily-unavailable|maintenance|something-went-wrong|server-error)/?$ index.html [L,NC]' "$ROOT_DIR/.htaccess"; then
+  log_error "[public-surface] .htaccess is missing explicit public SPA/status route allowlist"
+  exit 1
+fi
+if ! grep -Fq 'RewriteRule ^payment(?:/.*)?$ index.html [L,NC]' "$ROOT_DIR/.htaccess"; then
+  log_error "[public-surface] .htaccess is missing explicit payment route allowlist"
+  exit 1
+fi
+if ! grep -Fq 'RewriteRule . - [R=404,L]' "$ROOT_DIR/.htaccess"; then
+  log_error "[public-surface] .htaccess is missing true 404 fallback for unknown public paths"
+  exit 1
+fi
+if ! grep -q 'BrandImage' "$ROOT_DIR/frontend/src/components/BrandedStatusPage.js"; then
+  log_error "[public-surface] BrandedStatusPage is missing MMH logo branding"
+  exit 1
+fi
+if ! grep -q 'We couldn’t find that page\.' "$ROOT_DIR/frontend/src/pages/NotFoundPage.js"; then
+  log_error "[public-surface] branded React not-found page copy is missing"
+  exit 1
+fi
+if ! grep -q "badge: 'Access denied'" "$ROOT_DIR/frontend/src/pages/SiteStatusPage.js"; then
+  log_error "[public-surface] route-level access denied page copy is missing"
+  exit 1
+fi
+if ! grep -q "badge: 'Temporarily unavailable'" "$ROOT_DIR/frontend/src/pages/SiteStatusPage.js"; then
+  log_error "[public-surface] route-level temporarily unavailable page copy is missing"
+  exit 1
+fi
+if ! grep -q "badge: 'Something went wrong'" "$ROOT_DIR/frontend/src/pages/SiteStatusPage.js"; then
+  log_error "[public-surface] route-level server error page copy is missing"
+  exit 1
+fi
+if ! grep -q "'/access-denied': 'access-denied'" "$ROOT_DIR/frontend/src/App.js"; then
+  log_error "[public-surface] App.js is missing /access-denied route handling"
+  exit 1
+fi
+if ! grep -q "'/temporarily-unavailable': 'temporarily-unavailable'" "$ROOT_DIR/frontend/src/App.js"; then
+  log_error "[public-surface] App.js is missing /temporarily-unavailable route handling"
+  exit 1
+fi
+if ! grep -q "'/something-went-wrong': 'something-went-wrong'" "$ROOT_DIR/frontend/src/App.js"; then
+  log_error "[public-surface] App.js is missing /something-went-wrong route handling"
+  exit 1
+fi
+if ! grep -q 'Midway Music Hall' "$ROOT_DIR/frontend/public/404.html"; then
+  log_error "[public-surface] frontend/public/404.html is missing MMH branding"
+  exit 1
+fi
+if ! grep -q 'Go Home' "$ROOT_DIR/frontend/public/404.html"; then
+  log_error "[public-surface] frontend/public/404.html is missing a home action"
+  exit 1
+fi
+for page in 403 500 503; do
+  if ! grep -q 'Midway Music Hall' "$ROOT_DIR/frontend/public/${page}.html"; then
+    log_error "[public-surface] frontend/public/${page}.html is missing MMH branding"
+    exit 1
+  fi
+  if ! grep -q 'Go Home' "$ROOT_DIR/frontend/public/${page}.html"; then
+    log_error "[public-surface] frontend/public/${page}.html is missing a home action"
+    exit 1
+  fi
+done
 
 log_step "[public-surface] verifying skip-link and main landmarks"
 if ! grep -q 'className="skip-link"' "$ROOT_DIR/frontend/src/components/Navigation.js"; then
