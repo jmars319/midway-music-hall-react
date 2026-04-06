@@ -56,6 +56,26 @@ if ! rg -n "Opening Square|Pay with Square" "$ROOT_DIR/frontend/src/components/E
   log_error "Square launch action copy is missing from EventSeatingModal"
   exit 1
 fi
+if ! rg -n "resolvePaymentStatusState" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
+  log_error "payment status route mapping is missing from EventSeatingModal"
+  exit 1
+fi
+if ! rg -n "pending-confirmation|provider-unavailable|staff-help|in-progress|closed" "$ROOT_DIR/frontend/src/pages/PaymentStatusPage.js" >/dev/null; then
+  log_error "specific payment status routes are missing from PaymentStatusPage"
+  exit 1
+fi
+if ! rg -n "normalizedPath === '/payment' \\|\\| normalizedPath.startsWith\\('/payment/'\\)" "$ROOT_DIR/frontend/src/App.js" >/dev/null; then
+  log_error "public payment status route is missing from App.js"
+  exit 1
+fi
+if ! rg -n "Midway Music Hall|Go Back|Go Home" "$ROOT_DIR/frontend/src/pages/PaymentStatusPage.js" >/dev/null; then
+  log_error "branded payment status page copy is missing"
+  exit 1
+fi
+if ! rg -n "BrandImage" "$ROOT_DIR/frontend/src/pages/PaymentStatusPage.js" >/dev/null; then
+  log_error "payment status page is missing MMH logo branding"
+  exit 1
+fi
 if ! rg -n 'option value=\"square\"' "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js" >/dev/null; then
   log_error "Square provider option is missing from PaymentSettingsModule"
   exit 1

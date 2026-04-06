@@ -6,6 +6,7 @@ import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 import GatheringPlacePage from './pages/GatheringPlacePage';
 import ArchivePage from './pages/ArchivePage';
+import PaymentStatusPage from './pages/PaymentStatusPage';
 import { API_BASE } from './apiConfig';
 
 const DEFAULT_SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days hard expiry
@@ -263,6 +264,7 @@ export default function App() {
   const isArchiveRoute = normalizedPath === '/archive';
   const isPrivacyRoute = normalizedPath === '/privacy';
   const isTermsRoute = normalizedPath === '/terms';
+  const isPaymentRoute = normalizedPath === '/payment' || normalizedPath.startsWith('/payment/');
 
   if (currentView === 'login') {
     return <LoginPage onLogin={handleLogin} onBack={navigateToHome} />;
@@ -296,6 +298,10 @@ export default function App() {
         onNavigate={handleNavigate}
       />
     );
+  }
+
+  if (isPaymentRoute && currentView === 'home') {
+    return <PaymentStatusPage onAdminClick={navigateToAdmin} />;
   }
 
   // Default to the full public site `HomePage`.

@@ -65,7 +65,7 @@ PAYPAL_SDK_CLIENT_ID=your-paypal-client-id-if-used
 SQUARE_ENVIRONMENT=production
 SQUARE_ACCESS_TOKEN=your-square-access-token
 SQUARE_LOCATION_ID=your-square-location-id
-SQUARE_CHECKOUT_REDIRECT_URL=https://midwaymusichall.net/
+SQUARE_CHECKOUT_REDIRECT_URL=https://midwaymusichall.net/payment/return
 SQUARE_WEBHOOK_SIGNATURE_KEY=your-square-webhook-signature-key
 SQUARE_WEBHOOK_NOTIFICATION_URL=https://midwaymusichall.net/api/webhooks/square
 ```
@@ -78,6 +78,7 @@ Square production notes:
 - `SQUARE_WEBHOOK_NOTIFICATION_URL` must exactly match the public webhook URL configured in Square, including `https://` and path.
 - `SQUARE_WEBHOOK_SIGNATURE_KEY` must be the signature key from that Square webhook subscription.
 - `SQUARE_CHECKOUT_REDIRECT_URL` is optional but recommended if you want buyers returned to MMH after Square-hosted checkout.
+- The MMH-branded public return page for this build is `/payment/return`.
 
 ## Database setup (phpMyAdmin)
 1. Create DB + user in cPanel and grant All Privileges.

@@ -63,6 +63,42 @@ const resolveCompactTierRowSurfaceFrame = (row = {}) => {
   return { width, height, radius };
 };
 
+const buildPaymentStatusUrl = (state = 'help', options = {}) => {
+  const params = new URLSearchParams();
+  const normalizedState = typeof state === 'string' && state.trim() ? state.trim() : 'help';
+  if (typeof options.code === 'string' && options.code.trim()) {
+    params.set('code', options.code.trim());
+  }
+  if (typeof options.message === 'string' && options.message.trim()) {
+    params.set('message', options.message.trim());
+  }
+  const query = params.toString();
+  return `/payment/${normalizedState}${query ? `?${query}` : ''}`;
+};
+
+const resolvePaymentStatusState = (code, fallback = 'help') => {
+  switch ((code || '').trim().toUpperCase()) {
+    case 'PAYMENT_ALREADY_COMPLETED':
+      return 'pending-confirmation';
+    case 'PAYMENT_ALREADY_IN_PROGRESS':
+      return 'in-progress';
+    case 'PAYMENT_SEAT_LIMIT_EXCEEDED':
+      return 'staff-help';
+    case 'REQUEST_NOT_OPEN_FOR_PAYMENT':
+    case 'EVENT_NOT_PUBLIC_FOR_PAYMENT':
+      return 'closed';
+    case 'PAYMENT_PROVIDER_UNAVAILABLE':
+    case 'PAYMENT_PROVIDER_REQUEST_FAILED':
+      return 'provider-unavailable';
+    case 'PAYMENT_NOT_CONFIGURED':
+    case 'PAYMENT_AMOUNT_INVALID':
+    case 'PAYMENT_CURRENCY_INVALID':
+      return 'unavailable';
+    default:
+      return fallback;
+  }
+};
+
 export default function EventSeatingModal({ event, onClose }) {
   const [seatingConfig, setSeatingConfig] = useState([]);
   const [reservedSeats, setReservedSeats] = useState([]);
@@ -1005,6 +1041,11 @@ export default function EventSeatingModal({ event, onClose }) {
       maximumFractionDigits: 2,
     }).format(submittedTotalAmount)
     : '';
+  const paymentStatusRoute = resolvePaymentStatusState(submittedPaymentSummary?.reason_code, paymentOverLimit ? 'staff-help' : 'unavailable');
+  const paymentStatusLinkUrl = buildPaymentStatusUrl(paymentStatusRoute, {
+    code: submittedPaymentSummary?.reason_code,
+    message: paymentBlockReason || paymentOption?.over_limit_message || paymentLaunchError,
+  });
 
   const handleStartSquareCheckout = async () => {
     if (!submittedSeatRequestId || squareCheckoutStarting) {
@@ -1024,7 +1065,16 @@ export default function EventSeatingModal({ event, onClose }) {
         if (data?.payment_summary && typeof data.payment_summary === 'object') {
           setSubmittedPaymentSummary(data.payment_summary);
         }
-        setPaymentLaunchError(data?.message || 'Unable to start Square checkout right now.');
+        const launchErrorMessage = data?.message || 'Unable to start Square checkout right now.';
+        const launchErrorCode = typeof data?.code === 'string' ? data.code : data?.payment_summary?.reason_code;
+        setPaymentLaunchError(launchErrorMessage);
+        if (typeof window !== 'undefined') {
+          window.location.assign(buildPaymentStatusUrl(resolvePaymentStatusState(launchErrorCode, 'unavailable'), {
+            code: launchErrorCode,
+            message: launchErrorMessage,
+          }));
+          return;
+        }
         return;
       }
       if (data?.payment_summary && typeof data.payment_summary === 'object') {
@@ -1032,7 +1082,15 @@ export default function EventSeatingModal({ event, onClose }) {
       }
       const checkoutUrl = typeof data?.checkout_url === 'string' ? data.checkout_url.trim() : '';
       if (!checkoutUrl) {
-        setPaymentLaunchError('Square checkout did not return a launch URL.');
+        const launchErrorMessage = 'Square checkout did not return a launch URL.';
+        setPaymentLaunchError(launchErrorMessage);
+        if (typeof window !== 'undefined') {
+          window.location.assign(buildPaymentStatusUrl(resolvePaymentStatusState('PAYMENT_PROVIDER_REQUEST_FAILED', 'provider-unavailable'), {
+            code: 'PAYMENT_PROVIDER_REQUEST_FAILED',
+            message: launchErrorMessage,
+          }));
+          return;
+        }
         return;
       }
       if (data?.launch_target === 'same_tab') {
@@ -1045,7 +1103,14 @@ export default function EventSeatingModal({ event, onClose }) {
       }
     } catch (error) {
       console.error('Square checkout launch failed', error);
-      setPaymentLaunchError('Unable to start Square checkout right now. Please try again or contact staff.');
+      const launchErrorMessage = 'Unable to start Square checkout right now. Please try again or contact staff.';
+      setPaymentLaunchError(launchErrorMessage);
+      if (typeof window !== 'undefined') {
+        window.location.assign(buildPaymentStatusUrl(resolvePaymentStatusState('PAYMENT_PROVIDER_REQUEST_FAILED', 'provider-unavailable'), {
+          code: 'PAYMENT_PROVIDER_REQUEST_FAILED',
+          message: launchErrorMessage,
+        }));
+      }
     } finally {
       setSquareCheckoutStarting(false);
     }
@@ -1715,13 +1780,29 @@ export default function EventSeatingModal({ event, onClose }) {
                         </button>
                       </div>
                       {!paymentCanOffer ? (
-                        <p className="text-sm text-gray-100">
-                          {paymentBlockReason || 'Online payment is not available for this request yet.'}
-                        </p>
+                        <div className="space-y-2">
+                          <p className="text-sm text-gray-100">
+                            {paymentBlockReason || 'Online payment is not available for this request yet.'}
+                          </p>
+                          <a
+                            href={paymentStatusLinkUrl}
+                            className="inline-flex text-xs font-semibold text-indigo-100 underline decoration-dotted underline-offset-4 hover:text-white"
+                          >
+                            Open payment help page
+                          </a>
+                        </div>
                       ) : paymentOverLimit ? (
-                        <p className="text-sm text-gray-100">
-                          {paymentOption.over_limit_message || 'Please call the box office to arrange payment for larger groups.'}
-                        </p>
+                        <div className="space-y-2">
+                          <p className="text-sm text-gray-100">
+                            {paymentOption.over_limit_message || 'Please call the box office to arrange payment for larger groups.'}
+                          </p>
+                          <a
+                            href={paymentStatusLinkUrl}
+                            className="inline-flex text-xs font-semibold text-indigo-100 underline decoration-dotted underline-offset-4 hover:text-white"
+                          >
+                            Open payment help page
+                          </a>
+                        </div>
                       ) : (
                         <>
                           {paymentProviderType === 'square' ? (
