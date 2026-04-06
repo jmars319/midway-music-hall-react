@@ -7,7 +7,23 @@ import TermsOfService from './pages/TermsOfService';
 import GatheringPlacePage from './pages/GatheringPlacePage';
 import ArchivePage from './pages/ArchivePage';
 import PaymentStatusPage from './pages/PaymentStatusPage';
+import NotFoundPage from './pages/NotFoundPage';
+import SiteStatusPage from './pages/SiteStatusPage';
 import { API_BASE } from './apiConfig';
+
+const PUBLIC_SECTION_ROUTE_MAP = {
+  '/lessons': 'lessons',
+  '/recurring': 'recurring-events',
+  '/recurring-events': 'recurring-events',
+};
+
+const PUBLIC_STATUS_ROUTE_MAP = {
+  '/access-denied': 'access-denied',
+  '/temporarily-unavailable': 'temporarily-unavailable',
+  '/maintenance': 'temporarily-unavailable',
+  '/something-went-wrong': 'something-went-wrong',
+  '/server-error': 'something-went-wrong',
+};
 
 const DEFAULT_SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days hard expiry
 const DEFAULT_IDLE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hour idle timeout
@@ -260,17 +276,36 @@ export default function App() {
     ? (window.location.pathname || '/').replace(/\/+$/, '') || '/'
     : '/';
   const normalizedPath = pathname.toLowerCase();
+  const sectionRouteTarget = PUBLIC_SECTION_ROUTE_MAP[normalizedPath] || null;
+  const statusRouteTarget = PUBLIC_STATUS_ROUTE_MAP[normalizedPath] || null;
   const isGatheringPlaceRoute = normalizedPath === '/thegatheringplace';
   const isArchiveRoute = normalizedPath === '/archive';
   const isPrivacyRoute = normalizedPath === '/privacy';
   const isTermsRoute = normalizedPath === '/terms';
   const isPaymentRoute = normalizedPath === '/payment' || normalizedPath.startsWith('/payment/');
+  const isLoginRoute = normalizedPath === '/login';
+  const isAdminRoute = normalizedPath === '/admin' || normalizedPath === '/dashboard';
 
-  if (currentView === 'login') {
+  useEffect(() => {
+    if (!sectionRouteTarget || currentView !== 'home' || typeof document === 'undefined') {
+      return undefined;
+    }
+    const scrollToTarget = () => {
+      const target = document.getElementById(sectionRouteTarget)
+        || document.querySelector(`[data-nav-target="${sectionRouteTarget}"]`);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+    const timer = setTimeout(scrollToTarget, 50);
+    return () => clearTimeout(timer);
+  }, [currentView, sectionRouteTarget]);
+
+  if (currentView === 'login' || (isLoginRoute && !isAuthenticated) || (isAdminRoute && !isAuthenticated)) {
     return <LoginPage onLogin={handleLogin} onBack={navigateToHome} />;
   }
 
-  if (currentView === 'admin' && isAuthenticated) {
+  if ((currentView === 'admin' || isAdminRoute || (isLoginRoute && isAuthenticated)) && isAuthenticated) {
     return <AdminPanel user={currentUser} onLogout={handleLogout} onBackToSite={navigateToHome} />;
   }
 
@@ -302,6 +337,14 @@ export default function App() {
 
   if (isPaymentRoute && currentView === 'home') {
     return <PaymentStatusPage onAdminClick={navigateToAdmin} />;
+  }
+
+  if (statusRouteTarget && currentView === 'home') {
+    return <SiteStatusPage onAdminClick={navigateToAdmin} />;
+  }
+
+  if (currentView === 'home' && normalizedPath !== '/' && !sectionRouteTarget) {
+    return <NotFoundPage onAdminClick={navigateToAdmin} />;
   }
 
   // Default to the full public site `HomePage`.

@@ -3,19 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Page Not Found | Midway Music Hall</title>
-    <meta name="description" content="The page you requested could not be found on the Midway Music Hall website." />
+    <title>Something Went Wrong | Midway Music Hall</title>
+    <meta name="description" content="Midway Music Hall hit an unexpected error while serving this page." />
     <meta name="robots" content="noindex" />
     <style>
       :root {
         color-scheme: dark;
         --bg: #05060a;
         --panel: rgba(17, 24, 39, 0.92);
-        --border: rgba(129, 140, 248, 0.24);
+        --border: rgba(96, 165, 250, 0.24);
         --text: #f8fafc;
         --muted: #cbd5e1;
-        --accent: #8b5cf6;
-        --accent-strong: #a78bfa;
+        --accent: #4f46e5;
+        --accent-strong: #818cf8;
       }
       * { box-sizing: border-box; }
       body {
@@ -23,7 +23,7 @@
         min-height: 100vh;
         font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
         background:
-          radial-gradient(circle at top, rgba(139, 92, 246, 0.25), transparent 35%),
+          radial-gradient(circle at top, rgba(99, 102, 241, 0.24), transparent 35%),
           linear-gradient(180deg, #09090f 0%, var(--bg) 100%);
         color: var(--text);
         display: flex;
@@ -61,7 +61,7 @@
         font-size: 12px;
         letter-spacing: 0.35em;
         text-transform: uppercase;
-        color: #ddd6fe;
+        color: #c7d2fe;
       }
       h1 {
         margin: 0;
@@ -73,9 +73,9 @@
         margin-top: 18px;
         padding: 8px 12px;
         border-radius: 999px;
-        border: 1px solid rgba(167, 139, 250, 0.35);
-        background: rgba(139, 92, 246, 0.12);
-        color: #ede9fe;
+        border: 1px solid rgba(129, 140, 248, 0.35);
+        background: rgba(79, 70, 229, 0.12);
+        color: #e0e7ff;
         font-size: 12px;
         font-weight: 700;
         letter-spacing: 0.2em;
@@ -135,12 +135,12 @@
         background: var(--accent-strong);
       }
       .button-secondary {
-        border-color: rgba(167, 139, 250, 0.4);
-        color: #ede9fe;
-        background: rgba(139, 92, 246, 0.08);
+        border-color: rgba(129, 140, 248, 0.4);
+        color: #e0e7ff;
+        background: rgba(79, 70, 229, 0.08);
       }
       .button-secondary:hover {
-        background: rgba(139, 92, 246, 0.16);
+        background: rgba(79, 70, 229, 0.16);
       }
       .footer-note {
         margin-top: 18px;
@@ -157,19 +157,19 @@
             <img src="/iconslogos/mmh-logo@1x.png" alt="Midway Music Hall" />
             <div>
               <p class="eyebrow">Midway Music Hall</p>
-              <h1 id="page-title">We couldn’t find that page.</h1>
+              <h1 id="page-title">Something went wrong while loading this page.</h1>
             </div>
           </div>
-          <div class="badge">Page not found</div>
+          <div class="badge">Something went wrong</div>
         </div>
         <div class="content">
           <p class="lead">
-            The URL may be mistyped, outdated, or no longer available on the public site.
+            The safest next step is to go back and try again, or return home if you want to start fresh.
           </p>
           <div class="grid">
             <div class="card">You are still on an official Midway Music Hall page.</div>
-            <div class="card">Go back if you followed a bad link, or return home to start fresh.</div>
-            <div class="card">Known public routes include /thegatheringplace, /archive, /lessons, and /recurring.</div>
+            <div class="card">This does not necessarily mean your request or payment was lost.</div>
+            <div class="card">If the problem continues, wait a moment and try again from the homepage.</div>
           </div>
           <div class="actions">
             <button class="button button-primary" type="button" onclick="if (window.history.length > 1) { window.history.back(); } else { window.location.href = '/'; }">
@@ -177,7 +177,7 @@
             </button>
             <a class="button button-secondary" href="/">Go Home</a>
           </div>
-          <p class="footer-note">If you expected this page to exist, start from the homepage and navigate again.</p>
+          <p class="footer-note">If you keep seeing this page, give the site a moment and then retry from the homepage.</p>
         </div>
       </section>
     </main>

@@ -1,6 +1,11 @@
 # Midway Music Hall production .htaccess
 # Target docroot: public_html/midwaymusichall.net/
 
+ErrorDocument 403 /403.html
+ErrorDocument 404 /404.html
+ErrorDocument 500 /500.html
+ErrorDocument 503 /503.html
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
 
@@ -15,17 +20,33 @@
   # Public uploads (map /uploads/* to api/uploads/*)
   RewriteRule ^uploads/(.*)$ api/uploads/$1 [L,NC,QSA]
 
-  # Allow real files/folders (including api/index.php) to pass through as-is
-  RewriteCond %{REQUEST_FILENAME} -f [OR]
-  RewriteCond %{REQUEST_FILENAME} -d
+  # Allow real files (assets, static error documents, uploads, etc.) to pass through as-is.
+  # Public app routes are handled explicitly below so maintenance mode can cover "/".
+  RewriteCond %{REQUEST_FILENAME} -f
   RewriteRule ^ - [L]
+
+  # Public maintenance mode toggle.
+  # Create a file named "maintenance.enable" in the site root to serve a real 503 page
+  # for public routes while leaving /api, /login, /admin, /dashboard, and /payment/* reachable.
+  RewriteCond %{DOCUMENT_ROOT}/maintenance.enable -f
+  RewriteCond %{REQUEST_URI} !^/api(?:/|$) [NC]
+  RewriteCond %{REQUEST_URI} !^/(?:login|admin|dashboard)(?:/|$) [NC]
+  RewriteCond %{REQUEST_URI} !^/payment(?:/|$) [NC]
+  RewriteRule ^ - [R=503,L]
 
   # API front controller
   RewriteRule ^api/?$ api/index.php [QSA,L]
   RewriteRule ^api/(.*)$ api/index.php [QSA,L]
 
-  # SPA fallback for React routes
-  RewriteRule . index.html [L]
+  # Public app root
+  RewriteRule ^$ index.html [L]
+
+  # Explicit public SPA routes
+  RewriteRule ^(privacy|terms|archive|thegatheringplace|lessons|recurring|recurring-events|login|admin|dashboard|access-denied|temporarily-unavailable|maintenance|something-went-wrong|server-error)/?$ index.html [L,NC]
+  RewriteRule ^payment(?:/.*)?$ index.html [L,NC]
+
+  # Unknown public paths should return the branded 404 page with a real 404 status.
+  RewriteRule . - [R=404,L]
 </IfModule>
 
 # ----------------------------

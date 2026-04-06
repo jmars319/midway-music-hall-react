@@ -22,6 +22,7 @@ Rules:
 2. Backend lives in `public_html/midwaymusichall.net/api/`.
 3. `api/uploads/` must be writable.
 4. Only the repo root `.htaccess` is used.
+5. Branded static error documents (`403.html`, `404.html`, `500.html`, `503.html`) are served from the site root.
 
 ## Pre-deploy checklist (local)
 - `cd frontend && npm install && npm run lint && npm run build`
@@ -108,6 +109,24 @@ SHOW COLUMNS FROM events LIKE 'pricing_config';
 - Purge cache after deploy.
 - Disable Cloudflare Email Obfuscation to avoid injected scripts.
 
+## Optional maintenance mode
+The production `.htaccess` supports a simple public maintenance toggle without taking admin or API routes offline.
+
+Enable maintenance mode:
+```bash
+touch public_html/midwaymusichall.net/maintenance.enable
+```
+
+Disable maintenance mode:
+```bash
+rm -f public_html/midwaymusichall.net/maintenance.enable
+```
+
+Behavior:
+- Public routes return a real HTTP `503` and show the branded `503.html` page.
+- `/api`, `/login`, `/admin`, `/dashboard`, and `/payment/*` stay reachable.
+- Unknown public URLs still return the branded `404.html` page once maintenance mode is off.
+
 ## Post-deploy smoke test
 Keep `SEND_EMAILS=false` until all checks pass.
 
@@ -121,6 +140,8 @@ Keep `SEND_EMAILS=false` until all checks pass.
 8. Upload and delete a test image in Media Manager.
 9. `/robots.txt`, `/sitemap.xml`, `/manifest.json` load over HTTPS.
 10. If Square is enabled, submit a test seat request, launch Square checkout, complete one payment, and confirm the request stays `Paid / pending confirmation` without auto-confirming seats.
+11. Visit a bogus URL such as `/this-should-404` and confirm the branded 404 page appears.
+12. Optional: create `maintenance.enable`, confirm the public site returns the branded 503 page while `/login`, `/admin`, and `/api/health` still respond, then remove the file.
 
 ## Regression checklist (when time allows)
 - Verify event publish/unpublish/archiving on admin list and public site.
