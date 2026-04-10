@@ -1,6 +1,6 @@
 // EventsModule: admin UI to create and manage events
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Edit, Copy, CheckCircle, XCircle, Archive as ArchiveIcon } from 'lucide-react';
+import { Plus, Edit, Copy, CheckCircle, XCircle, Archive as ArchiveIcon, Trash2 } from 'lucide-react';
 import { API_BASE, getImageUrlSync } from '../apiConfig';
 import ResponsiveImage from '../components/ResponsiveImage';
 import AdminCollapsibleSection from './AdminCollapsibleSection';
@@ -15,9 +15,21 @@ import {
   parseFriendlyEventDate,
   parseFriendlyEventTime,
 } from '../utils/adminEventDateTimeInput';
-import { getLegacyRecurringSeriesOverride } from '../utils/recurringSeriesDisplay';
 const SECTION_STORAGE_KEY = 'mmh_event_sections';
 const EVENT_EDITOR_SECTION_STORAGE_KEY = 'mmh_event_editor_sections';
+const SITE_CONTENT_FOCUS_KEY = 'mmh_admin_site_content_focus';
+const DEFAULT_EVENT_FILTERS = {
+  status: 'all',
+  timeframe: 'upcoming',
+  recurringOnly: false,
+  seatingOnly: false,
+  needsScheduleOnly: false,
+  search: '',
+  venue: 'all',
+  category: 'all',
+  sortBy: 'start_asc',
+  groupBy: 'category',
+};
 
 const VENUE_LABELS = {
   MMH: 'Midway Music Hall',
@@ -919,7 +931,7 @@ const summarizeOccurrenceSchedule = (formData) => {
   ].filter(Boolean).join(' • ');
 };
 
-export default function EventsModule(){
+export default function EventsModule({ onNavigate = () => {} }){
   const [events, setEvents] = useState([]);
   const [layouts, setLayouts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -947,18 +959,7 @@ export default function EventsModule(){
   const [imageUploadProgress, setImageUploadProgress] = useState(0);
   const [imageUploadProcessing, setImageUploadProcessing] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState({});
-  const [filters, setFilters] = useState({
-    status: 'all',
-    timeframe: 'upcoming',
-    recurringOnly: false,
-    seatingOnly: false,
-    needsScheduleOnly: false,
-    search: '',
-    venue: 'all',
-    category: 'all',
-    sortBy: 'start_asc',
-    groupBy: 'category',
-  });
+  const [filters, setFilters] = useState(DEFAULT_EVENT_FILTERS);
   const [listError, setListError] = useState('');
   const [seriesExpanded, setSeriesExpanded] = useState({});
   const [seriesActionId, setSeriesActionId] = useState(null);
@@ -1381,6 +1382,13 @@ export default function EventsModule(){
     });
     return map;
   }, [categories]);
+  const categoryBySlug = useMemo(() => {
+    const map = new Map();
+    categories.forEach((cat) => {
+      map.set(String(cat.slug || '').toLowerCase(), cat);
+    });
+    return map;
+  }, [categories]);
 
   const selectedCategoryId = formData.category_id ? String(formData.category_id) : '';
   const selectedCategory = selectedCategoryId ? categoryLookup.get(selectedCategoryId) : null;
@@ -1394,20 +1402,8 @@ export default function EventsModule(){
         categorySlug: effectiveCategorySlug,
         isSeriesMaster: effectiveIsSeriesMaster,
         seatingEnabled: Boolean(formData.seating_enabled),
-      }),
+    }),
     [effectiveCategorySlug, effectiveIsSeriesMaster, formData.seating_enabled]
-  );
-  const legacyRecurringSeriesOverride = useMemo(() => getLegacyRecurringSeriesOverride({
-    title: editing?.title || formData.artist_name || '',
-    artist_name: formData.artist_name || editing?.artist_name || '',
-  }), [editing?.artist_name, editing?.title, formData.artist_name]);
-  const usingLegacySeriesScheduleFallback = Boolean(
-    legacyRecurringSeriesOverride?.schedule
-    && !String(formData.series_schedule_label || '').trim()
-  );
-  const usingLegacySeriesSummaryFallback = Boolean(
-    legacyRecurringSeriesOverride?.summary
-    && !String(formData.series_summary || '').trim()
   );
 
   const recurrenceExceptionPreviewRequest = useMemo(() => {
@@ -1916,6 +1912,48 @@ export default function EventsModule(){
     return Array.from(groups.values());
   }, [sortedItems, filters.groupBy]);
 
+  const quickCategoryCounts = useMemo(() => {
+    return eventItems.reduce((acc, item) => {
+      const slug = String(item.categorySlug || 'normal').toLowerCase();
+      acc[slug] = (acc[slug] || 0) + 1;
+      return acc;
+    }, {});
+  }, [eventItems]);
+
+  const quickAccessCategories = useMemo(() => {
+    const priorityLabels = {
+      normal: 'Normal',
+      'beach-bands': 'Beach Bands',
+      recurring: 'Recurring',
+    };
+    const prioritySlugs = Object.keys(priorityLabels);
+    const seen = new Set();
+    const prioritized = prioritySlugs.map((slug) => {
+      const match = categories.find((category) => String(category.slug || '').toLowerCase() === slug);
+      if (match) {
+        seen.add(slug);
+        return match;
+      }
+      return {
+        id: `virtual-${slug}`,
+        slug,
+        name: priorityLabels[slug],
+        is_active: 1,
+      };
+    });
+    const remaining = [...categories]
+      .filter((category) => {
+        const slug = String(category.slug || '').toLowerCase();
+        if (seen.has(slug)) {
+          return false;
+        }
+        seen.add(slug);
+        return true;
+      })
+      .sort((left, right) => left.name.localeCompare(right.name));
+    return [...prioritized, ...remaining];
+  }, [categories]);
+
   const sectionIds = useMemo(() => groupedSections.flatMap((group) => {
     const ids = [
       `${group.key}-published`,
@@ -2274,6 +2312,12 @@ export default function EventsModule(){
             </select>
           </div>
           <button
+            onClick={() => openEdit(event)}
+            className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+          >
+            <Edit className="h-4 w-4" /> Edit
+          </button>
+          <button
             onClick={() => duplicateEvent(event)}
             className="inline-flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded"
           >
@@ -2309,13 +2353,15 @@ export default function EventsModule(){
               >
                 <ArchiveIcon className="h-4 w-4" /> Archive
               </button>
-              <button
-                onClick={() => openEdit(event)}
-                className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
-              >
-                <Edit className="h-4 w-4" /> Edit
-              </button>
             </>
+          )}
+          {!isRecurringEvent(event) && !isPublished && (
+            <button
+              onClick={() => deleteEvent(event)}
+              className="inline-flex items-center gap-2 px-3 py-2 bg-gray-950 border border-red-500/40 text-red-200 hover:bg-red-950/40 rounded"
+            >
+              <Trash2 className="h-4 w-4" /> Delete
+            </button>
           )}
         </div>
       </div>
@@ -2574,9 +2620,23 @@ export default function EventsModule(){
     );
   };
 
-  const openAdd = () => {
+  const openAdd = (preset = {}) => {
+    const nextForm = createInitialFormState();
+    const presetCategory = preset.categorySlug
+      ? categoryBySlug.get(String(preset.categorySlug || '').toLowerCase())
+      : null;
+    if (presetCategory) {
+      nextForm.category_id = String(presetCategory.id);
+    }
+    if (preset.venue_code) {
+      nextForm.venue_code = preset.venue_code;
+    }
+    if (preset.recurrence_enabled) {
+      nextForm.recurrence_enabled = true;
+      nextForm.is_series_master = true;
+    }
     setEditing(null);
-    setFormData(createInitialFormState());
+    setFormData(nextForm);
     setEventPricingRows([]);
     setEventPricingRowsLoading(false);
     setRecurrenceLoading(false);
@@ -4298,6 +4358,53 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
     }
   };
 
+  const deleteEvent = async (event) => {
+    const eventTitle = event.artist_name || event.title || 'this event';
+    if (isRecurringEvent(event)) {
+      alert('Recurring series and generated series dates should be managed with series controls, not deleted directly.');
+      return false;
+    }
+    if (normalizeEventStatus(event) === 'published' && !isEventArchived(event)) {
+      alert('Unpublish this event before deleting it from the admin list.');
+      return false;
+    }
+    if (!window.confirm(`Delete "${eventTitle}" from the admin list? This removes it from normal admin views and public listings.`)) {
+      return false;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/events/${event.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || 'Failed to delete event');
+      }
+      fetchEvents();
+      if (editing?.id === event.id) {
+        setShowForm(false);
+      }
+      return true;
+    } catch (err) {
+      console.error('Delete event error', err);
+      alert(err instanceof Error ? err.message : 'Failed to delete event');
+      return false;
+    }
+  };
+
+  const jumpToLessonsManager = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(SITE_CONTENT_FOCUS_KEY, 'lessons');
+    }
+    onNavigate('site-content');
+  }, [onNavigate]);
+
+  const applyQuickAccessFilter = useCallback((categorySlug = 'all') => {
+    setFilters({
+      ...DEFAULT_EVENT_FILTERS,
+      timeframe: 'all',
+      category: categorySlug,
+      recurringOnly: categorySlug === 'recurring',
+    });
+  }, []);
+
   const duplicateEvent = async (event) => {
     const baseName = event.artist_name || event.title || 'Untitled Event';
     const occurrenceEditorState = buildOccurrenceEditorState(event);
@@ -4465,6 +4572,90 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
             <Plus className="h-4 w-4" /> Add Event
           </button>
         </div>
+      </div>
+
+      <div className="mb-6 grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+        <section className="rounded-2xl border border-purple-500/20 bg-gray-900 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-purple-300">Quick Access</p>
+              <h2 className="mt-1 text-lg font-semibold text-white">Jump by event type</h2>
+              <p className="mt-1 text-sm text-gray-400">
+                Filter the list with one click. Recurring shows stay in Events, and the public Lessons section is edited under Site Content &amp; Lessons.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFilters({ ...DEFAULT_EVENT_FILTERS })}
+              className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 hover:bg-gray-700"
+            >
+              Reset Filters
+            </button>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setFilters({ ...DEFAULT_EVENT_FILTERS })}
+              className={`rounded-full border px-4 py-2 text-sm font-medium ${
+                filters.category === 'all' && !filters.recurringOnly
+                  ? 'border-purple-400 bg-purple-500/20 text-white'
+                  : 'border-gray-700 bg-gray-800 text-gray-200 hover:bg-gray-700'
+              }`}
+            >
+              All Events <span className="ml-2 rounded-full bg-black/20 px-2 py-0.5 text-xs">{eventItems.length}</span>
+            </button>
+            {quickAccessCategories.map((category) => {
+              const slug = String(category.slug || '').toLowerCase();
+              const count = quickCategoryCounts[slug] || 0;
+              const isActive = filters.category === slug && (slug !== 'recurring' || filters.recurringOnly);
+              return (
+                <button
+                  key={`quick-access-${slug}`}
+                  type="button"
+                  onClick={() => applyQuickAccessFilter(slug)}
+                  className={`rounded-full border px-4 py-2 text-sm font-medium ${
+                    isActive
+                      ? 'border-purple-400 bg-purple-500/20 text-white'
+                      : 'border-gray-700 bg-gray-800 text-gray-200 hover:bg-gray-700'
+                  }`}
+                >
+                  {category.name}
+                  <span className="ml-2 rounded-full bg-black/20 px-2 py-0.5 text-xs">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-blue-500/20 bg-gray-900 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] text-blue-300">Common Tasks</p>
+          <div className="mt-3 grid gap-2">
+            <button
+              type="button"
+              onClick={() => openAdd({ categorySlug: 'normal' })}
+              className="rounded-lg bg-gray-800 px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+            >
+              Add normal event
+            </button>
+            <button
+              type="button"
+              onClick={() => openAdd({ categorySlug: 'recurring', recurrence_enabled: true })}
+              className="rounded-lg bg-gray-800 px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+            >
+              Add recurring series
+            </button>
+            <button
+              type="button"
+              onClick={jumpToLessonsManager}
+              className="rounded-lg bg-blue-600 px-3 py-2 text-left text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Edit public lessons section
+            </button>
+          </div>
+          <p className="mt-3 text-xs text-gray-400">
+            Use the yellow <strong>Unpublish</strong> action or the status dropdown on any event card to hide it from the public site without losing the record.
+          </p>
+        </section>
       </div>
 
       {listError && (
@@ -5890,11 +6081,9 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                         <div>
                           <h3 className="text-lg font-semibold text-white">Recurring Series Details</h3>
                           <p className="text-sm text-gray-400">Customize the public copy for this series. These fields power the Recurring Events grid on the home page.</p>
-                          {(usingLegacySeriesScheduleFallback || usingLegacySeriesSummaryFallback) ? (
-                            <p className="mt-2 text-xs text-blue-200">
-                              This series is currently using legacy default recurring copy on the public page. Type in the fields below to replace that fallback without changing code.
-                            </p>
-                          ) : null}
+                          <p className="mt-2 text-xs text-blue-200">
+                            Keep these filled in if you want a specific schedule line or summary on the public recurring cards. If you leave them blank, the site will use the saved event description and recurrence settings instead.
+                          </p>
                         </div>
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                           <div>
@@ -5904,12 +6093,10 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                               value={formData.series_schedule_label}
                               onChange={handleChange}
                               className="w-full rounded bg-gray-800 px-4 py-2 text-white"
-                              placeholder={legacyRecurringSeriesOverride?.schedule || 'e.g., Thursdays · 6:00 – 10:00 PM'}
+                              placeholder="e.g., Thursdays · 6:00 – 10:00 PM"
                             />
                             <p className="mt-1 text-xs text-gray-400">
-                              {usingLegacySeriesScheduleFallback
-                                ? `Current legacy default: ${legacyRecurringSeriesOverride.schedule}. Enter text here to override it.`
-                                : 'Shown beneath the “Typical schedule” heading.'}
+                              Shown beneath the “Typical schedule” heading on the public recurring card.
                             </p>
                           </div>
                           <div>
@@ -5920,12 +6107,10 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                               onChange={handleChange}
                               rows="3"
                               className="w-full rounded bg-gray-800 px-4 py-2 text-white"
-                              placeholder={legacyRecurringSeriesOverride?.summary || 'One-line overview that appears near the title.'}
+                              placeholder="One-line overview that appears near the title."
                             />
                             <p className="mt-1 text-xs text-gray-400">
-                              {usingLegacySeriesSummaryFallback
-                                ? `Current legacy default: ${legacyRecurringSeriesOverride.summary}. Enter text here to override it.`
-                                : 'Shown near the title on the recurring card.'}
+                              Shown near the title on the recurring card.
                             </p>
                           </div>
                         </div>

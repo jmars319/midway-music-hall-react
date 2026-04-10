@@ -5,7 +5,19 @@ import { formatPhoneHref, CONTACT_LINK_CLASSES } from '../utils/contactLinks';
 
 export default function LessonsSection() {
   const siteContent = useSiteContent();
-  const lessons = siteContent.lessons || [];
+  const lessons = Array.isArray(siteContent.lessons)
+    ? siteContent.lessons.filter((lesson) => (
+      String(lesson?.title || '').trim()
+      || String(lesson?.schedule || '').trim()
+      || String(lesson?.price || '').trim()
+      || String(lesson?.instructor || '').trim()
+    ))
+    : [];
+
+  if (!lessons.length) {
+    return null;
+  }
+
   return (
     <section className="py-12 bg-gray-900 border-t border-b border-purple-500/20" id="lessons">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

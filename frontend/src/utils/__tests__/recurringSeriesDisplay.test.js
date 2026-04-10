@@ -3,7 +3,6 @@ import {
   deriveRecurringSeriesSummary,
   formatRecurringOccurrenceDateLabel,
   formatRecurringOccurrenceTimeLabel,
-  getLegacyRecurringSeriesOverride,
   resolveRecurringSeriesDisplayOccurrences,
 } from '../recurringSeriesDisplay';
 
@@ -36,23 +35,18 @@ describe('recurringSeriesDisplay', () => {
     expect(label).toBe('Second Sunday each month · 2:00 PM');
   });
 
-  test('uses neutral recurring summary overrides instead of stale day-specific copy', () => {
+  test('uses saved recurring copy fields before falling back to generic content', () => {
     const summary = deriveRecurringSeriesSummary({
-      title: "Friday Night Dance with DJ Dancin' Dan",
+      series_summary: 'Open dance floor with rotating instructors.',
     });
 
-    expect(summary).toBe('Dance party with Dancin’ Dan.');
-    expect(summary.toLowerCase()).not.toContain('friday');
+    expect(summary).toBe('Open dance floor with rotating instructors.');
   });
 
-  test('exposes legacy recurring defaults so admin can override them', () => {
-    expect(getLegacyRecurringSeriesOverride({
-      title: "Friday Night Dance with DJ Dancin' Dan",
-    })).toEqual(expect.objectContaining({
-      key: 'dj-dan',
-      schedule: 'Recurring dance party · 6:00 – 10:00 PM',
-      summary: 'Dance party with Dancin’ Dan.',
-    }));
+  test('falls back to description when no custom recurring summary is saved', () => {
+    expect(deriveRecurringSeriesSummary({
+      description: 'Open community jam hosted by local musicians.',
+    })).toBe('Open community jam hosted by local musicians.');
   });
 
   test('formats date-only occurrences without shifting the weekday backward', () => {

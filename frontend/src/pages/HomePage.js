@@ -19,7 +19,6 @@ import { getEventAnchorId, getEventEndDate, getEventStartDate } from '../utils/e
 import { getEventMinimumPrice } from '../utils/eventPricing';
 import { resolveEventImageUrl } from '../utils/imageVariants';
 import {
-  MANUAL_RECURRING_OVERRIDES,
   deriveRecurringSeriesFooterNote,
   deriveRecurringSeriesScheduleLabel,
   deriveRecurringSeriesSummary,
@@ -260,36 +259,55 @@ const buildRecurringSeries = (masters, occurrences, now) => {
   return series.filter((item) => item.nextOccurrence || item.upcomingOccurrences.length);
 };
 
-const buildManualRecurringSeries = (events, now, existingKeys = new Set()) => MANUAL_RECURRING_OVERRIDES.map((override) => {
-  const key = override.key || normalizeSeriesKey(override.schedule || override.summary || override.match.toString());
-  if (existingKeys.has(key)) {
-    return null;
-  }
-  const matched = events.filter((event) => override.match.test(event.title || event.artist_name || ''));
-  if (!matched.length) {
-    return null;
-  }
-  const upcoming = matched.filter((event) => {
-    const dt = getEventDateValue(event);
-    return dt && dt >= now;
-  }).sort((a, b) => {
-    const aDate = getEventDateValue(a);
-    const bDate = getEventDateValue(b);
-    return (aDate?.getTime() || 0) - (bDate?.getTime() || 0);
+const buildRecurringCategoryFallbackSeries = (events, now, existingKeys = new Set()) => {
+  const recurringSingles = events.filter((event) => {
+    const categorySlug = (event.category_slug || '').toLowerCase();
+    const hasSeriesDisplayCopy = Boolean(
+      String(event.series_schedule_label || '').trim()
+      || String(event.series_summary || '').trim()
+      || String(event.series_footer_note || '').trim()
+    );
+    return categorySlug === 'recurring' || hasSeriesDisplayCopy;
   });
-  const nextOccurrence = upcoming[0] || null;
-  return {
-    key,
-    master: matched[0],
-    nextOccurrence,
-    upcomingOccurrences: upcoming.slice(0, 6),
-    happeningThisWeek: nextOccurrence ? sameWeek(getEventDateValue(nextOccurrence), now) : false,
-    summary: override.summary,
-    scheduleLabel: override.schedule,
-    footerNote: null,
-    sourceEventIds: matched.map((event) => event.id).filter(Boolean),
-  };
-}).filter(Boolean);
+
+  const grouped = new Map();
+  recurringSingles.forEach((event) => {
+    const key = normalizeSeriesKey(getSeriesDisplayName(event));
+    if (!grouped.has(key)) {
+      grouped.set(key, []);
+    }
+    grouped.get(key).push(event);
+  });
+
+  return Array.from(grouped.entries()).map(([key, matched]) => {
+    if (existingKeys.has(key) || !matched.length) {
+      return null;
+    }
+    const upcoming = matched.filter((event) => {
+      const dt = getEventDateValue(event);
+      return dt && dt >= now;
+    }).sort((a, b) => {
+      const aDate = getEventDateValue(a);
+      const bDate = getEventDateValue(b);
+      return (aDate?.getTime() || 0) - (bDate?.getTime() || 0);
+    });
+    const representative = upcoming[0] || matched[0];
+    const nextOccurrence = upcoming[0] || null;
+    const customSchedule = String(representative?.series_schedule_label || '').trim();
+    const fallbackTime = nextOccurrence ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(getEventDateValue(nextOccurrence)) : '';
+    return {
+      key,
+      master: representative,
+      nextOccurrence,
+      upcomingOccurrences: upcoming.slice(0, 6),
+      happeningThisWeek: nextOccurrence ? sameWeek(getEventDateValue(nextOccurrence), now) : false,
+      summary: deriveRecurringSeriesSummary(representative || {}),
+      scheduleLabel: customSchedule || (fallbackTime ? `Recurring dates · ${fallbackTime}` : 'Recurring schedule'),
+      footerNote: deriveRecurringSeriesFooterNote(representative || {}),
+      sourceEventIds: matched.map((event) => event.id).filter(Boolean),
+    };
+  }).filter((item) => item && (item.nextOccurrence || item.upcomingOccurrences.length));
+};
 
 const DEV_MODE = process.env.NODE_ENV !== 'production';
 let hasLoggedRecurringWarning = false;
@@ -327,11 +345,10 @@ const transformEvents = (events) => {
 
   const recurringSeriesBase = buildRecurringSeries(masters, decoratedOccurrences, startOfToday);
   const existingRecurringKeys = new Set(recurringSeriesBase.map((series) => series.key));
-  const recurringCandidates = decoratedSingles;
-  const manualRecurring = buildManualRecurringSeries(recurringCandidates, startOfToday, existingRecurringKeys);
-  const recurringSeries = [...recurringSeriesBase, ...manualRecurring];
+  const recurringFallbackSeries = buildRecurringCategoryFallbackSeries(decoratedSingles, startOfToday, existingRecurringKeys);
+  const recurringSeries = [...recurringSeriesBase, ...recurringFallbackSeries];
   const recurringEventIds = new Set(
-    manualRecurring.flatMap((series) => series.sourceEventIds || []),
+    recurringFallbackSeries.flatMap((series) => series.sourceEventIds || []),
   );
 
   const sortedSingles = decoratedSingles
@@ -357,9 +374,8 @@ const transformEvents = (events) => {
     console.warn('Recurring events section has no entries.', {
       totalFetched: events.length,
       singlesConsidered: decoratedSingles.length,
-      recurrenceCandidates: recurringCandidates.length,
       automaticSeries: recurringSeriesBase.length,
-      manualSeries: manualRecurring.length,
+      fallbackSeries: recurringFallbackSeries.length,
     });
   }
   if (DEV_MODE && !beachEvents.length && beachEligibleEvents.length > 0 && !hasLoggedBeachWarning) {
