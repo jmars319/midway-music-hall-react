@@ -62,6 +62,10 @@ if ! grep -q "'/recurring': 'recurring-events'" "$ROOT_DIR/frontend/src/App.js";
   log_error "[public-surface] App.js is missing direct /recurring route handling"
   exit 1
 fi
+if ! grep -q 'requestedSection={sectionRouteTarget}' "$ROOT_DIR/frontend/src/App.js"; then
+  log_error "[public-surface] App.js is not passing the direct section target into HomePage"
+  exit 1
+fi
 if ! grep -q 'return <NotFoundPage' "$ROOT_DIR/frontend/src/App.js"; then
   log_error "[public-surface] App.js is missing branded not-found route handling"
   exit 1
@@ -112,6 +116,14 @@ if ! grep -q 'BrandImage' "$ROOT_DIR/frontend/src/components/BrandedStatusPage.j
 fi
 if ! grep -q 'We couldn’t find that page\.' "$ROOT_DIR/frontend/src/pages/NotFoundPage.js"; then
   log_error "[public-surface] branded React not-found page copy is missing"
+  exit 1
+fi
+if ! grep -q 'Lessons are not currently published\.' "$ROOT_DIR/frontend/src/pages/HomePage.js"; then
+  log_error "[public-surface] HomePage is missing branded lessons-unavailable direct-route handling"
+  exit 1
+fi
+if ! grep -q 'Recurring events are not currently published\.' "$ROOT_DIR/frontend/src/pages/HomePage.js"; then
+  log_error "[public-surface] HomePage is missing branded recurring-unavailable direct-route handling"
   exit 1
 fi
 if ! grep -q "badge: 'Access denied'" "$ROOT_DIR/frontend/src/pages/SiteStatusPage.js"; then

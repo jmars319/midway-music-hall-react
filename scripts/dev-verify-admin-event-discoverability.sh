@@ -56,6 +56,10 @@ if ! grep -q "buildRecurringCategoryFallbackSeries" "$ROOT_DIR/frontend/src/page
   fail "HomePage.js is missing the generic recurring fallback grouping"
 fi
 
+if grep -q "BEACH_SERIES_LINEUP" "$ROOT_DIR/frontend/src/pages/HomePage.js"; then
+  fail "HomePage.js still contains hardcoded Beach Series act names"
+fi
+
 if ! grep -q "lessons: \\[\\]" "$ROOT_DIR/frontend/src/hooks/useSiteContent.js"; then
   fail "useSiteContent still seeds lessons with hardcoded defaults"
 fi
@@ -72,6 +76,18 @@ fi
 
 if ! grep -q "Unpublish this event before deleting it" "$ROOT_DIR/frontend/src/admin/EventsModule.js"; then
   fail "EventsModule is missing the published-event delete safety guard"
+fi
+
+if ! grep -q "Delete Series" "$ROOT_DIR/frontend/src/admin/EventsModule.js"; then
+  fail "EventsModule is missing the recurring series delete action"
+fi
+
+if ! grep -q "/events/\\\${master.id}/series" "$ROOT_DIR/frontend/src/admin/EventsModule.js"; then
+  fail "EventsModule is not wired to the recurring series delete endpoint"
+fi
+
+if ! grep -q "DELETE', '/api/events/:id/series'" "$ROOT_DIR/backend/index.php"; then
+  fail "backend is missing the recurring series delete endpoint"
 fi
 
 log "[admin-event-discoverability] verification succeeded"

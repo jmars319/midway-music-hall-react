@@ -26,6 +26,7 @@ scripts=(
   ./scripts/dev-verify-recurring-homepage.sh
   ./scripts/dev-verify-recurring-events-api.sh
   ./scripts/dev-verify-recurring-backcompat.sh
+  ./scripts/dev-verify-recurring-series-delete.sh
   ./scripts/dev-verify-admin-event-discoverability.sh
   ./scripts/dev-verify-event-images.sh
   ./scripts/dev-verify-public-surface.sh
