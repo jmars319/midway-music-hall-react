@@ -423,7 +423,7 @@ export default function SiteContentModule() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">Site Content & Lessons</h1>
+          <h1 className="text-2xl font-bold">Site Content</h1>
           <p className="text-sm text-gray-400">Update contact info, policies, lessons, and map details shown on the public site.</p>
         </div>
         <button
@@ -453,9 +453,9 @@ export default function SiteContentModule() {
       ) : (
         <form onSubmit={handleSave} className="space-y-5 pb-4">
           <div className="rounded-xl border border-purple-500/30 bg-purple-900/20 px-4 py-3 text-sm text-purple-100">
-            <p className="font-semibold text-white">Public lessons are edited here.</p>
+            <p className="font-semibold text-white">Lessons are edited here.</p>
             <p className="mt-1 text-purple-100/90">
-              If a client asks to update the Lessons section on the homepage, use the <strong>Weekly Lessons &amp; Classes</strong> section below instead of the Events list.
+              Lessons are site content, not event records. If you came here from the Events module, use the <strong>Lessons</strong> section below instead of the Events list.
             </p>
           </div>
           <div className="flex flex-wrap justify-end gap-2">
@@ -889,15 +889,15 @@ export default function SiteContentModule() {
 
           <AdminCollapsibleSection
             id="site-content-lessons"
-            title="Weekly Lessons & Classes"
-            description="Shown in the Lessons section. Leave blank if not offered."
+            title="Lessons"
+            description="Shown in the public Lessons section. Leave blank if not offered."
             summary={sectionSummaries.lessons}
             isCollapsed={Boolean(collapsedSections.lessons)}
             onToggle={() => toggleSection('lessons')}
           >
             <div className="sr-only">
-              <h2 className="text-xl font-semibold text-white">Weekly lessons & classes</h2>
-              <p className="text-sm text-gray-400">Shown in the Lessons section. Leave blank if not offered.</p>
+              <h2 className="text-xl font-semibold text-white">Lessons</h2>
+              <p className="text-sm text-gray-400">Shown in the public Lessons section. Leave blank if not offered.</p>
             </div>
             <div className="space-y-4">
               {lessons.map((lesson, index) => (

@@ -3162,6 +3162,29 @@ function square_provider_is_configured(): bool
         && resolve_square_location_id() !== null;
 }
 
+function square_admin_status(): array
+{
+    $accessTokenConfigured = resolve_square_access_token() !== null;
+    $locationIdConfigured = resolve_square_location_id() !== null;
+    $redirectUrlConfigured = resolve_square_checkout_redirect_url() !== null;
+    $webhookSignatureConfigured = resolve_square_webhook_signature_key() !== null;
+    $webhookNotificationConfigured = resolve_square_webhook_notification_url() !== null;
+    $paymentStartReady = $accessTokenConfigured && $locationIdConfigured;
+    $webhookReady = $webhookSignatureConfigured && $webhookNotificationConfigured;
+
+    return [
+        'environment' => resolve_square_environment(),
+        'access_token_configured' => $accessTokenConfigured,
+        'location_id_configured' => $locationIdConfigured,
+        'redirect_url_configured' => $redirectUrlConfigured,
+        'webhook_signature_key_configured' => $webhookSignatureConfigured,
+        'webhook_notification_url_configured' => $webhookNotificationConfigured,
+        'payment_start_ready' => $paymentStartReady,
+        'webhook_ready' => $webhookReady,
+        'ready_to_enable' => $paymentStartReady && $webhookReady,
+    ];
+}
+
 function square_extract_error_message(array $payload, string $fallback = 'Square request failed'): string
 {
     $errors = $payload['errors'] ?? null;
@@ -7197,6 +7220,7 @@ $router->add('GET', '/api/admin/payment-settings', function () {
                 'paypal_currency' => payment_settings_table_has_column($pdo, 'paypal_currency'),
                 'paypal_enable_venmo' => payment_settings_table_has_column($pdo, 'paypal_enable_venmo'),
                 'paypal_orders_scaffold' => true,
+                'square_status' => square_admin_status(),
             ],
         ]);
     } catch (Throwable $e) {

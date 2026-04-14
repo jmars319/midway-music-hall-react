@@ -15,6 +15,14 @@ const normalizeProviderType = (value) => {
   return 'external_link';
 };
 
+const isLegacyPaypalProvider = (value) => value === 'paypal_hosted_button' || value === 'paypal_orders';
+
+const legacyProviderLabel = (value) => {
+  if (value === 'paypal_hosted_button') return 'Legacy PayPal button configuration';
+  if (value === 'paypal_orders') return 'Legacy PayPal order configuration';
+  return 'Legacy provider';
+};
+
 const normalizeSetting = (setting = {}, scope = 'category', category = null) => {
   const limit = Number(setting.limit_seats) > 0 ? Number(setting.limit_seats) : DEFAULT_LIMIT;
   const providerType = normalizeProviderType(setting.provider_type);
@@ -144,10 +152,19 @@ export default function PaymentSettingsModule(){
   };
 
   const isProviderTypeAvailable = capabilities.provider_type !== false;
-  const isPaypalModeAvailable =
-    capabilities.paypal_hosted_button_id !== false &&
-    capabilities.paypal_currency !== false &&
-    capabilities.paypal_enable_venmo !== false;
+  const isSquareProviderAvailable = isProviderTypeAvailable && capabilities.provider_type_square !== false;
+  const squareStatus = capabilities.square_status || {};
+  const squareChecklist = useMemo(() => ([
+    { key: 'access_token_configured', label: 'Access token' },
+    { key: 'location_id_configured', label: 'Location ID' },
+    { key: 'redirect_url_configured', label: 'Return URL' },
+    { key: 'webhook_signature_key_configured', label: 'Webhook signature key' },
+    { key: 'webhook_notification_url_configured', label: 'Webhook URL' },
+  ]), []);
+  const missingSquareItems = squareChecklist
+    .filter((item) => !squareStatus[item.key])
+    .map((item) => item.label);
+
   const handleSave = async (key) => {
     const config = formState[key];
     if (!config) return;
@@ -243,7 +260,7 @@ export default function PaymentSettingsModule(){
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold">Payment Settings</h1>
-          <p className="text-sm text-gray-400">Configure optional payment methods shown after seat selection.</p>
+          <p className="text-sm text-gray-400">Configure the post-submit payment option shown after a guest submits a seat request.</p>
         </div>
         <button
           type="button"
@@ -272,9 +289,60 @@ export default function PaymentSettingsModule(){
         <div className="py-10 text-center text-gray-400">Loading payment configuration…</div>
       ) : (
         <div className="space-y-6">
-          {(!isProviderTypeAvailable || !isPaypalModeAvailable) && (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-900/15 px-5 py-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-white">Square readiness</h2>
+                <p className="mt-1 text-sm text-gray-300">
+                  Square is the primary online payment path for this build. Square secrets stay in backend environment settings, not in this admin form.
+                </p>
+              </div>
+              <div className={`rounded-md px-3 py-2 text-sm font-semibold ${
+                squareStatus.ready_to_enable
+                  ? 'bg-emerald-500/20 text-emerald-100 border border-emerald-400/40'
+                  : 'bg-amber-500/15 text-amber-100 border border-amber-400/40'
+              }`}>
+                {squareStatus.ready_to_enable ? 'Ready to enable' : 'Not ready to enable'}
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-lg border border-gray-700 bg-gray-900/60 px-3 py-3">
+                <p className="text-xs uppercase tracking-wide text-gray-500">Environment</p>
+                <p className="mt-1 text-sm font-semibold text-white">{squareStatus.environment || 'sandbox'}</p>
+              </div>
+              <div className="rounded-lg border border-gray-700 bg-gray-900/60 px-3 py-3">
+                <p className="text-xs uppercase tracking-wide text-gray-500">Payment start</p>
+                <p className="mt-1 text-sm font-semibold text-white">{squareStatus.payment_start_ready ? 'Configured' : 'Missing required env'}</p>
+              </div>
+              <div className="rounded-lg border border-gray-700 bg-gray-900/60 px-3 py-3">
+                <p className="text-xs uppercase tracking-wide text-gray-500">Webhook</p>
+                <p className="mt-1 text-sm font-semibold text-white">{squareStatus.webhook_ready ? 'Configured' : 'Missing required env'}</p>
+              </div>
+            </div>
+            <div className="mt-4">
+              {missingSquareItems.length ? (
+                <>
+                  <p className="text-sm font-semibold text-amber-100">Still needed before Square should be enabled:</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-300">
+                    {missingSquareItems.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="text-sm text-emerald-100">
+                  Square payment start and webhook settings are present. Admins can safely enable Square where needed.
+                </p>
+              )}
+              <p className="mt-3 text-xs text-gray-400">
+                Required backend keys: <code className="rounded bg-black/30 px-1">SQUARE_ACCESS_TOKEN</code>, <code className="rounded bg-black/30 px-1">SQUARE_LOCATION_ID</code>, <code className="rounded bg-black/30 px-1">SQUARE_WEBHOOK_SIGNATURE_KEY</code>, <code className="rounded bg-black/30 px-1">SQUARE_WEBHOOK_NOTIFICATION_URL</code>. Recommended: <code className="rounded bg-black/30 px-1">SQUARE_CHECKOUT_REDIRECT_URL</code>.
+              </p>
+            </div>
+          </div>
+
+          {!isSquareProviderAvailable && (
             <div className="rounded-md border border-amber-500/40 bg-amber-900/20 px-4 py-3 text-sm text-amber-200">
-              Some PayPal fields are unavailable in this database schema. Run the latest schema migration to enable hosted button settings.
+              Square provider support is not available in this database schema yet. Run <code className="rounded bg-black/30 px-1">database/20251212_schema_upgrade.sql</code>.
             </div>
           )}
           {configList.map(({ key, data }) => (
@@ -299,13 +367,13 @@ export default function PaymentSettingsModule(){
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm text-gray-300 mb-1">Provider label</label>
+                  <label className="block text-sm text-gray-300 mb-1">Display label</label>
                   <input
                     type="text"
                     className="w-full rounded bg-gray-800 border border-gray-700 px-3 py-2 text-white"
                     value={data.provider_label}
                     onChange={(e) => updateField(key, 'provider_label', e.target.value)}
-                    placeholder="PayPal, Square, etc."
+                    placeholder={data.provider_type === 'square' ? 'Square' : 'Pay Online'}
                     disabled={savingKey === key}
                   />
                 </div>
@@ -317,10 +385,11 @@ export default function PaymentSettingsModule(){
                     onChange={(e) => updateField(key, 'provider_type', e.target.value)}
                     disabled={savingKey === key || !isProviderTypeAvailable}
                   >
-                    <option value="external_link">External link</option>
-                    <option value="square">Square hosted checkout</option>
-                    <option value="paypal_hosted_button" disabled={!isPaypalModeAvailable}>PayPal hosted button</option>
-                    <option value="paypal_orders">PayPal Orders (scaffold)</option>
+                    {isLegacyPaypalProvider(data.provider_type) && (
+                      <option value={data.provider_type}>{legacyProviderLabel(data.provider_type)}</option>
+                    )}
+                    <option value="square" disabled={!isSquareProviderAvailable}>Square hosted checkout</option>
+                    <option value="external_link">External payment link</option>
                   </select>
                 </div>
                 <div>
@@ -347,61 +416,22 @@ export default function PaymentSettingsModule(){
                       disabled={savingKey === key}
                     />
                   </div>
-                ) : data.provider_type === 'paypal_hosted_button' ? (
-                  <>
-                    <div>
-                      <label className="block text-sm text-gray-300 mb-1">PayPal Hosted Button ID</label>
-                      <input
-                        type="text"
-                        className="w-full rounded bg-gray-800 border border-gray-700 px-3 py-2 text-white"
-                        value={data.paypal_hosted_button_id}
-                        onChange={(e) => updateField(key, 'paypal_hosted_button_id', e.target.value.replace(/[^A-Za-z0-9]/g, ''))}
-                        placeholder="U7GKCHLN5VH66"
-                        disabled={savingKey === key}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-gray-300 mb-1">Currency</label>
-                      <input
-                        type="text"
-                        className="w-full rounded bg-gray-800 border border-gray-700 px-3 py-2 text-white uppercase"
-                        value={data.paypal_currency}
-                        onChange={(e) => updateField(key, 'paypal_currency', e.target.value.toUpperCase())}
-                        placeholder="USD"
-                        maxLength={8}
-                        disabled={savingKey === key}
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="inline-flex items-center gap-2 text-sm text-gray-200">
-                        <input
-                          type="checkbox"
-                          className="rounded bg-gray-700"
-                          checked={Boolean(data.paypal_enable_venmo)}
-                          onChange={(e) => updateField(key, 'paypal_enable_venmo', e.target.checked)}
-                          disabled={savingKey === key}
-                        />
-                        <span>Enable Venmo in PayPal SDK</span>
-                      </label>
-                    </div>
-                    {data.scope === 'global' && (
-                      <div className="md:col-span-2 text-xs text-gray-400">
-                        PayPal SDK client ID is sourced from backend environment (`PAYPAL_SDK_CLIENT_ID`).
-                      </div>
-                    )}
-                  </>
                 ) : data.provider_type === 'square' ? (
                   <div className="md:col-span-2 rounded-md border border-emerald-500/40 bg-emerald-900/20 px-3 py-3 text-sm text-emerald-100">
-                    Square checkout uses backend-authoritative seat request totals after the guest submits the request. Configure the Square backend environment values before enabling this provider.
+                    Square checkout starts only after a guest submits a seat request, and it always uses backend-authoritative totals. No Square secrets or URLs are edited here.
+                  </div>
+                ) : isLegacyPaypalProvider(data.provider_type) ? (
+                  <div className="md:col-span-2 rounded-md border border-amber-500/40 bg-amber-900/20 px-3 py-3 text-sm text-amber-100">
+                    This setting is still using a legacy PayPal configuration. Switch it to <strong>Square hosted checkout</strong> or <strong>External payment link</strong> and save when you are ready to replace it.
                   </div>
                 ) : (
-                  <div className="md:col-span-2 rounded-md border border-indigo-500/40 bg-indigo-900/20 px-3 py-3 text-sm text-indigo-100">
-                    PayPal Orders is scaffolded only in this phase. Customer-facing payment capture is not enabled yet.
+                  <div className="md:col-span-2 rounded-md border border-blue-500/40 bg-blue-900/20 px-3 py-3 text-sm text-blue-100">
+                    Use an external link only for manual or legacy payment flows. Square is the recommended option for dynamic request-based payment.
                   </div>
                 )}
 
                 <div>
-                  <label className="block text-sm text-gray-300 mb-1">Seat limit for payment link</label>
+                  <label className="block text-sm text-gray-300 mb-1">Seat limit for online payment</label>
                   <input
                     type="number"
                     min={1}
@@ -410,7 +440,7 @@ export default function PaymentSettingsModule(){
                     onChange={(e) => updateField(key, 'limit_seats', e.target.value)}
                     disabled={savingKey === key}
                   />
-                  <p className="text-xs text-gray-500 mt-1">Payment button hides when selection exceeds this count.</p>
+                  <p className="text-xs text-gray-500 mt-1">The pay-now action hides when a guest selects more seats than this limit.</p>
                 </div>
                 <div>
                   <label className="block text-sm text-gray-300 mb-1">Fine print (optional)</label>

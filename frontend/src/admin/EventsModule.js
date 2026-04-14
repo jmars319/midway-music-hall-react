@@ -4688,11 +4688,14 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
               onClick={jumpToLessonsManager}
               className="rounded-lg bg-blue-600 px-3 py-2 text-left text-sm font-semibold text-white hover:bg-blue-700"
             >
-              Edit public lessons section
+              Open lessons editor
             </button>
           </div>
           <p className="mt-3 text-xs text-gray-400">
             Use the yellow <strong>Unpublish</strong> action or the status dropdown on any event card to hide it from the public site without losing the record.
+          </p>
+          <p className="mt-2 text-xs text-gray-400">
+            Lessons are managed under <strong>Site Content</strong>. They are not edited as event records in this module.
           </p>
         </section>
       </div>
