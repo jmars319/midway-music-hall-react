@@ -352,6 +352,7 @@ export default function App() {
     <HomePage
       onAdminClick={navigateToAdmin}
       onNavigate={handleNavigate}
+      requestedSection={sectionRouteTarget}
     />
   );
 }

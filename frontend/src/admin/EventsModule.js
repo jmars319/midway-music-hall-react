@@ -2554,6 +2554,15 @@ export default function EventsModule({ onNavigate = () => {} }){
             >
               Edit Series
             </button>
+            {!masterPublished && (
+              <button
+                type="button"
+                onClick={() => deleteRecurringSeries(seriesItem)}
+                className="px-3 py-2 rounded border border-red-500/40 bg-gray-950 text-red-200 text-sm hover:bg-red-950/40"
+              >
+                Delete Series
+              </button>
+            )}
           </div>
         </div>
         <div className="mt-4 p-3 rounded-lg border border-gray-800 bg-gray-950/60 text-sm text-gray-200">
@@ -4385,6 +4394,36 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
     } catch (err) {
       console.error('Delete event error', err);
       alert(err instanceof Error ? err.message : 'Failed to delete event');
+      return false;
+    }
+  };
+
+  const deleteRecurringSeries = async (seriesItem) => {
+    const master = seriesItem?.master || {};
+    const eventTitle = master.artist_name || master.title || 'this recurring series';
+    const masterStatus = normalizeEventStatus(master);
+    const masterArchived = isEventArchived(master);
+    if (masterStatus === 'published' && !masterArchived) {
+      alert('Unpublish this recurring series before deleting it.');
+      return false;
+    }
+    if (!window.confirm(`Delete "${eventTitle}" and its generated dates from the admin list? This should only be used when the series is no longer needed.`)) {
+      return false;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/events/${master.id}/series`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || 'Failed to delete recurring series');
+      }
+      fetchEvents();
+      if (editing?.id === master.id) {
+        setShowForm(false);
+      }
+      return true;
+    } catch (err) {
+      console.error('Delete recurring series error', err);
+      alert(err instanceof Error ? err.message : 'Failed to delete recurring series');
       return false;
     }
   };

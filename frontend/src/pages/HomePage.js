@@ -5,7 +5,7 @@ import AnnouncementPopup from '../components/AnnouncementPopup';
 import Hero from '../components/Hero';
 import FeaturedEvents from '../components/FeaturedEvents';
 import RecurringEvents from '../components/RecurringEvents';
-import LessonsSection from '../components/LessonsSection';
+import LessonsSection, { getRenderableLessons } from '../components/LessonsSection';
 import BeachSeriesShowcase from '../components/BeachSeriesShowcase';
 import FirstTimeHere from '../components/FirstTimeHere';
 import Schedule from '../components/Schedule';
@@ -24,6 +24,8 @@ import {
   deriveRecurringSeriesSummary,
   resolveRecurringSeriesDisplayOccurrences,
 } from '../utils/recurringSeriesDisplay';
+import { useSiteContentState } from '../hooks/useSiteContent';
+import NotFoundPage from './NotFoundPage';
 
 const SITE_BASE_URL = 'https://midwaymusichall.net';
 
@@ -43,16 +45,6 @@ const parseTags = (value) => {
 
 const BEACH_SERIES_TAGS = ['beach_music', 'beach_series', 'carolina_beach_music_series', 'beach_band'];
 const BEACH_SERIES_PHRASES = ['carolina beach music series', 'beach music series'];
-const BEACH_SERIES_LINEUP = [
-  'the embers',
-  'special occasion band',
-  'gary lowder and smokin hot',
-  'the entertainers',
-  'the catalinas',
-  'jim quick and coastline',
-  'too much sylvia',
-  'band of oz',
-];
 
 const normalizeLower = (value) => {
   if (typeof value === 'string') {
@@ -82,10 +74,11 @@ const isBeachSeriesEvent = (event = {}) => {
   if (tags.some((tag) => BEACH_SERIES_TAGS.includes(tag))) {
     return true;
   }
+  if (hasBeachSeriesPhrase(event.category_name)) return true;
   if (hasBeachSeriesPhrase(event.venue_section)) return true;
   if (hasBeachSeriesPhrase(event.series_name) || hasBeachSeriesPhrase(event.series_label)) return true;
   if (hasBeachSeriesPhrase(event.notes)) return true;
-  if (BEACH_SERIES_LINEUP.some((name) => title.includes(name))) return true;
+  if (hasBeachSeriesPhrase(event.description)) return true;
   return false;
 };
 
@@ -396,10 +389,11 @@ const transformEvents = (events) => {
   };
 };
 
-export default function HomePage({ onAdminClick, onNavigate }) {
+export default function HomePage({ onAdminClick, onNavigate, requestedSection = null }) {
   const [events, setEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [eventsError, setEventsError] = useState('');
+  const { content: siteContent, loaded: siteContentLoaded } = useSiteContentState();
 
   useEffect(() => {
     let isMounted = true;
@@ -461,6 +455,7 @@ export default function HomePage({ onAdminClick, onNavigate }) {
     () => transformEvents(events),
     [events]
   );
+  const lessons = useMemo(() => getRenderableLessons(siteContent.lessons), [siteContent.lessons]);
   const eventSchema = useMemo(() => {
     const baseUrl = SITE_BASE_URL;
     const graph = mainEvents.slice(0, 8).map((event) => {
@@ -522,7 +517,40 @@ export default function HomePage({ onAdminClick, onNavigate }) {
       '@graph': graph,
     };
   }, [mainEvents]);
+  const missingLessonsSection = requestedSection === 'lessons' && siteContentLoaded && lessons.length === 0;
+  const missingRecurringSection = requestedSection === 'recurring-events' && !loadingEvents && !eventsError && recurringSeries.length === 0;
 
+  if (missingLessonsSection) {
+    return (
+      <NotFoundPage
+        onAdminClick={onAdminClick}
+        badge="Lessons unavailable"
+        title="Lessons are not currently published."
+        body="The lessons section is currently empty or has been removed from the public site."
+        supportPoints={[
+          'You are still on an official Midway Music Hall page.',
+          'Go back if you followed an outdated lessons link.',
+          'Return home to browse currently published events and venue information.',
+        ]}
+      />
+    );
+  }
+
+  if (missingRecurringSection) {
+    return (
+      <NotFoundPage
+        onAdminClick={onAdminClick}
+        badge="Recurring series unavailable"
+        title="Recurring events are not currently published."
+        body="This recurring section does not have any active public series to show right now."
+        supportPoints={[
+          'You are still on an official Midway Music Hall page.',
+          'Go back if you followed an outdated recurring-events link.',
+          'Return home to browse currently published shows and venue updates.',
+        ]}
+      />
+    );
+  }
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <Navigation />

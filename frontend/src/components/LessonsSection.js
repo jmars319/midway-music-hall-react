@@ -3,16 +3,20 @@ import { Phone } from 'lucide-react';
 import useSiteContent from '../hooks/useSiteContent';
 import { formatPhoneHref, CONTACT_LINK_CLASSES } from '../utils/contactLinks';
 
-export default function LessonsSection() {
-  const siteContent = useSiteContent();
-  const lessons = Array.isArray(siteContent.lessons)
-    ? siteContent.lessons.filter((lesson) => (
+export const getRenderableLessons = (lessons) => (
+  Array.isArray(lessons)
+    ? lessons.filter((lesson) => (
       String(lesson?.title || '').trim()
       || String(lesson?.schedule || '').trim()
       || String(lesson?.price || '').trim()
       || String(lesson?.instructor || '').trim()
     ))
-    : [];
+    : []
+);
+
+export default function LessonsSection() {
+  const siteContent = useSiteContent();
+  const lessons = getRenderableLessons(siteContent.lessons);
 
   if (!lessons.length) {
     return null;

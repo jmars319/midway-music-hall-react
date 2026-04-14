@@ -2835,6 +2835,31 @@ function soft_archive_recurrence_child(PDO $pdo, int $childId): void
     ]);
 }
 
+function soft_delete_event_record(PDO $pdo, int $eventId, string $actor = 'api', string $changeNote = 'deleted via API'): void
+{
+    $stmt = $pdo->prepare('UPDATE events SET deleted_at = NOW(), status = ?, visibility = ?, updated_by = ?, change_note = ? WHERE id = ?');
+    $stmt->execute([
+        'archived',
+        'private',
+        $actor,
+        $changeNote,
+        $eventId,
+    ]);
+}
+
+function recurring_series_has_any_seat_requests(PDO $pdo, int $masterId): bool
+{
+    $stmt = $pdo->prepare('
+        SELECT 1
+        FROM seat_requests sr
+        JOIN events e ON e.id = sr.event_id
+        WHERE e.id = ? OR e.series_master_id = ?
+        LIMIT 1
+    ');
+    $stmt->execute([$masterId, $masterId]);
+    return (bool) $stmt->fetchColumn();
+}
+
 function sync_generated_recurrence_children(PDO $pdo, int $masterId, array $recurrence, ?int $recurrenceId = null, ?array $exceptions = null): array
 {
     if (empty($recurrence['enabled'])) {
@@ -8577,6 +8602,82 @@ $router->add('DELETE', '/api/events/:id', function (Request $request, $params) {
             error_log('DELETE /api/events/:id error: ' . $e->getMessage());
         }
         Response::error('Failed to delete event', 500);
+    }
+});
+
+$router->add('DELETE', '/api/events/:id/series', function (Request $request, $params) {
+    try {
+        $pdo = Database::connection();
+        $masterId = (int) ($params['id'] ?? 0);
+        if ($masterId <= 0) {
+            return Response::error('Invalid event id', 422);
+        }
+
+        $pdo->beginTransaction();
+        $masterStmt = $pdo->prepare('SELECT * FROM events WHERE id = ? LIMIT 1 FOR UPDATE');
+        $masterStmt->execute([$masterId]);
+        $master = $masterStmt->fetch();
+        if (!$master) {
+            $pdo->rollBack();
+            return Response::error('Recurring series not found', 404);
+        }
+        if (empty($master['is_series_master'])) {
+            $pdo->rollBack();
+            return Response::error('This event is not a recurring series master.', 409);
+        }
+        if (!empty($master['deleted_at'])) {
+            $pdo->rollBack();
+            return Response::error('This recurring series has already been deleted.', 409);
+        }
+        if (
+            strtolower(trim((string) ($master['status'] ?? 'draft'))) === 'published'
+            && strtolower(trim((string) ($master['visibility'] ?? 'private'))) === 'public'
+        ) {
+            $pdo->rollBack();
+            return Response::error('Unpublish this recurring series before deleting it.', 409);
+        }
+        if (recurring_series_has_any_seat_requests($pdo, $masterId)) {
+            $pdo->rollBack();
+            return Response::error('Recurring series with seat requests cannot be deleted. Archive it instead.', 409);
+        }
+
+        $childrenStmt = $pdo->prepare('SELECT id FROM events WHERE series_master_id = ? AND deleted_at IS NULL FOR UPDATE');
+        $childrenStmt->execute([$masterId]);
+        $childIds = array_map('intval', array_column($childrenStmt->fetchAll() ?: [], 'id'));
+
+        $ruleStmt = $pdo->prepare('SELECT id FROM event_recurrence_rules WHERE event_id = ? LIMIT 1');
+        $ruleStmt->execute([$masterId]);
+        $recurrenceId = (int) ($ruleStmt->fetchColumn() ?: 0);
+        if ($recurrenceId > 0) {
+            $deleteExceptions = $pdo->prepare('DELETE FROM event_recurrence_exceptions WHERE recurrence_id = ?');
+            $deleteExceptions->execute([$recurrenceId]);
+            $deleteRule = $pdo->prepare('DELETE FROM event_recurrence_rules WHERE id = ?');
+            $deleteRule->execute([$recurrenceId]);
+        }
+
+        foreach ($childIds as $childId) {
+            soft_delete_event_record($pdo, $childId, 'api', 'deleted via recurring series workflow');
+        }
+        soft_delete_event_record($pdo, $masterId, 'api', 'deleted via recurring series workflow');
+
+        $pdo->commit();
+        record_audit('event.series.delete', 'event', $masterId, [
+            'child_count' => count($childIds),
+            'recurrence_id' => $recurrenceId ?: null,
+        ]);
+        Response::success([
+            'deleted' => true,
+            'series_master_id' => $masterId,
+            'child_count' => count($childIds),
+        ]);
+    } catch (Throwable $e) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        if (APP_DEBUG) {
+            error_log('DELETE /api/events/:id/series error: ' . $e->getMessage());
+        }
+        Response::error('Failed to delete recurring series', 500);
     }
 });
 

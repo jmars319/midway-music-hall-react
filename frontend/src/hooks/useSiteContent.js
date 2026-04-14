@@ -197,8 +197,9 @@ export const invalidateSiteContentCache = () => {
   invalidateBrandingCache();
 };
 
-export default function useSiteContent() {
+export function useSiteContentState() {
   const [content, setContent] = useState(cachedContent || DEFAULT_CONTENT);
+  const [loaded, setLoaded] = useState(Boolean(cachedContent));
   const [, setVersion] = useState(0); // force re-render when cache updates
 
   useEffect(() => {
@@ -209,6 +210,7 @@ export default function useSiteContent() {
       primeBrandingCache(cachedContent?.branding || null);
       persistStoredContent(cachedContent);
       setContent(cachedContent);
+      setLoaded(true);
       setVersion((prev) => prev + 1);
     });
     return () => {
@@ -216,7 +218,11 @@ export default function useSiteContent() {
     };
   }, []);
 
-  return content;
+  return { content, loaded };
+}
+
+export default function useSiteContent() {
+  return useSiteContentState().content;
 }
 
 export { DEFAULT_CONTENT };
