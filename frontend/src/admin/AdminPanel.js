@@ -22,7 +22,7 @@ const MENU = [
   { key: 'events', label: 'Events', comp: EventsModule },
   { key: 'categories', label: 'Event Categories', comp: CategoriesModule },
   { key: 'payment-settings', label: 'Payment Settings', comp: PaymentSettingsModule },
-  { key: 'site-content', label: 'Site Content', comp: SiteContentModule },
+  { key: 'site-content', label: 'Site Content & Lessons', comp: SiteContentModule },
   { key: 'audit-log', label: 'Audit Log', comp: AuditLogModule },
   { key: 'layouts', label: 'Seating Layouts', comp: LayoutsModule },
   { key: 'requests', label: 'Seat Requests', comp: SeatRequestsModule },

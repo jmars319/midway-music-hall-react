@@ -42,27 +42,6 @@ const MONTHLY_ORDINAL_LABELS = Object.fromEntries(
   MONTHLY_ORDINAL_OPTIONS.map((option) => [option.value, option.label]),
 );
 
-export const MANUAL_RECURRING_OVERRIDES = [
-  {
-    key: 'community-jam',
-    match: /jam session/i,
-    schedule: 'Recurring evening jam · 6:00 – 10:00 PM',
-    summary: 'Open community jam hosted by local musicians.',
-  },
-  {
-    key: 'dj-dan',
-    match: /dancin'? dan|friday night dj/i,
-    schedule: 'Recurring dance party · 6:00 – 10:00 PM',
-    summary: 'Dance party with Dancin’ Dan.',
-  },
-  {
-    key: 'cruise-in',
-    match: /cruise in/i,
-    schedule: 'Monthly Cruise-In',
-    summary: 'Classic cars, vendors, and community hangouts.',
-  },
-];
-
 const parseRulePayload = (value) => {
   if (!value) return {};
   if (typeof value === 'object' && !Array.isArray(value)) {
@@ -229,15 +208,9 @@ const buildMonthlyScheduleLabel = (weekdayTokens = [], setposTokens = [], monthd
   return timeLabel ? `${base} · ${timeLabel}` : base;
 };
 
-export const getLegacyRecurringSeriesOverride = (master = {}) => (
-  MANUAL_RECURRING_OVERRIDES.find((item) => item.match.test(master.title || master.artist_name || '')) || null
-);
-
 export const deriveRecurringSeriesSummary = (master = {}) => {
   const customSummary = typeof master.series_summary === 'string' ? master.series_summary.trim() : '';
   if (customSummary) return customSummary;
-  const override = getLegacyRecurringSeriesOverride(master);
-  if (override?.summary) return override.summary;
   if (typeof master.description === 'string' && master.description.trim()) return master.description.trim();
   if (typeof master.notes === 'string' && master.notes.trim()) return master.notes.trim();
   return 'Recurring community series.';

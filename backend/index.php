@@ -10456,37 +10456,8 @@ $router->add('GET', '/api/site-content', function () {
                 'notes' => 'Carolina Beach Music Series bookings.',
             ],
         ];
-        $defaultLessons = [
-            [
-                'id' => 'line-all-levels',
-                'title' => 'Line Dance Lessons - All Skill Levels',
-                'schedule' => 'Mondays · 5:30 – 7:30 PM',
-                'price' => '$7 / person',
-                'instructor' => 'Jackie Phillips',
-                'phone' => '727-776-1555',
-                'description' => 'High-energy session covering foundations plus new choreography each week.',
-            ],
-            [
-                'id' => 'line-seniors',
-                'title' => 'Line Dance Lessons - 55+ Beginner',
-                'schedule' => 'Wednesdays · 11:00 AM – Noon',
-                'price' => '$7 / person',
-                'instructor' => 'Brenda Holcomb',
-                'phone' => '336-816-5544',
-                'description' => 'Gentle pacing for beginners and seniors who want to get comfortable on the floor.',
-            ],
-            [
-                'id' => 'shag-all-levels',
-                'title' => 'Shag Dance Lessons - All Levels',
-                'schedule' => 'Tuesdays · 6:30 PM',
-                'price' => '$12 / person',
-                'instructor' => 'Vickie Chambers',
-                'phone' => '336-989-0156',
-                'description' => 'Classic beach music shag instruction with individualized coaching.',
-            ],
-        ];
         $contacts = decode_settings_json($settings, 'site_contacts_json', $defaultContacts);
-        $lessons = decode_settings_json($settings, 'lessons_json', $defaultLessons);
+        $lessons = decode_settings_json($settings, 'lessons_json', []);
         $business = [
             'name' => $settings['business_name'] ?? 'Midway Music Hall',
             'address' => $settings['business_address'] ?? '11141 Old US Hwy 52, Winston-Salem, NC 27107',

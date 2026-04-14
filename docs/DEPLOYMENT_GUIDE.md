@@ -87,8 +87,14 @@ Square production notes:
 3. Run canonical migrations in this order:
    1. `database/20250326_payment_settings.sql`
    2. `database/20251212_schema_upgrade.sql`
+   3. `database/20260409_content_compatibility_backfill.sql`
 
 The full seed dumps now include `event_occurrences`, but you should still run the canonical migrations after any seed import so older columns, indexes, and compatibility changes stay aligned.
+
+Content compatibility note:
+- `database/20260409_content_compatibility_backfill.sql` is the safe way to preserve legacy recurring homepage card copy and legacy lessons content on older installs that relied on runtime defaults.
+- It only fills missing values. It does not overwrite admin-managed lessons or recurring series metadata.
+- Do not run `database/20250312_site_content_seed.sql` on production just to restore lessons content unless you explicitly want its full site-content seed values applied.
 
 Optional legacy backfill:
 - If you want every pre-existing single-day event on production to have one normalized occurrence row, run `database/20260316_event_occurrences_backfill.sql` once after `database/20251212_schema_upgrade.sql`.
@@ -100,6 +106,8 @@ SELECT COUNT(*) FROM event_categories;
 SELECT COUNT(*) FROM admins;
 SELECT slug, COUNT(*) FROM events GROUP BY slug HAVING COUNT(*) > 1;
 SHOW COLUMNS FROM events LIKE 'pricing_config';
+SELECT setting_key, JSON_VALID(setting_value) AS json_valid FROM business_settings WHERE setting_key = 'lessons_json';
+SELECT COUNT(*) AS recurring_series_meta_rows FROM event_series_meta;
 ```
 
 ## Cloudflare settings

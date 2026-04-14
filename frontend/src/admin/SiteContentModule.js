@@ -6,6 +6,7 @@ import AdminStickyActionBar from './AdminStickyActionBar';
 import useCollapsibleSections from './useCollapsibleSections';
 
 const SITE_CONTENT_SECTION_STORAGE_KEY = 'mmh_site_content_editor_sections';
+const SITE_CONTENT_FOCUS_KEY = 'mmh_admin_site_content_focus';
 
 const emptyContact = () => ({
   name: '',
@@ -222,6 +223,23 @@ export default function SiteContentModule() {
     loadSettings();
   }, []);
 
+  useEffect(() => {
+    if (loading || typeof window === 'undefined') {
+      return;
+    }
+    const focusTarget = window.localStorage.getItem(SITE_CONTENT_FOCUS_KEY);
+    if (!focusTarget) {
+      return;
+    }
+    window.localStorage.removeItem(SITE_CONTENT_FOCUS_KEY);
+    if (focusTarget === 'lessons') {
+      setSectionsState(['lessons'], false);
+      window.requestAnimationFrame(() => {
+        document.getElementById('site-content-lessons')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+  }, [loading, setSectionsState]);
+
   const handleFieldChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -405,7 +423,7 @@ export default function SiteContentModule() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">Site Content</h1>
+          <h1 className="text-2xl font-bold">Site Content & Lessons</h1>
           <p className="text-sm text-gray-400">Update contact info, policies, lessons, and map details shown on the public site.</p>
         </div>
         <button
@@ -434,6 +452,12 @@ export default function SiteContentModule() {
         </div>
       ) : (
         <form onSubmit={handleSave} className="space-y-5 pb-4">
+          <div className="rounded-xl border border-purple-500/30 bg-purple-900/20 px-4 py-3 text-sm text-purple-100">
+            <p className="font-semibold text-white">Public lessons are edited here.</p>
+            <p className="mt-1 text-purple-100/90">
+              If a client asks to update the Lessons section on the homepage, use the <strong>Weekly Lessons &amp; Classes</strong> section below instead of the Events list.
+            </p>
+          </div>
           <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
