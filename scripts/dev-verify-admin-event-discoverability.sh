@@ -18,7 +18,7 @@ if ! grep -q "Jump by event type" "$ROOT_DIR/frontend/src/admin/EventsModule.js"
   fail "EventsModule is missing the quick access heading"
 fi
 
-if ! grep -q "Edit public lessons section" "$ROOT_DIR/frontend/src/admin/EventsModule.js"; then
+if ! grep -q "Open lessons editor" "$ROOT_DIR/frontend/src/admin/EventsModule.js"; then
   fail "EventsModule is missing the lessons manager shortcut"
 fi
 
@@ -26,16 +26,20 @@ if ! grep -q "Normal <span" "$ROOT_DIR/frontend/src/admin/EventsModule.js" && ! 
   fail "EventsModule is missing the explicit Normal quick-access filter support"
 fi
 
-if ! grep -q "Site Content & Lessons" "$ROOT_DIR/frontend/src/admin/AdminPanel.js"; then
-  fail "Admin navigation is missing the Site Content & Lessons label"
+if ! grep -q "label: 'Site Content'" "$ROOT_DIR/frontend/src/admin/AdminPanel.js"; then
+  fail "Admin navigation is missing the Site Content label"
 fi
 
-if ! grep -q "Public lessons are edited here" "$ROOT_DIR/frontend/src/admin/SiteContentModule.js"; then
+if ! grep -q "Lessons are edited here" "$ROOT_DIR/frontend/src/admin/SiteContentModule.js"; then
   fail "SiteContentModule is missing the lessons editing guidance"
 fi
 
 if ! grep -q "site-content-lessons" "$ROOT_DIR/frontend/src/admin/SiteContentModule.js"; then
   fail "SiteContentModule is missing the lessons anchor for admin jump navigation"
+fi
+
+if ! grep -q "Lessons are managed under <strong>Site Content</strong>" "$ROOT_DIR/frontend/src/admin/EventsModule.js"; then
+  fail "EventsModule is missing the clear Site Content lessons guidance"
 fi
 
 log "[admin-event-discoverability] verifying recurring and lessons data are not hardcoded to specific shows"
