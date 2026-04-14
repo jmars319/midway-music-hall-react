@@ -62,7 +62,13 @@ ALERTS_EMAIL_TO=support@jamarq.digital
 
 CORS_ALLOW_ORIGINS=https://midwaymusichall.net
 ADMIN_SESSION_COOKIE_SECURE=true
-PAYPAL_SDK_CLIENT_ID=your-paypal-client-id-if-used
+PAYPAL_ENVIRONMENT=production
+PAYPAL_CLIENT_ID=your-paypal-client-id
+PAYPAL_CLIENT_SECRET=your-paypal-client-secret
+PAYPAL_CHECKOUT_RETURN_URL=https://midwaymusichall.net/payment/return
+PAYPAL_CHECKOUT_CANCEL_URL=https://midwaymusichall.net/payment/cancelled
+PAYPAL_WEBHOOK_ID=your-paypal-webhook-id
+PAYPAL_WEBHOOK_NOTIFICATION_URL=https://midwaymusichall.net/api/webhooks/paypal
 SQUARE_ENVIRONMENT=production
 SQUARE_ACCESS_TOKEN=your-square-access-token
 SQUARE_LOCATION_ID=your-square-location-id
@@ -80,6 +86,13 @@ Square production notes:
 - `SQUARE_WEBHOOK_SIGNATURE_KEY` must be the signature key from that Square webhook subscription.
 - `SQUARE_CHECKOUT_REDIRECT_URL` is optional but recommended if you want buyers returned to MMH after Square-hosted checkout.
 - The MMH-branded public return page for this build is `/payment/return`.
+- Cash App Pay is exposed through Square checkout when the Square provider is enabled for a scope and the `Allow Cash App Pay inside Square checkout` toggle is enabled in admin.
+
+PayPal production notes:
+- `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` are the server-side REST credentials for the live PayPal app.
+- `PAYPAL_WEBHOOK_ID` must be the webhook ID from the PayPal app that points at `PAYPAL_WEBHOOK_NOTIFICATION_URL`.
+- `PAYPAL_CHECKOUT_RETURN_URL` and `PAYPAL_CHECKOUT_CANCEL_URL` should return buyers to MMH-branded `/payment/*` routes.
+- The PayPal provider only appears publicly when both the provider row is enabled in admin and the backend PayPal readiness checks are complete.
 
 ## Database setup (phpMyAdmin)
 1. Create DB + user in cPanel and grant All Privileges.
@@ -87,7 +100,8 @@ Square production notes:
 3. Run canonical migrations in this order:
    1. `database/20250326_payment_settings.sql`
    2. `database/20251212_schema_upgrade.sql`
-   3. `database/20260409_content_compatibility_backfill.sql`
+   3. `database/20260414_payment_provider_matrix.sql`
+   4. `database/20260409_content_compatibility_backfill.sql`
 
 The full seed dumps now include `event_occurrences`, but you should still run the canonical migrations after any seed import so older columns, indexes, and compatibility changes stay aligned.
 
@@ -147,7 +161,7 @@ Keep `SEND_EMAILS=false` until all checks pass.
 7. Update Site Content or a category, refresh public site, then revert.
 8. Upload and delete a test image in Media Manager.
 9. `/robots.txt`, `/sitemap.xml`, `/manifest.json` load over HTTPS.
-10. If Square is enabled, submit a test seat request, launch Square checkout, complete one payment, and confirm the request stays `Paid / pending confirmation` without auto-confirming seats.
+10. If Square or PayPal is enabled, submit a test seat request, launch each enabled checkout, complete one payment, and confirm the request stays `Paid / pending confirmation` without auto-confirming seats.
 11. Visit a bogus URL such as `/this-should-404` and confirm the branded 404 page appears.
 12. Optional: create `maintenance.enable`, confirm the public site returns the branded 503 page while `/login`, `/admin`, and `/api/health` still respond, then remove the file.
 

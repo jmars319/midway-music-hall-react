@@ -5,9 +5,6 @@ import EventSeatingModal from '../EventSeatingModal';
 
 jest.mock('../ReservationBanner', () => () => null);
 jest.mock('../../utils/useFocusTrap', () => jest.fn());
-jest.mock('../../utils/paypalHostedButtons', () => ({
-  loadPayPalHostedButtonsSdk: jest.fn(),
-}));
 jest.mock('../../hooks/useSeatDebug', () => ({
   useSeatDebugLogger: () => ({ log: jest.fn(), enabled: false }),
   useSeatDebugProbe: jest.fn(),

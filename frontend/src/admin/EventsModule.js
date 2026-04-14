@@ -314,24 +314,72 @@ const formatSnapshotSeatBadgeLabel = (seatId) => {
 const normalizePaymentConfig = (config = {}) => ({
   scope: config.scope || 'category',
   category_id: config.category_id ?? null,
+  provider_scope_key: config.provider_scope_key || '',
   enabled: Boolean(config.enabled),
-  provider_type: config.provider_type === 'paypal_hosted_button'
-    ? 'paypal_hosted_button'
-    : config.provider_type === 'paypal_orders'
-      ? 'paypal_orders'
-      : config.provider_type === 'square'
-        ? 'square'
-        : 'external_link',
+  provider_type: config.provider_type === 'paypal_orders'
+    ? 'paypal_orders'
+    : config.provider_type === 'square'
+      ? 'square'
+      : 'external_link',
   provider_label: config.provider_label || '',
   button_text: config.button_text || 'Pay Online',
   payment_url: config.payment_url || '',
-  paypal_hosted_button_id: config.paypal_hosted_button_id || '',
   paypal_currency: config.paypal_currency || 'USD',
-  paypal_enable_venmo: Boolean(config.paypal_enable_venmo),
+  square_enable_cash_app_pay: Boolean(config.square_enable_cash_app_pay),
   limit_seats: Number(config.limit_seats) > 0 ? Number(config.limit_seats) : 6,
   over_limit_message: config.over_limit_message || '',
   fine_print: config.fine_print || '',
 });
+
+const paymentProviderPriority = (providerType = '') => {
+  switch (String(providerType || '').trim()) {
+    case 'square':
+      return 10;
+    case 'paypal_orders':
+      return 20;
+    case 'external_link':
+      return 30;
+    default:
+      return 99;
+  }
+};
+
+const paymentProviderLabel = (config = {}) => (
+  config.provider_label
+  || (config.provider_type === 'square'
+    ? 'Square'
+    : config.provider_type === 'paypal_orders'
+      ? 'PayPal'
+      : 'External link')
+);
+
+const paymentProviderTypeLabel = (providerType = '') => {
+  switch (providerType) {
+    case 'square':
+      return 'Square hosted checkout';
+    case 'paypal_orders':
+      return 'PayPal Orders checkout';
+    default:
+      return 'External payment link';
+  }
+};
+
+const resolveEnabledPaymentConfigsForCategory = (paymentConfigs, categoryId) => {
+  const globalConfigs = paymentConfigs?.global && typeof paymentConfigs.global === 'object' ? paymentConfigs.global : {};
+  const categoryConfigs = categoryId && paymentConfigs?.categories?.[categoryId] && typeof paymentConfigs.categories[categoryId] === 'object'
+    ? paymentConfigs.categories[categoryId]
+    : {};
+  const providerTypes = Array.from(new Set([
+    ...Object.keys(globalConfigs),
+    ...Object.keys(categoryConfigs),
+  ]));
+  return providerTypes
+    .map((providerType) => (Object.prototype.hasOwnProperty.call(categoryConfigs, providerType)
+      ? categoryConfigs[providerType]
+      : globalConfigs[providerType]))
+    .filter((config) => config && config.enabled)
+    .sort((left, right) => paymentProviderPriority(left.provider_type) - paymentProviderPriority(right.provider_type));
+};
 
 const resolveSeatRoutingInfo = (event = {}) => {
   const email = event.seat_request_target_email || DEFAULT_STAFF_INBOX;
@@ -935,7 +983,7 @@ export default function EventsModule({ onNavigate = () => {} }){
   const [events, setEvents] = useState([]);
   const [layouts, setLayouts] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [paymentConfigs, setPaymentConfigs] = useState({ categories: {}, global: null });
+  const [paymentConfigs, setPaymentConfigs] = useState({ categories: {}, global: {} });
   const [paymentSettingsAvailable, setPaymentSettingsAvailable] = useState(true);
   const [paymentSettingsError, setPaymentSettingsError] = useState('');
   const [categoryError, setCategoryError] = useState('');
@@ -1238,21 +1286,25 @@ export default function EventsModule({ onNavigate = () => {} }){
       }
       if (!data.has_table) {
         setPaymentSettingsAvailable(false);
-        setPaymentConfigs({ categories: {}, global: null });
+        setPaymentConfigs({ categories: {}, global: {} });
         setPaymentSettingsError('');
         return;
       }
       setPaymentSettingsAvailable(true);
-      const lookup = { categories: {}, global: null };
+      const lookup = { categories: {}, global: {} };
       (data.payment_settings || []).forEach((setting) => {
         if (!setting || typeof setting !== 'object') {
           return;
         }
         const normalized = normalizePaymentConfig(setting);
         if (normalized.scope === 'global') {
-          lookup.global = normalized;
+          lookup.global[normalized.provider_type] = normalized;
         } else if (normalized.category_id) {
-          lookup.categories[Number(normalized.category_id)] = normalized;
+          const categoryId = Number(normalized.category_id);
+          if (!lookup.categories[categoryId]) {
+            lookup.categories[categoryId] = {};
+          }
+          lookup.categories[categoryId][normalized.provider_type] = normalized;
         }
       });
       setPaymentConfigs(lookup);
@@ -1260,7 +1312,7 @@ export default function EventsModule({ onNavigate = () => {} }){
     } catch (err) {
       console.error('Failed to load payment settings', err);
       setPaymentSettingsError(err instanceof Error ? err.message : 'Unable to load payment settings');
-      setPaymentConfigs({ categories: {}, global: null });
+      setPaymentConfigs({ categories: {}, global: {} });
     }
   }, []);
 
@@ -1982,25 +2034,19 @@ export default function EventsModule({ onNavigate = () => {} }){
     return resolveSeatRoutingInfo(editing);
   }, [editing]);
 
-  const activePaymentConfig = useMemo(() => {
+  const activePaymentConfigs = useMemo(() => {
     if (!paymentSettingsAvailable) {
-      return null;
+      return [];
     }
     const categoryId = formData.category_id ? Number(formData.category_id) : null;
-    if (categoryId && paymentConfigs.categories[categoryId] && paymentConfigs.categories[categoryId].enabled) {
-      return paymentConfigs.categories[categoryId];
-    }
-    if (paymentConfigs.global && paymentConfigs.global.enabled) {
-      return paymentConfigs.global;
-    }
-    return null;
+    return resolveEnabledPaymentConfigsForCategory(paymentConfigs, categoryId);
   }, [formData.category_id, paymentConfigs, paymentSettingsAvailable]);
 
   useEffect(() => {
-    if (!activePaymentConfig && formData.payment_enabled) {
+    if (!activePaymentConfigs.length && formData.payment_enabled) {
       setFormData((prev) => ({ ...prev, payment_enabled: false }));
     }
-  }, [activePaymentConfig, formData.payment_enabled]);
+  }, [activePaymentConfigs, formData.payment_enabled]);
 
   const editorSectionIds = useMemo(() => ([
     'basic-info',
@@ -2034,9 +2080,7 @@ export default function EventsModule({ onNavigate = () => {} }){
     const categoryLabel = selectedCategory?.name || 'Normal';
     const venueLabel = VENUE_LABELS[normalizeVenueKey(formData.venue_code)];
     const layoutLabel = findLayoutName(layouts, formData.layout_id);
-    const paymentLabel = activePaymentConfig
-      ? (activePaymentConfig.provider_label || 'Configured payment link')
-      : null;
+    const paymentLabels = activePaymentConfigs.map((config) => paymentProviderLabel(config));
     const snapshotCount = seatingSnapshotsState.items?.length || 0;
     return {
       'basic-info': [
@@ -2059,8 +2103,8 @@ export default function EventsModule({ onNavigate = () => {} }){
         : 'Seat reservations disabled',
       payment: !paymentSettingsAvailable
         ? 'Migration required'
-        : activePaymentConfig
-          ? `${formData.payment_enabled ? 'Enabled' : 'Disabled'} • ${paymentLabel}`
+        : activePaymentConfigs.length
+          ? `${formData.payment_enabled ? 'Enabled' : 'Disabled'} • ${paymentLabels.join(', ')}`
           : 'No payment config available',
       advanced: [
         formData.seat_request_email_override ? 'Custom seat inbox' : 'Default seat routing',
@@ -2080,7 +2124,7 @@ export default function EventsModule({ onNavigate = () => {} }){
       ].join(' • '),
     };
   }, [
-    activePaymentConfig,
+    activePaymentConfigs,
     editing,
     editorFlags.showBeachBandsPanel,
     editorFlags.showRecurringPanel,
@@ -5962,7 +6006,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                 <AdminCollapsibleSection
                   id="event-editor-payment"
                   title="Payment Settings"
-                  description="Category or global payment-link configuration for this event."
+                  description="Category or global provider settings for this event."
                   summary={eventEditorSummaries.payment}
                   isCollapsed={Boolean(collapsedEditorSections.payment)}
                   onToggle={() => toggleEditorSection('payment')}
@@ -5971,11 +6015,11 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                     <div className="space-y-3 rounded-2xl border border-indigo-700/40 bg-indigo-950/20 p-4">
                       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                         <div>
-                          <h3 className="text-lg font-semibold text-white">Payment Link</h3>
+                          <h3 className="text-lg font-semibold text-white">Payment Providers</h3>
                           <p className="text-sm text-gray-400">
-                            {activePaymentConfig
-                              ? `Uses the ${activePaymentConfig.provider_label || 'custom'} payment link saved in Payment Settings.`
-                              : 'No payment configuration detected for this category.'}
+                            {activePaymentConfigs.length
+                              ? 'This event can offer the enabled providers listed below after the guest submits a seat request.'
+                              : 'No enabled payment provider is available for this event category yet.'}
                           </p>
                         </div>
                         <label className="inline-flex items-center gap-2 text-sm text-gray-200">
@@ -5984,7 +6028,7 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                             name="payment_enabled"
                             checked={!!formData.payment_enabled}
                             onChange={handleChange}
-                            disabled={!activePaymentConfig}
+                            disabled={!activePaymentConfigs.length}
                             className="h-4 w-4 rounded bg-gray-700"
                           />
                           <span>Enable for this event</span>
@@ -5993,82 +6037,66 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                       {paymentSettingsError && (
                         <p className="text-xs text-red-400">{paymentSettingsError}</p>
                       )}
-                      {activePaymentConfig ? (
-                        <div className="grid grid-cols-1 gap-3 text-sm text-gray-300 md:grid-cols-2">
-                          <div>
-                            <p className="text-xs uppercase tracking-wide text-gray-400">Provider</p>
-                            <p className="font-medium text-white">
-                              {activePaymentConfig.provider_label
-                                || (activePaymentConfig.provider_type === 'square'
-                                  ? 'Square'
-                                  : activePaymentConfig.provider_type === 'paypal_hosted_button' || activePaymentConfig.provider_type === 'paypal_orders'
-                                    ? 'PayPal'
-                                    : 'Custom link')}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs uppercase tracking-wide text-gray-400">Type</p>
-                            <p className="font-medium text-white">
-                              {activePaymentConfig.provider_type === 'paypal_hosted_button'
-                                ? 'PayPal hosted button'
-                                : activePaymentConfig.provider_type === 'paypal_orders'
-                                  ? 'PayPal Orders (scaffold)'
-                                  : activePaymentConfig.provider_type === 'square'
-                                    ? 'Square hosted checkout'
-                                  : 'External link'}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs uppercase tracking-wide text-gray-400">Seat limit</p>
-                            <p className="font-medium text-white">{activePaymentConfig.limit_seats} seats</p>
-                          </div>
-                          <div className="md:col-span-2">
-                            <p className="text-xs uppercase tracking-wide text-gray-400">Button text</p>
-                            <p className="font-medium text-white">{activePaymentConfig.button_text}</p>
-                          </div>
-                          {activePaymentConfig.provider_type === 'paypal_hosted_button' ? (
-                            <>
-                              <div>
-                                <p className="text-xs uppercase tracking-wide text-gray-400">Hosted button ID</p>
-                                <p className="font-medium text-white">{activePaymentConfig.paypal_hosted_button_id || 'Not set'}</p>
+                      {activePaymentConfigs.length ? (
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                          {activePaymentConfigs.map((config) => (
+                            <div key={config.provider_scope_key || `${config.scope}-${config.category_id || 0}-${config.provider_type}`} className="rounded-xl border border-indigo-500/20 bg-gray-950/50 p-4 text-sm text-gray-300">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="font-semibold text-white">{paymentProviderLabel(config)}</p>
+                                <span className="rounded-full border border-indigo-400/30 bg-indigo-500/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-100">
+                                  {paymentProviderTypeLabel(config.provider_type)}
+                                </span>
+                                {config.scope === 'global' && (
+                                  <span className="rounded-full border border-gray-600 bg-gray-800 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-200">
+                                    Global default
+                                  </span>
+                                )}
                               </div>
-                              <div>
-                                <p className="text-xs uppercase tracking-wide text-gray-400">Currency</p>
-                                <p className="font-medium text-white">{activePaymentConfig.paypal_currency || 'USD'}</p>
+                              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                                <div>
+                                  <p className="text-xs uppercase tracking-wide text-gray-400">Seat limit</p>
+                                  <p className="font-medium text-white">{config.limit_seats} seats</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs uppercase tracking-wide text-gray-400">Button text</p>
+                                  <p className="font-medium text-white">{config.button_text}</p>
+                                </div>
                               </div>
-                            </>
-                          ) : activePaymentConfig.provider_type === 'paypal_orders' ? (
-                            <div className="md:col-span-2">
-                              <p className="text-xs uppercase tracking-wide text-gray-400">Orders scaffold</p>
-                              <p className="text-white">Dynamic amount capture is planned but not enabled in production yet.</p>
+                              {config.provider_type === 'square' && (
+                                <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-900/10 px-3 py-2 text-xs text-emerald-100">
+                                  Square checkout starts after seat-request submission and uses backend-authoritative totals.
+                                  {config.square_enable_cash_app_pay ? ' Cash App Pay is enabled inside Square checkout when eligible.' : ''}
+                                </div>
+                              )}
+                              {config.provider_type === 'paypal_orders' && (
+                                <div className="mt-3 rounded-lg border border-blue-500/30 bg-blue-900/10 px-3 py-2 text-xs text-blue-100">
+                                  PayPal redirect checkout is enabled and uses the backend seat-request total.
+                                </div>
+                              )}
+                              {config.provider_type === 'external_link' && (
+                                <div className="mt-3">
+                                  <p className="text-xs uppercase tracking-wide text-gray-400">Payment URL</p>
+                                  <p className="break-all font-mono text-white">{config.payment_url || 'Not set'}</p>
+                                </div>
+                              )}
+                              {config.over_limit_message && (
+                                <div className="mt-3">
+                                  <p className="text-xs uppercase tracking-wide text-gray-400">Over-limit message</p>
+                                  <p className="text-white">{config.over_limit_message}</p>
+                                </div>
+                              )}
+                              {config.fine_print && (
+                                <div className="mt-3">
+                                  <p className="text-xs uppercase tracking-wide text-gray-400">Fine print</p>
+                                  <p className="text-white">{config.fine_print}</p>
+                                </div>
+                              )}
                             </div>
-                          ) : activePaymentConfig.provider_type === 'square' ? (
-                            <div className="md:col-span-2">
-                              <p className="text-xs uppercase tracking-wide text-gray-400">Hosted checkout</p>
-                              <p className="text-white">Square checkout starts after the customer submits the seat request and uses backend-authoritative totals.</p>
-                            </div>
-                          ) : (
-                            <div className="md:col-span-2">
-                              <p className="text-xs uppercase tracking-wide text-gray-400">Payment URL</p>
-                              <p className="break-all font-mono text-white">{activePaymentConfig.payment_url || 'Not set'}</p>
-                            </div>
-                          )}
-                          {activePaymentConfig.over_limit_message && (
-                            <div className="md:col-span-2">
-                              <p className="text-xs uppercase tracking-wide text-gray-400">Over-limit message</p>
-                              <p className="text-white">{activePaymentConfig.over_limit_message}</p>
-                            </div>
-                          )}
-                          {activePaymentConfig.fine_print && (
-                            <div className="md:col-span-2">
-                              <p className="text-xs uppercase tracking-wide text-gray-400">Fine print</p>
-                              <p className="text-white">{activePaymentConfig.fine_print}</p>
-                            </div>
-                          )}
+                          ))}
                         </div>
                       ) : (
                         <p className="text-sm text-gray-400">
-                          Configure payment links under <span className="font-semibold text-white">Payment Settings</span> to make this option available.
+                          Configure providers under <span className="font-semibold text-white">Payment Settings</span> to make this option available.
                         </p>
                       )}
                     </div>

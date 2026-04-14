@@ -44,20 +44,24 @@ if ! rg -n "Amount due" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js"
   log_error "post-submit amount due display token is missing"
   exit 1
 fi
-if ! rg -n "paymentProviderType === 'square'" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
-  log_error "Square post-submit payment branch is missing from EventSeatingModal"
+if ! rg -n "handleStartPayment = async \\(providerType\\)" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
+  log_error "generic provider launch handler is missing from EventSeatingModal"
   exit 1
 fi
 if ! rg -n 'seat-requests/\$\{submittedSeatRequestId\}/payment/start' "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
-  log_error "Square payment start route is not used by EventSeatingModal"
+  log_error "payment start route is not used by EventSeatingModal"
   exit 1
 fi
-if ! rg -n "Opening Square|Pay with Square" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
-  log_error "Square launch action copy is missing from EventSeatingModal"
+if ! rg -n "Pay with Square|Pay with PayPal|Opening .*providerLabel" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
+  log_error "provider launch action copy is missing from EventSeatingModal"
   exit 1
 fi
 if ! rg -n "resolvePaymentStatusState" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
   log_error "payment status route mapping is missing from EventSeatingModal"
+  exit 1
+fi
+if ! rg -n "provider_options|visiblePaymentOptions" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
+  log_error "provider option list handling is missing from EventSeatingModal"
   exit 1
 fi
 if ! rg -n "pending-confirmation|provider-unavailable|staff-help|in-progress|closed" "$ROOT_DIR/frontend/src/pages/PaymentStatusPage.js" >/dev/null; then
@@ -76,12 +80,12 @@ if ! rg -n "BrandImage" "$ROOT_DIR/frontend/src/components/BrandedStatusPage.js"
   log_error "payment status shell is missing MMH logo branding"
   exit 1
 fi
-if ! rg -n 'option value=\"square\"' "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js" >/dev/null; then
-  log_error "Square provider option is missing from PaymentSettingsModule"
+if ! rg -n "providerCardKey|Square readiness|PayPal readiness|Square hosted checkout|PayPal Orders checkout" "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js" >/dev/null; then
+  log_error "multi-provider payment settings cards are missing from PaymentSettingsModule"
   exit 1
 fi
-if ! rg -n "Square hosted checkout" "$ROOT_DIR/frontend/src/admin/EventsModule.js" >/dev/null; then
-  log_error "Square provider summary is missing from EventsModule"
+if ! rg -n "Payment Providers|PayPal Orders checkout|Square hosted checkout" "$ROOT_DIR/frontend/src/admin/EventsModule.js" >/dev/null; then
+  log_error "multi-provider event editor summary is missing from EventsModule"
   exit 1
 fi
 if ! rg -n "Paid / pending confirmation" "$ROOT_DIR/frontend/src/admin/SeatRequestsModule.js" >/dev/null; then

@@ -8,30 +8,42 @@ fail() {
   exit 1
 }
 
-printf '%s\n' "[payment-settings-ui] verifying Square-first admin payment messaging"
+printf '%s\n' "[payment-settings-ui] verifying multi-provider admin payment messaging"
 
 if ! grep -q "Square readiness" "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js"; then
   fail "PaymentSettingsModule is missing the Square readiness panel"
 fi
 
-if ! grep -q "Square secrets stay in backend environment settings" "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js"; then
-  fail "PaymentSettingsModule is missing the backend-env Square guidance"
+if ! grep -q "PayPal readiness" "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js"; then
+  fail "PaymentSettingsModule is missing the PayPal readiness panel"
 fi
 
-if ! grep -q "Square hosted checkout" "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js"; then
-  fail "PaymentSettingsModule is missing the Square hosted checkout option"
+if ! grep -q "Enable provider" "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js"; then
+  fail "PaymentSettingsModule is missing per-provider enable controls"
 fi
 
-if ! grep -q "External payment link" "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js"; then
-  fail "PaymentSettingsModule is missing the external payment link fallback option"
+if ! grep -q "PayPal Orders checkout" "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js"; then
+  fail "PaymentSettingsModule is missing the PayPal Orders provider card"
+fi
+
+if grep -q "Legacy PayPal" "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js"; then
+  fail "PaymentSettingsModule still exposes legacy PayPal hosted-button UI"
+fi
+
+if ! grep -q "Allow Cash App Pay inside Square checkout" "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js"; then
+  fail "PaymentSettingsModule is missing the Square Cash App Pay toggle"
+fi
+
+if ! grep -q "provider_scope_key" "$ROOT_DIR/backend/index.php"; then
+  fail "backend payment settings endpoint is missing provider_scope_key support"
+fi
+
+if ! grep -q "paypal_status" "$ROOT_DIR/backend/index.php"; then
+  fail "backend payment settings endpoint is missing PayPal readiness metadata"
 fi
 
 if ! grep -q "square_status" "$ROOT_DIR/backend/index.php"; then
-  fail "backend payment settings endpoint is missing Square status metadata"
-fi
-
-if ! grep -q "ready_to_enable" "$ROOT_DIR/backend/index.php"; then
-  fail "backend Square readiness metadata is incomplete"
+  fail "backend payment settings endpoint is missing Square readiness metadata"
 fi
 
 printf '%s\n' "[payment-settings-ui] verification succeeded"

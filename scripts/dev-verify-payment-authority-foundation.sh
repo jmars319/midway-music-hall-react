@@ -70,9 +70,7 @@ payload = {
     'enabled': False,
     'provider_type': 'external_link',
     'payment_url': '',
-    'paypal_hosted_button_id': '',
     'paypal_currency': 'USD',
-    'paypal_enable_venmo': False,
     'button_text': 'Pay Online',
     'limit_seats': 6,
     'over_limit_message': '',
@@ -86,9 +84,7 @@ if raw:
         'enabled': bool(data.get('enabled')),
         'provider_type': provider_type,
         'payment_url': data.get('payment_url') or '',
-        'paypal_hosted_button_id': data.get('paypal_hosted_button_id') or '',
         'paypal_currency': data.get('paypal_currency') or 'USD',
-        'paypal_enable_venmo': bool(data.get('paypal_enable_venmo')),
         'button_text': data.get('button_text') or 'Pay Online',
         'limit_seats': data.get('limit_seats') or 6,
         'over_limit_message': data.get('over_limit_message') or '',
@@ -540,7 +536,11 @@ import sys
 data = json.loads(os.environ.get('PAYMENT_JSON', '{}'))
 target = sys.argv[1]
 for item in data.get('payment_settings', []):
-    if str(item.get('category_id')) == str(target) and item.get('scope') == 'category':
+    if (
+        str(item.get('category_id')) == str(target)
+        and item.get('scope') == 'category'
+        and str(item.get('provider_type') or '') == 'square'
+    ):
         print(base64.b64encode(json.dumps(item).encode()).decode())
         break
 else:
@@ -555,9 +555,7 @@ payment_payload="$(cat <<JSON
   "enabled": true,
   "provider_type": "square",
   "payment_url": "",
-  "paypal_hosted_button_id": "",
   "paypal_currency": "USD",
-  "paypal_enable_venmo": false,
   "button_text": "Pay Online",
   "limit_seats": 6,
   "over_limit_message": "",

@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS payment_settings (
   id INT AUTO_INCREMENT PRIMARY KEY,
   scope ENUM('global','category') NOT NULL DEFAULT 'category',
   category_id INT DEFAULT NULL,
+  provider_scope_key VARCHAR(255) NOT NULL,
   enabled TINYINT(1) NOT NULL DEFAULT 0,
   provider_label VARCHAR(191) DEFAULT NULL,
   provider_type ENUM('external_link','paypal_hosted_button','paypal_orders','square') NOT NULL DEFAULT 'external_link',
@@ -112,6 +113,7 @@ CREATE TABLE IF NOT EXISTS payment_settings (
   paypal_hosted_button_id VARCHAR(64) DEFAULT NULL,
   paypal_currency VARCHAR(8) DEFAULT 'USD',
   paypal_enable_venmo TINYINT(1) NOT NULL DEFAULT 0,
+  square_enable_cash_app_pay TINYINT(1) NOT NULL DEFAULT 0,
   button_text VARCHAR(191) DEFAULT 'Pay Online',
   limit_seats INT NOT NULL DEFAULT 6,
   over_limit_message TEXT,
@@ -120,8 +122,10 @@ CREATE TABLE IF NOT EXISTS payment_settings (
   updated_by VARCHAR(191) DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_payment_category (category_id),
+  UNIQUE KEY uniq_payment_provider_scope (provider_scope_key),
+  KEY idx_payment_category (category_id),
   KEY idx_payment_scope (scope),
+  KEY idx_payment_scope_category (scope, category_id),
   CONSTRAINT fk_payment_category FOREIGN KEY (category_id) REFERENCES event_categories(id) ON DELETE CASCADE
 );
 

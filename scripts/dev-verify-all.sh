@@ -20,7 +20,6 @@ scripts=(
   ./scripts/dev-verify-admin-api.sh
   ./scripts/dev-verify-payment-settings.sh
   ./scripts/dev-verify-payment-settings-ui.sh
-  ./scripts/dev-verify-paypal-hosted-buttons-api.sh
   ./scripts/dev-verify-seating-guardrails.sh
   ./scripts/dev-verify-table-layout-geometry.sh
   ./scripts/dev-verify-layout-canvas-presets.sh

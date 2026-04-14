@@ -1,13 +1,39 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
   Info,
+  RefreshCcw,
   XCircle,
 } from 'lucide-react';
 import BrandedStatusPage from '../components/BrandedStatusPage';
+import { API_BASE } from '../apiConfig';
 
 const PAYMENT_ROUTE_PREFIX = '/payment';
+
+const providerLabel = (providerType) => (
+  providerType === 'paypal_orders'
+    ? 'PayPal'
+    : providerType === 'square'
+      ? 'Square'
+      : 'online payment'
+);
+
+const paymentUnavailableCopy = (providerType) => ({
+  badge: `${providerLabel(providerType)} unavailable`,
+  title: `${providerLabel(providerType)} payment is not configured right now.`,
+  body: `If payment was enabled too early or the provider setup is incomplete, the safest next step is to go back or contact Midway Music Hall staff.`,
+  tone: 'rose',
+  icon: AlertTriangle,
+});
+
+const providerRequestFailedCopy = (providerType) => ({
+  badge: `${providerLabel(providerType)} unavailable`,
+  title: `${providerLabel(providerType)} checkout could not be started.`,
+  body: 'The payment provider did not return a usable checkout session. Please go back and try again, or contact staff if the problem continues.',
+  tone: 'rose',
+  icon: AlertTriangle,
+});
 
 const CODE_VARIANTS = {
   EVENT_NOT_PUBLIC_FOR_PAYMENT: {
@@ -22,20 +48,6 @@ const CODE_VARIANTS = {
     title: 'Online payment is not enabled for this request.',
     body: 'This event is not currently set up for online payment. You can go back or contact staff for help with payment.',
     tone: 'amber',
-    icon: AlertTriangle,
-  },
-  PAYMENT_PROVIDER_UNAVAILABLE: {
-    badge: 'Square unavailable',
-    title: 'Square payment is not configured right now.',
-    body: 'If payment was enabled too early or the provider setup is incomplete, the safest next step is to go back or contact Midway Music Hall staff.',
-    tone: 'rose',
-    icon: AlertTriangle,
-  },
-  PAYMENT_PROVIDER_REQUEST_FAILED: {
-    badge: 'Square unavailable',
-    title: 'Square checkout could not be started.',
-    body: 'The payment provider did not return a usable checkout session. Please go back and try again, or contact staff if the problem continues.',
-    tone: 'rose',
     icon: AlertTriangle,
   },
   PAYMENT_AMOUNT_INVALID: {
@@ -69,7 +81,14 @@ const CODE_VARIANTS = {
   PAYMENT_ALREADY_IN_PROGRESS: {
     badge: 'Checkout already open',
     title: 'A payment attempt is already in progress.',
-    body: 'If you already opened Square in another tab, finish there first. Otherwise go back and try again after a moment.',
+    body: 'If you already opened checkout in another tab, finish there first. Otherwise go back and try again after a moment.',
+    tone: 'indigo',
+    icon: Info,
+  },
+  PAYMENT_PROVIDER_REQUIRED: {
+    badge: 'Choose a provider',
+    title: 'Choose a payment provider before starting checkout.',
+    body: 'This request supports more than one payment option. Go back to the payment panel and choose the provider you want to use.',
     tone: 'indigo',
     icon: Info,
   },
@@ -104,13 +123,7 @@ const ROUTE_VARIANTS = {
     tone: 'amber',
     icon: AlertTriangle,
   },
-  'provider-unavailable': {
-    badge: 'Square unavailable',
-    title: 'Square checkout is temporarily unavailable.',
-    body: 'This usually means the provider setup is incomplete or Square could not create a checkout session right now. You can go back and try again later or return home.',
-    tone: 'rose',
-    icon: AlertTriangle,
-  },
+  'provider-unavailable': paymentUnavailableCopy('square'),
   'staff-help': {
     badge: 'Staff help needed',
     title: 'This request needs staff-assisted payment.',
@@ -120,7 +133,7 @@ const ROUTE_VARIANTS = {
   },
   'in-progress': {
     badge: 'Checkout already open',
-    title: 'A Square checkout is already in progress.',
+    title: 'A checkout is already in progress.',
     body: 'If you already opened checkout in another tab, finish there first. If not, go back and try again after a moment.',
     tone: 'indigo',
     icon: Info,
@@ -147,7 +160,7 @@ const ROUTE_VARIANTS = {
     icon: XCircle,
   },
   return: {
-    badge: 'Square checkout',
+    badge: 'Checkout submitted',
     title: 'Your checkout was submitted.',
     body: 'If payment completed successfully, your request will move to paid and pending staff confirmation. Payment does not auto-confirm seats.',
     tone: 'emerald',
@@ -175,31 +188,154 @@ const resolveRouteKey = () => {
   return normalized.replace(/^\/payment\/?/, '');
 };
 
-const resolveStatusPageCopy = () => {
+const resolveSearchParams = () => {
+  if (typeof window === 'undefined') {
+    return new URLSearchParams();
+  }
+  return new URLSearchParams(window.location.search || '');
+};
+
+const resolveStatusPageCopy = (runtimeState = {}) => {
   if (typeof window === 'undefined') {
     return ROUTE_VARIANTS.help;
   }
-  const routeKey = resolveRouteKey();
-  const search = new URLSearchParams(window.location.search || '');
-  const code = (search.get('code') || '').trim().toUpperCase();
-  const detail = truncateDetail(search.get('message') || '');
+  const routeKey = runtimeState.routeOverride || resolveRouteKey();
+  const search = resolveSearchParams();
+  const providerType = runtimeState.providerType || (search.get('provider') || '').trim().toLowerCase();
+  const code = (runtimeState.code || search.get('code') || '').trim().toUpperCase();
+  const detail = truncateDetail(runtimeState.message || search.get('message') || '');
+
+  if (runtimeState.status === 'loading') {
+    return {
+      badge: `${providerLabel(providerType)} return`,
+      title: `Finalizing your ${providerLabel(providerType)} payment.`,
+      body: 'Please wait while Midway Music Hall confirms the payment result with the provider.',
+      detail,
+      tone: 'indigo',
+      icon: RefreshCcw,
+      routeKey,
+    };
+  }
+
   const routeVariant = ROUTE_VARIANTS[routeKey] || ROUTE_VARIANTS.help;
-  const codeVariant = code ? CODE_VARIANTS[code] : null;
+  let resolved = routeVariant;
+  if (code === 'PAYMENT_PROVIDER_UNAVAILABLE') {
+    resolved = paymentUnavailableCopy(providerType);
+  } else if (code === 'PAYMENT_PROVIDER_REQUEST_FAILED') {
+    resolved = providerRequestFailedCopy(providerType);
+  } else if (code && CODE_VARIANTS[code]) {
+    resolved = CODE_VARIANTS[code];
+  } else if (routeKey === 'provider-unavailable') {
+    resolved = paymentUnavailableCopy(providerType || 'square');
+  }
+
+  if (routeKey === 'cancelled' && providerType === 'paypal_orders') {
+    resolved = {
+      ...resolved,
+      badge: 'PayPal checkout canceled',
+      title: 'No PayPal payment was completed.',
+      body: 'Your seat request is still in place. You can go back to the payment panel and try PayPal again, choose another configured provider, or return home.',
+    };
+  }
+  if (routeKey === 'return' && providerType === 'paypal_orders' && runtimeState.status !== 'loading') {
+    resolved = {
+      badge: 'PayPal return',
+      title: 'Your PayPal checkout returned to Midway Music Hall.',
+      body: runtimeState.paymentCompleted
+        ? 'Your PayPal payment is complete and the request is now waiting for staff confirmation.'
+        : 'If payment completed successfully, the request will move to paid and pending staff confirmation after the provider response is processed.',
+      tone: runtimeState.paymentCompleted ? 'emerald' : 'indigo',
+      icon: runtimeState.paymentCompleted ? CheckCircle2 : Info,
+    };
+  }
+
   return {
-    ...(codeVariant || routeVariant),
+    ...resolved,
     detail,
     routeKey,
   };
 };
 
 export default function PaymentStatusPage({ onAdminClick }) {
-  const pageCopy = useMemo(() => resolveStatusPageCopy(), []);
+  const initialSearch = useMemo(() => resolveSearchParams(), []);
+  const providerType = (initialSearch.get('provider') || '').trim().toLowerCase();
+  const seatRequestId = (initialSearch.get('seat_request_id') || '').trim();
+  const token = (initialSearch.get('token') || '').trim();
+  const routeKey = useMemo(() => resolveRouteKey(), []);
+  const [runtimeState, setRuntimeState] = useState({});
+  const pageCopy = useMemo(() => resolveStatusPageCopy(runtimeState), [runtimeState]);
   const StatusIcon = pageCopy.icon || Info;
   const supportPoints = [
     'You are still on an official Midway Music Hall page.',
     'Online payment never changes your seat total on the frontend.',
     'Successful payment still requires staff confirmation before seating is finalized.',
   ];
+
+  useEffect(() => {
+    if (routeKey !== 'return' || providerType !== 'paypal_orders' || !seatRequestId || !token) {
+      return undefined;
+    }
+    let cancelled = false;
+    const finalizePayPalReturn = async () => {
+      setRuntimeState({
+        status: 'loading',
+        providerType: 'paypal_orders',
+        routeOverride: 'return',
+      });
+      try {
+        const res = await fetch(`${API_BASE}/seat-requests/${seatRequestId}/payment/capture`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ token }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) {
+          return;
+        }
+        if (!res.ok || !data?.success) {
+          setRuntimeState({
+            status: 'error',
+            providerType: 'paypal_orders',
+            routeOverride: resolveStatusPageCopy({
+              code: typeof data?.code === 'string' ? data.code : 'PAYMENT_PROVIDER_REQUEST_FAILED',
+              providerType: 'paypal_orders',
+            }).routeKey,
+            code: typeof data?.code === 'string' ? data.code : 'PAYMENT_PROVIDER_REQUEST_FAILED',
+            message: data?.message || 'Unable to finalize PayPal payment right now.',
+          });
+          return;
+        }
+        setRuntimeState({
+          status: 'success',
+          providerType: 'paypal_orders',
+          routeOverride: data?.payment_completed ? 'pending-confirmation' : 'return',
+          code: data?.payment_completed ? 'PAYMENT_ALREADY_COMPLETED' : '',
+          message: data?.payment_completed
+            ? 'Your PayPal payment is complete and pending staff confirmation.'
+            : 'PayPal returned to Midway Music Hall and the payment result is still being processed.',
+          paymentCompleted: Boolean(data?.payment_completed),
+        });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setRuntimeState({
+          status: 'error',
+          providerType: 'paypal_orders',
+          routeOverride: 'provider-unavailable',
+          code: 'PAYMENT_PROVIDER_REQUEST_FAILED',
+          message: 'Unable to finalize PayPal payment right now. Please contact Midway Music Hall if the problem continues.',
+        });
+      }
+    };
+    finalizePayPalReturn();
+    return () => {
+      cancelled = true;
+    };
+  }, [providerType, routeKey, seatRequestId, token]);
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -211,6 +347,7 @@ export default function PaymentStatusPage({ onAdminClick }) {
       document.title = previousTitle;
     };
   }, [pageCopy.title]);
+
   return (
     <BrandedStatusPage
       onAdminClick={onAdminClick}
