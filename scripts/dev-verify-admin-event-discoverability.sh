@@ -22,6 +22,14 @@ if ! grep -q "Open lessons editor" "$ROOT_DIR/frontend/src/admin/EventsModule.js
   fail "EventsModule is missing the lessons manager shortcut"
 fi
 
+if ! grep -q "Choose from gallery" "$ROOT_DIR/frontend/src/admin/EventsModule.js"; then
+  fail "EventsModule is missing the media gallery picker for event images"
+fi
+
+if ! grep -q "Open Media Manager" "$ROOT_DIR/frontend/src/admin/EventsModule.js"; then
+  fail "EventsModule is missing the media manager shortcut from the event editor"
+fi
+
 if ! grep -q "Normal <span" "$ROOT_DIR/frontend/src/admin/EventsModule.js" && ! grep -q "name: priorityLabels\\[slug\\]" "$ROOT_DIR/frontend/src/admin/EventsModule.js"; then
   fail "EventsModule is missing the explicit Normal quick-access filter support"
 fi

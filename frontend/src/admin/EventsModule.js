@@ -983,6 +983,12 @@ export default function EventsModule({ onNavigate = () => {} }){
   const [events, setEvents] = useState([]);
   const [layouts, setLayouts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [galleryMedia, setGalleryMedia] = useState([]);
+  const [galleryMediaLoading, setGalleryMediaLoading] = useState(false);
+  const [galleryMediaLoaded, setGalleryMediaLoaded] = useState(false);
+  const [galleryMediaError, setGalleryMediaError] = useState('');
+  const [showMediaLibrary, setShowMediaLibrary] = useState(false);
+  const [mediaLibrarySearch, setMediaLibrarySearch] = useState('');
   const [paymentConfigs, setPaymentConfigs] = useState({ categories: {}, global: {} });
   const [paymentSettingsAvailable, setPaymentSettingsAvailable] = useState(true);
   const [paymentSettingsError, setPaymentSettingsError] = useState('');
@@ -1052,6 +1058,56 @@ export default function EventsModule({ onNavigate = () => {} }){
     const timer = setTimeout(() => setSaveToast(''), 4500);
     return () => clearTimeout(timer);
   }, [saveToast]);
+
+  const fetchGalleryMedia = useCallback(async (force = false) => {
+    if (galleryMediaLoading || (galleryMediaLoaded && !force)) {
+      return;
+    }
+    setGalleryMediaLoading(true);
+    setGalleryMediaError('');
+    try {
+      const res = await fetch(`${API_BASE}/media?category=gallery`);
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || 'Unable to load gallery images');
+      }
+      setGalleryMedia(Array.isArray(data.media) ? data.media : []);
+    } catch (err) {
+      console.error('Failed to fetch gallery media', err);
+      setGalleryMediaError(err.message || 'Unable to load gallery images.');
+    } finally {
+      setGalleryMediaLoaded(true);
+      setGalleryMediaLoading(false);
+    }
+  }, [galleryMediaLoaded, galleryMediaLoading]);
+
+  useEffect(() => {
+    if (!showForm || galleryMediaLoaded || galleryMediaLoading) {
+      return;
+    }
+    fetchGalleryMedia();
+  }, [fetchGalleryMedia, galleryMediaLoaded, galleryMediaLoading, showForm]);
+
+  const selectedEventMediaId = useMemo(() => {
+    const posterId = Number(formData.poster_image_id || 0);
+    if (posterId > 0) return posterId;
+    const heroId = Number(formData.hero_image_id || 0);
+    return heroId > 0 ? heroId : null;
+  }, [formData.hero_image_id, formData.poster_image_id]);
+
+  const filteredGalleryMedia = useMemo(() => {
+    const query = String(mediaLibrarySearch || '').trim().toLowerCase();
+    if (!query) return galleryMedia;
+    return galleryMedia.filter((item) => {
+      const haystack = [
+        item.original_name,
+        item.filename,
+        item.alt_text,
+        item.caption,
+      ].join(' ').toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [galleryMedia, mediaLibrarySearch]);
 
   const selectedLayoutTemplateRows = useMemo(() => {
     const selectedLayoutId = String(formData.layout_id || '').trim();
@@ -2119,7 +2175,11 @@ export default function EventsModule({ onNavigate = () => {} }){
         formData.contact_email || null,
       ].filter(Boolean).join(' • ') || 'No event contact set',
       media: [
-        imagePreview || formData.image_url ? 'Custom image selected' : 'Default image',
+        selectedEventMediaId
+          ? 'Gallery image selected'
+          : imagePreview || formData.image_url
+            ? 'Custom image selected'
+            : 'Default image',
         formData.description ? 'Description added' : 'No description yet',
       ].join(' • '),
     };
@@ -2132,6 +2192,7 @@ export default function EventsModule({ onNavigate = () => {} }){
     imagePreview,
     layouts,
     paymentSettingsAvailable,
+    selectedEventMediaId,
     seatingSnapshotsState.items,
     selectedCategory?.name,
   ]);
@@ -2696,6 +2757,9 @@ export default function EventsModule({ onNavigate = () => {} }){
     setRecurrenceError('');
     setImageFile(null);
     setImagePreview(null);
+    setShowMediaLibrary(false);
+    setMediaLibrarySearch('');
+    setGalleryMediaError('');
     setError('');
     setFieldErrors({});
     setSaveToast('');
@@ -2768,6 +2832,9 @@ export default function EventsModule({ onNavigate = () => {} }){
     setRecurrenceLoading(Boolean(Number(event.is_series_master) === 1));
     setRecurrenceError('');
     setImageFile(null);
+    setShowMediaLibrary(false);
+    setMediaLibrarySearch('');
+    setGalleryMediaError('');
     setEventPricingRows([]);
     setEventPricingRowsLoading(false);
     const previewSource = event.effective_image?.src
@@ -2783,6 +2850,7 @@ export default function EventsModule({ onNavigate = () => {} }){
     const file = e.target.files[0];
     if (file) {
       setImageFile(file);
+      setFormData((prev) => ({ ...prev, poster_image_id: null, hero_image_id: null }));
       const reader = new FileReader();
       reader.onloadend = () => {
         setImagePreview(reader.result);
@@ -2795,6 +2863,21 @@ export default function EventsModule({ onNavigate = () => {} }){
     setImageFile(null);
     setImagePreview(null);
     setFormData(prev => ({ ...prev, image_url: '', hero_image_id: null, poster_image_id: null }));
+  };
+
+  const handleSelectGalleryImage = (item) => {
+    if (!item?.id) return;
+    const previewPath = item.webp_path || item.optimized_path || item.file_url || '';
+    const storedUrl = item.file_url || item.optimized_path || item.webp_path || '';
+    setImageFile(null);
+    setImagePreview(previewPath ? getImageUrlSync(previewPath) : null);
+    setFormData((prev) => ({
+      ...prev,
+      image_url: storedUrl,
+      poster_image_id: item.id,
+      hero_image_id: item.id,
+    }));
+    setShowMediaLibrary(false);
   };
 
   const copySnapshotPayload = useCallback(async (snapshot) => {
@@ -3492,6 +3575,8 @@ export default function EventsModule({ onNavigate = () => {} }){
     }
     const nextValue = type === 'checkbox' ? checked : value;
     if (name === 'image_url') {
+      setImageFile(null);
+      setImagePreview(nextValue ? getImageUrlSync(nextValue) : null);
       setFormData((prev) => ({ ...prev, image_url: nextValue, poster_image_id: null, hero_image_id: null }));
       return;
     }
@@ -3821,6 +3906,11 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
             if (!heroImageId && posterImageId) {
               heroImageId = posterImageId;
             }
+            setGalleryMedia((prev) => {
+              const next = prev.filter((item) => Number(item.id) !== Number(media.id));
+              return [media, ...next];
+            });
+            setGalleryMediaLoaded(true);
             const previewUrl = media.optimized_path || media.webp_path || media.file_url || media.url || '';
             if (previewUrl) {
               setImagePreview(getImageUrlSync(previewUrl));
@@ -6325,8 +6415,125 @@ const uploadImageWithProgress = useCallback((file) => new Promise((resolve, reje
                             onChange={handleImageChange}
                             className="block w-full cursor-pointer text-sm text-gray-300 file:mr-4 file:cursor-pointer file:rounded file:border-0 file:bg-purple-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-purple-700"
                           />
-                          <p className="mt-1 text-xs text-gray-400">Upload a custom image or leave empty to use the default logo</p>
+                          <p className="mt-1 text-xs text-gray-400">Upload a custom image, reuse one from the gallery below, or leave empty to use the default logo.</p>
                         </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowMediaLibrary((prev) => !prev);
+                              if (!galleryMediaLoaded) {
+                                fetchGalleryMedia();
+                              }
+                            }}
+                            className="rounded border border-purple-500/40 bg-purple-500/10 px-3 py-2 text-sm text-purple-100 hover:bg-purple-500/20"
+                          >
+                            {showMediaLibrary ? 'Hide gallery picker' : 'Choose from gallery'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowMediaLibrary(true);
+                              fetchGalleryMedia(true);
+                            }}
+                            className="rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 hover:bg-gray-700"
+                          >
+                            Refresh gallery
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onNavigate('media')}
+                            className="rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 hover:bg-gray-700"
+                          >
+                            Open Media Manager
+                          </button>
+                        </div>
+
+                        {showMediaLibrary && (
+                          <div className="space-y-3 rounded-xl border border-gray-700 bg-gray-800/70 p-4">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-medium text-white">Gallery images</p>
+                                <p className="text-xs text-gray-400">Select an existing media-library image instead of uploading a duplicate.</p>
+                              </div>
+                              <div className="text-xs text-gray-400">
+                                {galleryMediaLoading ? 'Loading…' : `${filteredGalleryMedia.length} image${filteredGalleryMedia.length === 1 ? '' : 's'}`}
+                              </div>
+                            </div>
+
+                            <label className="block">
+                              <span className="mb-1 block text-xs text-gray-400">Search gallery</span>
+                              <input
+                                type="text"
+                                value={mediaLibrarySearch}
+                                onChange={(e) => setMediaLibrarySearch(e.target.value)}
+                                className="w-full rounded bg-gray-700 px-3 py-2 text-sm text-white"
+                                placeholder="Search by filename, alt text, or caption"
+                              />
+                            </label>
+
+                            {galleryMediaError && (
+                              <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                                {galleryMediaError}
+                              </div>
+                            )}
+
+                            {galleryMediaLoading ? (
+                              <div className="flex items-center justify-center py-8">
+                                <div className="h-8 w-8 animate-spin rounded-full border-4 border-purple-500 border-t-transparent" />
+                              </div>
+                            ) : filteredGalleryMedia.length === 0 ? (
+                              <div className="rounded border border-dashed border-gray-600 bg-gray-900/40 px-4 py-6 text-sm text-gray-400">
+                                {galleryMedia.length
+                                  ? 'No gallery images match this search.'
+                                  : 'No gallery images are available yet. Upload one here or add it in Media Manager.'}
+                              </div>
+                            ) : (
+                              <div className="grid max-h-80 grid-cols-2 gap-3 overflow-y-auto pr-1 md:grid-cols-3">
+                                {filteredGalleryMedia.map((item) => {
+                                  const previewSrc = getImageUrlSync(item.webp_path || item.optimized_path || item.file_url || '');
+                                  const isSelected = selectedEventMediaId === Number(item.id);
+                                  return (
+                                    <button
+                                      key={item.id}
+                                      type="button"
+                                      onClick={() => handleSelectGalleryImage(item)}
+                                      className={`overflow-hidden rounded-lg border text-left transition ${
+                                        isSelected
+                                          ? 'border-purple-400 bg-purple-500/10'
+                                          : 'border-gray-700 bg-gray-900/60 hover:border-purple-500/50 hover:bg-gray-900'
+                                      }`}
+                                    >
+                                      <ResponsiveImage
+                                        src={previewSrc}
+                                        alt={item.alt_text || item.original_name || 'Gallery image'}
+                                        width={320}
+                                        height={192}
+                                        className="h-28 w-full object-cover"
+                                      />
+                                      <div className="space-y-1 p-2">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <p className="truncate text-xs font-medium text-white">
+                                            {item.original_name || item.filename || `Image #${item.id}`}
+                                          </p>
+                                          {isSelected && (
+                                            <span className="rounded-full bg-purple-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-purple-100">
+                                              Selected
+                                            </span>
+                                          )}
+                                        </div>
+                                        <p className="truncate text-[11px] text-gray-400">
+                                          {item.alt_text || item.caption || item.category || 'Gallery image'}
+                                        </p>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         <div>
                           <label className="mb-1 block text-xs text-gray-400">Or enter image URL:</label>
