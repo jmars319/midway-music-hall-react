@@ -320,6 +320,7 @@ export default function EventSeatingModal({ event, onClose }) {
   );
   const isSeatSelectionView = !loading && !showContactForm && hasPositions;
   const isMobileSeatMode = isSeatSelectionView && isMobileViewport;
+  const mobileScrollableSeatSelection = isMobileSeatMode && overlayOnlySeatChart && !showLargeMap;
   const MIN_INLINE_MAP_HEIGHT = 240;
 
   /* eslint-disable react-hooks/exhaustive-deps */
@@ -659,8 +660,7 @@ export default function EventSeatingModal({ event, onClose }) {
     const getMobileViewport = () => {
       const isNarrow = Boolean(widthQuery.matches);
       const isCoarsePointer = Boolean(coarseQuery.matches) || (Boolean(hoverNoneQuery.matches) && !Boolean(finePointerQuery.matches));
-      const isNarrowTouch = isNarrow && !Boolean(finePointerQuery.matches);
-      return isNarrowTouch || isCoarsePointer;
+      return isNarrow || isCoarsePointer;
     };
     const handleChange = () => {
       setIsMobileViewport(getMobileViewport());
@@ -1998,7 +1998,10 @@ export default function EventSeatingModal({ event, onClose }) {
           </div>
         ) : (
           // Seating Chart View
-          <div ref={seatSelectionContentRef} className="flex-1 overflow-hidden p-6 min-h-0 seat-selection-content">
+          <div
+            ref={seatSelectionContentRef}
+            className={`flex-1 p-6 min-h-0 seat-selection-content${mobileScrollableSeatSelection ? ' seat-selection-content--scrollable' : ' overflow-hidden'}`}
+          >
             {!hasPositions ? (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center text-gray-400">
@@ -2013,19 +2016,38 @@ export default function EventSeatingModal({ event, onClose }) {
                 <button
                   type="button"
                   onClick={openLargeMapOverlay}
-                  className="h-full w-full rounded-xl border border-indigo-500/30 bg-gray-950/70 p-6 text-left focus:outline-none focus:ring-2 focus:ring-indigo-300/70"
+                  className={`w-full rounded-xl border border-indigo-500/30 bg-gray-950/70 p-6 text-left focus:outline-none focus:ring-2 focus:ring-indigo-300/70${isMobileSeatMode ? ' seat-chart-launch-button' : ' h-full'}`}
                   aria-label="Open full seating chart"
                 >
-                  <div className="relative h-full rounded-xl border border-indigo-500/20 bg-gradient-to-br from-gray-950 to-indigo-950/70 overflow-hidden">
+                  <div className={`relative rounded-xl border border-indigo-500/20 bg-gradient-to-br from-gray-950 to-indigo-950/70 overflow-hidden${isMobileSeatMode ? ' seat-chart-launch-surface' : ' h-full'}`}>
                     <div className="absolute inset-0 bg-black/35" />
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center px-4">
-                      <h3 className="text-2xl font-semibold text-white">Open full seating chart</h3>
-                      <p className="max-w-2xl text-sm text-gray-200">
-                        Click anywhere to enter the full chart view, pick seats, and confirm.
-                      </p>
-                      <span className="inline-flex items-center justify-center rounded-lg border border-indigo-400/60 bg-indigo-600/30 px-5 py-3 text-sm font-semibold text-white">
-                        Open full seating chart
-                      </span>
+                    <div className={`relative z-10 flex min-h-full flex-col${isMobileSeatMode ? ' items-start justify-start gap-3 px-4 py-4 text-left sm:px-5 sm:py-5' : ' items-center justify-center gap-4 px-4 text-center'}`}>
+                      {isMobileSeatMode ? (
+                        <>
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.26em] text-indigo-200">
+                            Seating chart
+                          </span>
+                          <h3 className="text-lg font-semibold leading-tight text-white sm:text-xl">
+                            View the seating chart
+                          </h3>
+                          <p className="max-w-sm text-sm leading-relaxed text-gray-200">
+                            Tap here to open the map, review available seats, and choose your section.
+                          </p>
+                          <span className="inline-flex w-full items-center justify-center rounded-lg border border-indigo-400/60 bg-indigo-600/30 px-4 py-3 text-center text-sm font-semibold leading-tight text-white whitespace-normal">
+                            View seating chart
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <h3 className="text-2xl font-semibold text-white">Open full seating chart</h3>
+                          <p className="max-w-2xl text-sm leading-relaxed text-gray-200">
+                            Click anywhere to enter the full chart view, pick seats, and confirm.
+                          </p>
+                          <span className="inline-flex w-full max-w-xs items-center justify-center rounded-lg border border-indigo-400/60 bg-indigo-600/30 px-5 py-3 text-center text-sm font-semibold leading-tight text-white whitespace-normal">
+                            Open full seating chart
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </button>

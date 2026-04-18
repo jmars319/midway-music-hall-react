@@ -212,6 +212,21 @@ a:focus, button:focus, iframe:focus {
   max-height: none;
 }
 
+.seat-selection-mobile .seat-selection-content--scrollable {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.seat-selection-mobile .seat-chart-launch-button {
+  min-height: 0;
+}
+
+.seat-selection-mobile .seat-chart-launch-surface {
+  min-height: clamp(9.5rem, 26vh, 12rem);
+}
+
 .seat-legend-toggle {
   cursor: pointer;
   list-style: none;

@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import EventSeatingModal from '../EventSeatingModal';
 
-jest.mock('../ReservationBanner', () => () => null);
+jest.mock('../ReservationBanner', () => () => <div data-testid="reservation-banner">Reservation banner</div>);
 jest.mock('../../utils/useFocusTrap', () => jest.fn());
 jest.mock('../../hooks/useSeatDebug', () => ({
   useSeatDebugLogger: () => ({ log: jest.fn(), enabled: false }),
@@ -149,6 +149,28 @@ const flush = async () => {
   await Promise.resolve();
 };
 
+const mockViewportQueries = ({ isMobile = false, isNarrow = isMobile, hasFinePointer = false } = {}) => {
+  window.matchMedia.mockImplementation((query) => {
+    let matches = false;
+    if (query === '(max-width: 640px)') {
+      matches = isNarrow;
+    } else if (query === '(pointer: coarse)' || query === '(hover: none)') {
+      matches = isMobile;
+    } else if (query === '(pointer: fine)') {
+      matches = hasFinePointer;
+    }
+    return {
+      matches,
+      media: query,
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
+      dispatchEvent: jest.fn(),
+    };
+  });
+};
+
 describe('EventSeatingModal tier visibility', () => {
   let container;
   let root;
@@ -185,6 +207,7 @@ describe('EventSeatingModal tier visibility', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     global.fetch = jest.fn();
+    mockViewportQueries();
   });
 
   afterEach(() => {
@@ -343,5 +366,37 @@ describe('EventSeatingModal tier visibility', () => {
     expect(document.body.textContent).toContain('$18.00');
     expect(document.body.textContent).toContain('Running total');
     expect(document.body.textContent).toContain('$36.00');
+  });
+
+  test('keeps the mobile seating-chart launcher scrollable when the modal header stack grows', async () => {
+    mockViewportQueries({ isNarrow: true, hasFinePointer: true });
+
+    await renderModal({
+      event: {
+        ...buildTieredEvent(),
+        contact_name: 'Midway Box Office',
+        contact_phone: '(555) 555-0100',
+      },
+      response: buildTieredSeatingResponse(),
+    });
+
+    const dialog = document.querySelector('[role="dialog"]');
+    const seatSelectionContent = document.querySelector('.seat-selection-content');
+    const banner = document.querySelector('[data-testid="reservation-banner"]');
+    const openChartButton = document.querySelector('button[aria-label="Open full seating chart"]');
+    const launchSurface = document.querySelector('.seat-chart-launch-surface');
+    const launchCta = Array.from(openChartButton.querySelectorAll('span')).find(
+      (node) => node.textContent.includes('View seating chart')
+    );
+
+    expect(dialog.className).toContain('seat-selection-mobile');
+    expect(banner).not.toBeNull();
+    expect(document.body.textContent).toContain('Show event details');
+    expect(seatSelectionContent.className).toContain('seat-selection-content--scrollable');
+    expect(openChartButton.className).toContain('seat-chart-launch-button');
+    expect(launchSurface).not.toBeNull();
+    expect(launchCta).not.toBeNull();
+    expect(openChartButton.textContent).toContain('View the seating chart');
+    expect(launchCta.className).toContain('whitespace-normal');
   });
 });
