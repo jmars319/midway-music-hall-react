@@ -54,9 +54,9 @@ This document covers public-facing features, their implementation, and why they 
 - **Why:** Large accessibility font sizes on mobile must not obscure the map or action buttons.
 
 ## Payment links in seat requests
-- **What:** Payment CTA and fine print for eligible events.
-- **How:** `EventSeatingModal.js` renders payment details from `payment_option` and category-level payment settings only after successful seat-request submission; `paypal_orders` endpoints are scaffold stubs (not implemented) and amount fields (`total_amount`, `currency`) are stored as scaffolding.
-- **Why:** Consistent payment flow without per-event manual setup.
+- **What:** Protected post-submit payment CTA and fine print for eligible seat requests.
+- **How:** `EventSeatingModal.js` renders provider options from category/global payment settings only after successful seat-request submission. Square hosted checkout and PayPal Orders are created by backend endpoints from stored `total_amount` and `currency`; public start/capture requests require the signed `payment_access_token` returned with the seat request.
+- **Why:** Consistent payment flow without per-event manual setup or frontend-controlled amounts.
 
 ## Artist suggestion form
 - **What:** Artist/fan submission form.

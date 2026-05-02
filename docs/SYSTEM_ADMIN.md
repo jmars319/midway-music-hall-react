@@ -49,9 +49,9 @@ This document covers admin-facing features, their implementation, and why they e
 - **Why:** Allows staff edits without deployments.
 
 ## Payment settings
-- **What:** Manage payment URLs and seat limits per category.
-- **How:** `PaymentSettingsModule.js` and `payment_settings` table; events reference active settings at render time.
-- **Why:** Centralized, consistent payment handling for seat requests.
+- **What:** Manage Square, PayPal Orders, external payment fallback, and seat limits per global/category scope.
+- **How:** `PaymentSettingsModule.js` and `payment_settings` table; events reference active settings at render time. The admin screen shows config readiness and can run live provider credential validation for Square and PayPal.
+- **Why:** Centralized, consistent payment handling for seat requests while keeping provider secrets out of the browser.
 
 ## Admin users
 - **What:** Manage admin users and credentials.

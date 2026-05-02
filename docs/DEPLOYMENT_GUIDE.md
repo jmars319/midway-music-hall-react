@@ -54,6 +54,7 @@ DB_HOST=127.0.0.1
 DB_NAME=midway_live
 DB_USER=midway_user
 DB_PASSWORD=strong-password
+PAYMENT_ACCESS_SECRET=random-32-plus-character-secret
 
 SENDGRID_API_KEY=SG.xxxxxx
 SEND_EMAILS=false
@@ -79,6 +80,9 @@ SQUARE_WEBHOOK_NOTIFICATION_URL=https://midwaymusichall.net/api/webhooks/square
 
 Use `backend/.env.production.example` as the canonical key list. Older names like `DB_PASS` are not read by the backend.
 
+Payment access note:
+- `PAYMENT_ACCESS_SECRET` signs per-seat-request payment links. Use a unique random value of at least 32 characters and keep it stable across deploys; changing it invalidates unpaid public payment links.
+
 Square production notes:
 - `SQUARE_ACCESS_TOKEN` must be a server-side token for the same Square account and location you intend to use.
 - `SQUARE_LOCATION_ID` must match the location used for checkout links.
@@ -87,12 +91,14 @@ Square production notes:
 - `SQUARE_CHECKOUT_REDIRECT_URL` is optional but recommended if you want buyers returned to MMH after Square-hosted checkout.
 - The MMH-branded public return page for this build is `/payment/return`.
 - Cash App Pay is exposed through Square checkout when the Square provider is enabled for a scope and the `Allow Cash App Pay inside Square checkout` toggle is enabled in admin.
+- After setting Square env values, use Payment Settings -> Square readiness -> Validate credentials to prove the access token can see the configured location before enabling Square publicly.
 
 PayPal production notes:
 - `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` are the server-side REST credentials for the live PayPal app.
 - `PAYPAL_WEBHOOK_ID` must be the webhook ID from the PayPal app that points at `PAYPAL_WEBHOOK_NOTIFICATION_URL`.
 - `PAYPAL_CHECKOUT_RETURN_URL` and `PAYPAL_CHECKOUT_CANCEL_URL` should return buyers to MMH-branded `/payment/*` routes.
 - The PayPal provider only appears publicly when both the provider row is enabled in admin and the backend PayPal readiness checks are complete.
+- After setting PayPal env values, use Payment Settings -> PayPal readiness -> Validate credentials to prove the REST app credentials can obtain an OAuth token before enabling PayPal publicly.
 
 ## Database setup (phpMyAdmin)
 1. Create DB + user in cPanel and grant All Privileges.

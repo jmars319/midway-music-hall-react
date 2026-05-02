@@ -26,6 +26,10 @@ if ! grep -q "PayPal Orders checkout" "$ROOT_DIR/frontend/src/admin/PaymentSetti
   fail "PaymentSettingsModule is missing the PayPal Orders provider card"
 fi
 
+if ! grep -q "Validate credentials" "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js"; then
+  fail "PaymentSettingsModule is missing live provider validation actions"
+fi
+
 if grep -q "Legacy PayPal" "$ROOT_DIR/frontend/src/admin/PaymentSettingsModule.js"; then
   fail "PaymentSettingsModule still exposes legacy PayPal hosted-button UI"
 fi
@@ -44,6 +48,10 @@ fi
 
 if ! grep -q "square_status" "$ROOT_DIR/backend/index.php"; then
   fail "backend payment settings endpoint is missing Square readiness metadata"
+fi
+
+if ! grep -q "payment-settings/validate-provider" "$ROOT_DIR/backend/index.php"; then
+  fail "backend payment settings endpoint is missing live provider validation route"
 fi
 
 printf '%s\n' "[payment-settings-ui] verification succeeded"

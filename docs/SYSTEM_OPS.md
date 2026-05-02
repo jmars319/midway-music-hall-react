@@ -40,9 +40,9 @@ This document covers deployment, hosting, data model rationale, and operational 
 - **Health check:** `/api/health` for API reachability.
 - **Image audit:** `backend/scripts/check_image_variants.php`.
 
-## Phase 3 payment plan (scaffolding only)
-- **Target UX sequence:** seat selection -> contact info submit -> request success -> payment section.
-- **Current constraint:** keep existing PayPal Hosted Buttons integration type and avoid webhook/capture rewrites in this phase.
-- **Feasibility note:** Hosted Buttons typically do not support dynamic per-seat totals without moving to a different PayPal order/capture integration.
-- **UI scaffolding direction:** retain existing payment config resolution; actionable payment CTA is post-submit only.
-- **Current scaffold fields/endpoints:** `seat_requests.total_amount`, `currency`, `payment_provider`, `payment_status`, `payment_order_id`, `payment_capture_id`, `payment_updated_at`; PayPal Orders endpoints are stubs.
+## Online payments
+- **Target UX sequence:** seat selection -> contact info submit -> request success -> protected payment action.
+- **Implemented providers:** Square hosted checkout and PayPal Orders use backend-calculated seat-request totals; external links remain a manual fallback.
+- **Payment state fields:** `seat_requests.total_amount`, `currency`, `payment_provider`, `payment_status`, `payment_order_id`, `payment_capture_id`, `payment_updated_at`.
+- **Provider callbacks:** Square and PayPal webhook endpoints validate provider signatures before updating payment state. PayPal return capture also validates the protected payment access token attached to the request.
+- **Operational requirement:** `PAYMENT_ACCESS_SECRET` must be stable and at least 32 characters. Provider readiness is config-gated, and the admin Payment Settings screen includes live credential validation actions before enabling Square or PayPal publicly.

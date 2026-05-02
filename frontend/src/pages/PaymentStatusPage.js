@@ -92,6 +92,13 @@ const CODE_VARIANTS = {
     tone: 'indigo',
     icon: Info,
   },
+  PAYMENT_ACCESS_DENIED: {
+    badge: 'Payment link expired',
+    title: 'This payment link is not valid for the request.',
+    body: 'Payment links are protected for each seat request. Please return to the original request confirmation or contact staff for a fresh payment link.',
+    tone: 'amber',
+    icon: AlertTriangle,
+  },
   REQUEST_NOT_OPEN_FOR_PAYMENT: {
     badge: 'Request closed',
     title: 'This request is no longer open for payment.',
@@ -261,6 +268,7 @@ export default function PaymentStatusPage({ onAdminClick }) {
   const providerType = (initialSearch.get('provider') || '').trim().toLowerCase();
   const seatRequestId = (initialSearch.get('seat_request_id') || '').trim();
   const token = (initialSearch.get('token') || '').trim();
+  const paymentAccessToken = (initialSearch.get('payment_access_token') || '').trim();
   const routeKey = useMemo(() => resolveRouteKey(), []);
   const [runtimeState, setRuntimeState] = useState({});
   const pageCopy = useMemo(() => resolveStatusPageCopy(runtimeState), [runtimeState]);
@@ -272,7 +280,17 @@ export default function PaymentStatusPage({ onAdminClick }) {
   ];
 
   useEffect(() => {
-    if (routeKey !== 'return' || providerType !== 'paypal_orders' || !seatRequestId || !token) {
+    if (routeKey === 'return' && providerType === 'paypal_orders' && seatRequestId && token && !paymentAccessToken) {
+      setRuntimeState({
+        status: 'error',
+        providerType: 'paypal_orders',
+        routeOverride: 'unavailable',
+        code: 'PAYMENT_ACCESS_DENIED',
+        message: 'This PayPal return URL is missing the protected payment access token.',
+      });
+      return undefined;
+    }
+    if (routeKey !== 'return' || providerType !== 'paypal_orders' || !seatRequestId || !token || !paymentAccessToken) {
       return undefined;
     }
     let cancelled = false;
@@ -289,7 +307,10 @@ export default function PaymentStatusPage({ onAdminClick }) {
             'Content-Type': 'application/json',
             Accept: 'application/json',
           },
-          body: JSON.stringify({ token }),
+          body: JSON.stringify({
+            token,
+            payment_access_token: paymentAccessToken,
+          }),
         });
         const data = await res.json().catch(() => ({}));
         if (cancelled) {
@@ -335,7 +356,7 @@ export default function PaymentStatusPage({ onAdminClick }) {
     return () => {
       cancelled = true;
     };
-  }, [providerType, routeKey, seatRequestId, token]);
+  }, [paymentAccessToken, providerType, routeKey, seatRequestId, token]);
 
   useEffect(() => {
     if (typeof document === 'undefined') {

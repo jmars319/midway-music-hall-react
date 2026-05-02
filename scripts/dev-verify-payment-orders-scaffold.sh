@@ -256,6 +256,10 @@ if ! rg -n "provider=paypal_orders|Finalizing your PayPal payment|payment/captur
   log_error "PayPal return/finalize flow is missing from PaymentStatusPage"
   exit 1
 fi
+if ! rg -n "payment_access_token|PAYMENT_ACCESS_SECRET" "$ROOT_DIR/backend/index.php" "$ROOT_DIR/frontend/src/pages/PaymentStatusPage.js" "$ROOT_DIR/backend/.env.production.example" >/dev/null; then
+  log_error "PayPal payment flow is missing protected payment access token wiring"
+  exit 1
+fi
 if ! rg -n "providerType === 'paypal_orders'|Pay with PayPal" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
   log_error "PayPal launch flow is missing from EventSeatingModal"
   exit 1

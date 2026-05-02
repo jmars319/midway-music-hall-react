@@ -52,6 +52,10 @@ if ! rg -n 'seat-requests/\$\{submittedSeatRequestId\}/payment/start' "$ROOT_DIR
   log_error "payment start route is not used by EventSeatingModal"
   exit 1
 fi
+if ! rg -n "submittedPaymentAccessToken|payment_access_token" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" "$ROOT_DIR/backend/index.php" >/dev/null; then
+  log_error "post-submit payment flow is missing protected payment access token handling"
+  exit 1
+fi
 if ! rg -n "Pay with Square|Pay with PayPal|Opening .*providerLabel" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" >/dev/null; then
   log_error "provider launch action copy is missing from EventSeatingModal"
   exit 1

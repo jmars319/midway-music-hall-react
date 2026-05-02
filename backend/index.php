@@ -3068,6 +3068,38 @@ function normalize_payment_provider_type($value): string
     return $providerType;
 }
 
+function env_value_looks_placeholder(string $value): bool
+{
+    $normalized = strtoupper(trim($value));
+    if ($normalized === '') {
+        return true;
+    }
+    if (in_array($normalized, ['CHANGE_ME', 'CHANGEME', 'TODO', 'TBD', 'PLACEHOLDER'], true)) {
+        return true;
+    }
+    return str_contains($normalized, 'REPLACE_WITH')
+        || str_contains($normalized, 'YOUR_')
+        || str_contains($normalized, 'PLACEHOLDER');
+}
+
+function configured_env_text(string $key, int $minLength = 1): ?string
+{
+    $value = trim((string) Env::get($key, ''));
+    if ($value === '' || strlen($value) < $minLength || env_value_looks_placeholder($value)) {
+        return null;
+    }
+    return $value;
+}
+
+function configured_env_url(string $key): ?string
+{
+    $value = configured_env_text($key);
+    if ($value === null || !preg_match('#^https?://#i', $value)) {
+        return null;
+    }
+    return $value;
+}
+
 function normalize_currency_code($value): ?string
 {
     $currency = strtoupper(trim((string) ($value ?? 'USD')));
@@ -3104,43 +3136,48 @@ function resolve_paypal_api_base_url(): string
 
 function resolve_paypal_client_id(): ?string
 {
-    $clientId = trim((string) Env::get('PAYPAL_CLIENT_ID', ''));
-    return $clientId !== '' ? $clientId : null;
+    return configured_env_text('PAYPAL_CLIENT_ID', 8);
 }
 
 function resolve_paypal_client_secret(): ?string
 {
-    $clientSecret = trim((string) Env::get('PAYPAL_CLIENT_SECRET', ''));
-    return $clientSecret !== '' ? $clientSecret : null;
+    return configured_env_text('PAYPAL_CLIENT_SECRET', 16);
 }
 
 function resolve_paypal_webhook_id(): ?string
 {
-    $webhookId = trim((string) Env::get('PAYPAL_WEBHOOK_ID', ''));
-    return $webhookId !== '' ? $webhookId : null;
+    return configured_env_text('PAYPAL_WEBHOOK_ID', 8);
 }
 
 function resolve_paypal_webhook_notification_url(): ?string
 {
-    $notificationUrl = trim((string) Env::get('PAYPAL_WEBHOOK_NOTIFICATION_URL', ''));
-    return $notificationUrl !== '' ? $notificationUrl : null;
+    return configured_env_url('PAYPAL_WEBHOOK_NOTIFICATION_URL');
 }
 
 function resolve_paypal_checkout_return_url(): ?string
 {
-    $returnUrl = trim((string) Env::get('PAYPAL_CHECKOUT_RETURN_URL', ''));
-    return $returnUrl !== '' ? $returnUrl : null;
+    return configured_env_url('PAYPAL_CHECKOUT_RETURN_URL');
 }
 
 function resolve_paypal_checkout_cancel_url(): ?string
 {
-    $cancelUrl = trim((string) Env::get('PAYPAL_CHECKOUT_CANCEL_URL', ''));
-    return $cancelUrl !== '' ? $cancelUrl : null;
+    return configured_env_url('PAYPAL_CHECKOUT_CANCEL_URL');
 }
 
 function paypal_orders_provider_is_configured(): bool
 {
     return !empty(paypal_admin_status()['ready_to_enable']);
+}
+
+function resolve_payment_access_token_secret(): ?string
+{
+    return configured_env_text('PAYMENT_ACCESS_SECRET', 32)
+        ?? configured_env_text('JWT_SECRET', 32);
+}
+
+function payment_access_token_secret_is_configured(): bool
+{
+    return resolve_payment_access_token_secret() !== null;
 }
 
 function paypal_admin_status(): array
@@ -3151,6 +3188,7 @@ function paypal_admin_status(): array
     $cancelUrlConfigured = resolve_paypal_checkout_cancel_url() !== null;
     $webhookIdConfigured = resolve_paypal_webhook_id() !== null;
     $webhookNotificationConfigured = resolve_paypal_webhook_notification_url() !== null;
+    $paymentAccessSecretConfigured = payment_access_token_secret_is_configured();
     $paymentStartReady = $clientIdConfigured && $clientSecretConfigured && $returnUrlConfigured && $cancelUrlConfigured;
     $webhookReady = $clientIdConfigured && $clientSecretConfigured && $webhookIdConfigured && $webhookNotificationConfigured;
 
@@ -3162,9 +3200,10 @@ function paypal_admin_status(): array
         'cancel_url_configured' => $cancelUrlConfigured,
         'webhook_id_configured' => $webhookIdConfigured,
         'webhook_notification_url_configured' => $webhookNotificationConfigured,
+        'payment_access_secret_configured' => $paymentAccessSecretConfigured,
         'payment_start_ready' => $paymentStartReady,
         'webhook_ready' => $webhookReady,
-        'ready_to_enable' => $paymentStartReady && $webhookReady,
+        'ready_to_enable' => $paymentStartReady && $webhookReady && $paymentAccessSecretConfigured,
     ];
 }
 
@@ -3179,14 +3218,12 @@ function resolve_square_environment(): string
 
 function resolve_square_access_token(): ?string
 {
-    $token = trim((string) Env::get('SQUARE_ACCESS_TOKEN', ''));
-    return $token !== '' ? $token : null;
+    return configured_env_text('SQUARE_ACCESS_TOKEN', 16);
 }
 
 function resolve_square_location_id(): ?string
 {
-    $locationId = trim((string) Env::get('SQUARE_LOCATION_ID', ''));
-    return $locationId !== '' ? $locationId : null;
+    return configured_env_text('SQUARE_LOCATION_ID', 4);
 }
 
 function resolve_square_api_base_url(): string
@@ -3208,20 +3245,17 @@ function resolve_square_api_version(): string
 
 function resolve_square_checkout_redirect_url(): ?string
 {
-    $redirectUrl = trim((string) Env::get('SQUARE_CHECKOUT_REDIRECT_URL', ''));
-    return $redirectUrl !== '' ? $redirectUrl : null;
+    return configured_env_url('SQUARE_CHECKOUT_REDIRECT_URL');
 }
 
 function resolve_square_webhook_signature_key(): ?string
 {
-    $signatureKey = trim((string) Env::get('SQUARE_WEBHOOK_SIGNATURE_KEY', ''));
-    return $signatureKey !== '' ? $signatureKey : null;
+    return configured_env_text('SQUARE_WEBHOOK_SIGNATURE_KEY', 16);
 }
 
 function resolve_square_webhook_notification_url(): ?string
 {
-    $notificationUrl = trim((string) Env::get('SQUARE_WEBHOOK_NOTIFICATION_URL', ''));
-    return $notificationUrl !== '' ? $notificationUrl : null;
+    return configured_env_url('SQUARE_WEBHOOK_NOTIFICATION_URL');
 }
 
 function square_provider_is_configured(): bool
@@ -3236,6 +3270,7 @@ function square_admin_status(): array
     $redirectUrlConfigured = resolve_square_checkout_redirect_url() !== null;
     $webhookSignatureConfigured = resolve_square_webhook_signature_key() !== null;
     $webhookNotificationConfigured = resolve_square_webhook_notification_url() !== null;
+    $paymentAccessSecretConfigured = payment_access_token_secret_is_configured();
     $paymentStartReady = $accessTokenConfigured && $locationIdConfigured;
     $webhookReady = $webhookSignatureConfigured && $webhookNotificationConfigured;
 
@@ -3246,10 +3281,134 @@ function square_admin_status(): array
         'redirect_url_configured' => $redirectUrlConfigured,
         'webhook_signature_key_configured' => $webhookSignatureConfigured,
         'webhook_notification_url_configured' => $webhookNotificationConfigured,
+        'payment_access_secret_configured' => $paymentAccessSecretConfigured,
         'payment_start_ready' => $paymentStartReady,
         'webhook_ready' => $webhookReady,
-        'ready_to_enable' => $paymentStartReady && $webhookReady,
+        'ready_to_enable' => $paymentStartReady && $webhookReady && $paymentAccessSecretConfigured,
     ];
+}
+
+function base64url_encode_string(string $value): string
+{
+    return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+}
+
+function base64url_decode_string(string $value): ?string
+{
+    $normalized = strtr($value, '-_', '+/');
+    $padding = strlen($normalized) % 4;
+    if ($padding > 0) {
+        $normalized .= str_repeat('=', 4 - $padding);
+    }
+    $decoded = base64_decode($normalized, true);
+    return $decoded === false ? null : $decoded;
+}
+
+function normalize_payment_token_contact($value): string
+{
+    return strtolower(trim((string) ($value ?? '')));
+}
+
+function payment_access_token_claims(array $seatRequest): array
+{
+    return [
+        'seat_request_id' => (int) ($seatRequest['id'] ?? 0),
+        'event_id' => (int) ($seatRequest['event_id'] ?? 0),
+        'created_at' => normalize_nullable_text($seatRequest['created_at'] ?? null),
+        'customer_email_hash' => hash('sha256', normalize_payment_token_contact($seatRequest['customer_email'] ?? null)),
+        'customer_phone_hash' => hash('sha256', normalize_payment_token_contact($seatRequest['customer_phone_normalized'] ?? ($seatRequest['customer_phone'] ?? null))),
+    ];
+}
+
+function build_payment_access_token(array $seatRequest): ?string
+{
+    $secret = resolve_payment_access_token_secret();
+    $claims = payment_access_token_claims($seatRequest);
+    if ($secret === null || empty($claims['seat_request_id']) || empty($claims['event_id']) || empty($claims['created_at'])) {
+        return null;
+    }
+    $payload = json_encode($claims);
+    if ($payload === false) {
+        return null;
+    }
+    $encodedPayload = base64url_encode_string($payload);
+    $signature = base64url_encode_string(hash_hmac('sha256', $encodedPayload, $secret, true));
+    return 'v1.' . $encodedPayload . '.' . $signature;
+}
+
+function payment_access_token_is_valid(array $seatRequest, ?string $token): bool
+{
+    $secret = resolve_payment_access_token_secret();
+    $token = normalize_nullable_text($token);
+    if ($secret === null || $token === null) {
+        return false;
+    }
+    $parts = explode('.', $token);
+    if (count($parts) !== 3 || $parts[0] !== 'v1') {
+        return false;
+    }
+    [, $encodedPayload, $encodedSignature] = $parts;
+    $expectedSignature = base64url_encode_string(hash_hmac('sha256', $encodedPayload, $secret, true));
+    if (!hash_equals($expectedSignature, $encodedSignature)) {
+        return false;
+    }
+    $decodedPayload = base64url_decode_string($encodedPayload);
+    if ($decodedPayload === null) {
+        return false;
+    }
+    $claims = json_decode($decodedPayload, true);
+    if (!is_array($claims)) {
+        return false;
+    }
+    return $claims === payment_access_token_claims($seatRequest);
+}
+
+function payment_access_token_from_request(Request $request, array $payload = []): ?string
+{
+    return normalize_nullable_text($payload['payment_access_token'] ?? null)
+        ?? normalize_nullable_text($request->query['payment_access_token'] ?? null)
+        ?? normalize_nullable_text($request->query['access_token'] ?? null);
+}
+
+function payment_access_denied_response(int $seatRequestId, ?string $providerType = null): void
+{
+    Response::error('Payment access token is required for this request.', 403, [
+        'code' => 'PAYMENT_ACCESS_DENIED',
+        'provider_type' => $providerType ? normalize_payment_provider_type($providerType) : null,
+        'seat_request_id' => $seatRequestId,
+    ]);
+}
+
+function selected_seats_fingerprint_value($selectedSeats): string
+{
+    if (is_string($selectedSeats)) {
+        $decoded = json_decode($selectedSeats, true);
+        $selectedSeats = is_array($decoded) ? $decoded : [$selectedSeats];
+    }
+    if (!is_array($selectedSeats)) {
+        return '';
+    }
+    $normalized = array_values(array_filter(array_map(static function ($seat): ?string {
+        $value = trim((string) $seat);
+        return $value === '' ? null : $value;
+    }, $selectedSeats)));
+    sort($normalized, SORT_STRING);
+    return implode('|', $normalized);
+}
+
+function build_payment_attempt_fingerprint(array $seatRequest, string $providerType): string
+{
+    $payload = [
+        'provider_type' => normalize_payment_provider_type($providerType),
+        'seat_request_id' => (int) ($seatRequest['id'] ?? 0),
+        'event_id' => (int) ($seatRequest['event_id'] ?? 0),
+        'selected_seats' => selected_seats_fingerprint_value($seatRequest['selected_seats'] ?? null),
+        'total_amount' => normalize_nullable_decimal($seatRequest['total_amount'] ?? null),
+        'currency' => normalize_currency_code($seatRequest['currency'] ?? null),
+        'updated_at' => normalize_nullable_text($seatRequest['updated_at'] ?? null),
+        'payment_updated_at' => normalize_nullable_text($seatRequest['payment_updated_at'] ?? null),
+    ];
+    return hash('sha256', json_encode($payload));
 }
 
 function payment_provider_priority(string $providerType): int
@@ -3387,7 +3546,7 @@ function square_money_amount_from_decimal($amount): int
     return (int) round($normalized * 100);
 }
 
-function square_create_payment_link(array $seatRequest, ?array $paymentOption = null): array
+function square_create_payment_link(array $seatRequest, ?array $paymentOption = null, ?string $paymentAccessToken = null): array
 {
     $seatRequestId = (int) ($seatRequest['id'] ?? 0);
     if ($seatRequestId <= 0) {
@@ -3406,8 +3565,9 @@ function square_create_payment_link(array $seatRequest, ?array $paymentOption = 
 
     $lineItemName = build_square_checkout_item_name($seatRequest);
     $amountCents = square_money_amount_from_decimal($seatRequest['total_amount'] ?? null);
+    $attemptFingerprint = build_payment_attempt_fingerprint($seatRequest, 'square');
     $body = [
-        'idempotency_key' => hash('sha256', 'square-checkout:' . $seatRequestId . ':' . normalize_nullable_decimal($seatRequest['total_amount'] ?? null) . ':' . $currency),
+        'idempotency_key' => 'mmh-square-' . $attemptFingerprint,
         'order' => [
             'location_id' => $locationId,
             'reference_id' => build_square_checkout_reference_id($seatRequestId),
@@ -3426,7 +3586,7 @@ function square_create_payment_link(array $seatRequest, ?array $paymentOption = 
     $checkoutOptions = [];
     $redirectUrl = resolve_square_checkout_redirect_url();
     if ($redirectUrl !== null) {
-        $checkoutOptions['redirect_url'] = $redirectUrl;
+        $checkoutOptions['redirect_url'] = payment_experience_url($redirectUrl, $seatRequestId, 'square', $paymentAccessToken);
     }
     if (!empty($paymentOption['square_enable_cash_app_pay'])) {
         $checkoutOptions['accepted_payment_methods'] = [
@@ -3589,7 +3749,7 @@ function build_paypal_checkout_reference_id(int $seatRequestId): string
     return substr('seatreq-' . $seatRequestId, 0, 127);
 }
 
-function paypal_experience_url(?string $baseUrl, int $seatRequestId, string $providerType): ?string
+function payment_experience_url(?string $baseUrl, int $seatRequestId, string $providerType, ?string $paymentAccessToken = null): ?string
 {
     if ($baseUrl === null) {
         return null;
@@ -3604,6 +3764,9 @@ function paypal_experience_url(?string $baseUrl, int $seatRequestId, string $pro
     }
     $existingQuery['provider'] = $providerType;
     $existingQuery['seat_request_id'] = $seatRequestId;
+    if ($paymentAccessToken !== null && trim($paymentAccessToken) !== '') {
+        $existingQuery['payment_access_token'] = $paymentAccessToken;
+    }
     $parts['query'] = http_build_query($existingQuery);
 
     $rebuilt = '';
@@ -3631,6 +3794,11 @@ function paypal_experience_url(?string $baseUrl, int $seatRequestId, string $pro
     return $rebuilt !== '' ? $rebuilt : null;
 }
 
+function paypal_experience_url(?string $baseUrl, int $seatRequestId, string $providerType, ?string $paymentAccessToken = null): ?string
+{
+    return payment_experience_url($baseUrl, $seatRequestId, $providerType, $paymentAccessToken);
+}
+
 function paypal_order_approval_url_from_response(?array $payload): ?string
 {
     if (!$payload) {
@@ -3656,7 +3824,7 @@ function paypal_order_approval_url_from_response(?array $payload): ?string
     return null;
 }
 
-function paypal_create_order(array $seatRequest): array
+function paypal_create_order(array $seatRequest, ?string $paymentAccessToken = null): array
 {
     $seatRequestId = (int) ($seatRequest['id'] ?? 0);
     if ($seatRequestId <= 0) {
@@ -3671,8 +3839,8 @@ function paypal_create_order(array $seatRequest): array
         throw new RuntimeException('PayPal amount must be a positive decimal');
     }
 
-    $returnUrl = paypal_experience_url(resolve_paypal_checkout_return_url(), $seatRequestId, 'paypal_orders');
-    $cancelUrl = paypal_experience_url(resolve_paypal_checkout_cancel_url(), $seatRequestId, 'paypal_orders');
+    $returnUrl = paypal_experience_url(resolve_paypal_checkout_return_url(), $seatRequestId, 'paypal_orders', $paymentAccessToken);
+    $cancelUrl = paypal_experience_url(resolve_paypal_checkout_cancel_url(), $seatRequestId, 'paypal_orders', $paymentAccessToken);
     if ($returnUrl === null || $cancelUrl === null) {
         throw new RuntimeException('PayPal return/cancel URLs are not configured');
     }
@@ -3711,7 +3879,7 @@ function paypal_create_order(array $seatRequest): array
         '/v2/checkout/orders',
         $body,
         paypal_access_token(),
-        ['PayPal-Request-Id: seat-request-paypal-order-' . $seatRequestId]
+        ['PayPal-Request-Id: mmh-paypal-order-' . substr(build_payment_attempt_fingerprint($seatRequest, 'paypal_orders'), 0, 48)]
     );
     if ($response['status'] < 200 || $response['status'] >= 300) {
         throw new RuntimeException(paypal_extract_error_message($response['json'] ?? [], 'PayPal order creation failed'));
@@ -3821,6 +3989,84 @@ function paypal_capture_order(string $orderId, int $seatRequestId): array
         'capture_id' => $captureId,
         'payload' => $payload,
     ];
+}
+
+function square_validate_provider_credentials(): array
+{
+    $status = square_admin_status();
+    if (empty($status['payment_start_ready'])) {
+        return [
+            'ok' => false,
+            'message' => 'Square access token and location ID are required before live validation can run.',
+            'status' => $status,
+        ];
+    }
+    try {
+        $response = square_api_request('GET', '/v2/locations');
+        if ($response['status'] < 200 || $response['status'] >= 300) {
+            return [
+                'ok' => false,
+                'message' => square_extract_error_message($response['json'] ?? [], 'Square credential validation failed'),
+                'status' => $status,
+            ];
+        }
+        $configuredLocationId = resolve_square_location_id();
+        $locations = $response['json']['locations'] ?? [];
+        $locationMatched = false;
+        if (is_array($locations)) {
+            foreach ($locations as $location) {
+                if (!is_array($location)) {
+                    continue;
+                }
+                if (normalize_nullable_text($location['id'] ?? null) === $configuredLocationId) {
+                    $locationMatched = true;
+                    break;
+                }
+            }
+        }
+        return [
+            'ok' => $locationMatched,
+            'message' => $locationMatched
+                ? 'Square credentials and configured location were validated.'
+                : 'Square credentials worked, but the configured location ID was not returned by Square.',
+            'location_verified' => $locationMatched,
+            'status' => $status,
+        ];
+    } catch (Throwable $error) {
+        return [
+            'ok' => false,
+            'message' => APP_DEBUG ? $error->getMessage() : 'Square credential validation failed.',
+            'status' => $status,
+        ];
+    }
+}
+
+function paypal_validate_provider_credentials(): array
+{
+    $status = paypal_admin_status();
+    if (empty($status['payment_start_ready'])) {
+        return [
+            'ok' => false,
+            'message' => 'PayPal client credentials and checkout URLs are required before live validation can run.',
+            'status' => $status,
+        ];
+    }
+    try {
+        $token = paypal_access_token();
+        return [
+            'ok' => $token !== '',
+            'message' => $token !== ''
+                ? 'PayPal client credentials were validated with the OAuth API.'
+                : 'PayPal OAuth did not return an access token.',
+            'status' => $status,
+        ];
+    } catch (Throwable $error) {
+        return [
+            'ok' => false,
+            'message' => APP_DEBUG ? $error->getMessage() : 'PayPal credential validation failed.',
+            'status' => $status,
+        ];
+    }
 }
 
 function paypal_webhook_signature_is_valid(Request $request, array $payload): bool
@@ -6983,6 +7229,7 @@ function create_seat_request_record(PDO $pdo, array $payload, array $options = [
                 $created,
                 $createdPaymentOptions
             );
+            $created['payment_access_token'] = build_payment_access_token($created);
         }
         if ($startedTransaction) {
             $pdo->commit();
@@ -8148,6 +8395,41 @@ $router->add('PUT', '/api/admin/payment-settings', function (Request $request) {
             error_log('PUT /api/admin/payment-settings error: ' . $e->getMessage());
         }
         Response::error('Failed to save payment settings', 500);
+    }
+});
+
+$router->add('POST', '/api/admin/payment-settings/validate-provider', function (Request $request) {
+    $session = current_admin_session();
+    if (!$session || empty($session['user'])) {
+        return Response::error('Unauthorized', 401);
+    }
+    if (!admin_csrf_origin_is_valid($request)) {
+        return Response::error('Forbidden', 403);
+    }
+    try {
+        $payload = read_json_body($request);
+        $providerType = normalize_payment_provider_type($payload['provider_type'] ?? '');
+        if ($providerType === 'square') {
+            return Response::success([
+                'provider_type' => 'square',
+                'validation' => square_validate_provider_credentials(),
+            ]);
+        }
+        if ($providerType === 'paypal_orders') {
+            return Response::success([
+                'provider_type' => 'paypal_orders',
+                'validation' => paypal_validate_provider_credentials(),
+            ]);
+        }
+        Response::error('Provider validation is only available for Square and PayPal Orders.', 422, [
+            'code' => 'PAYMENT_PROVIDER_VALIDATION_UNSUPPORTED',
+            'provider_type' => $providerType,
+        ]);
+    } catch (Throwable $e) {
+        if (APP_DEBUG) {
+            error_log('POST /api/admin/payment-settings/validate-provider error: ' . $e->getMessage());
+        }
+        Response::error('Failed to validate payment provider', 500);
     }
 });
 
@@ -10408,6 +10690,7 @@ $router->add('POST', '/api/seat-requests/:id/payment/start', function (Request $
         $requestedProviderType = array_key_exists('provider_type', $payload)
             ? normalize_payment_provider_type($payload['provider_type'])
             : null;
+        $paymentAccessToken = payment_access_token_from_request($request, $payload);
         $pdo = Database::connection();
         $seatRequestId = (int) ($params['id'] ?? 0);
         if ($seatRequestId <= 0) {
@@ -10420,6 +10703,11 @@ $router->add('POST', '/api/seat-requests/:id/payment/start', function (Request $
             return Response::error('Seat request not found', 404);
         }
         $seatRequest = $context['seat_request'];
+        if (!payment_access_token_is_valid($seatRequest, $paymentAccessToken)) {
+            $pdo->rollBack();
+            payment_access_denied_response($seatRequestId, $requestedProviderType);
+            return;
+        }
         $paymentOptions = $context['payment_options'] ?? [];
         $paymentSelection = resolve_payment_option_for_start($seatRequest, $paymentOptions, $requestedProviderType);
         if (!empty($paymentSelection['error'])) {
@@ -10469,6 +10757,7 @@ $router->add('POST', '/api/seat-requests/:id/payment/start', function (Request $
                             'checkout_url' => $existingLink['checkout_url'],
                             'launch_target' => 'new_tab',
                             'payment_resumed' => true,
+                            'payment_access_token' => $paymentAccessToken,
                             'payment_summary' => $seatRequest['payment_summary'] ?? null,
                         ]);
                         return;
@@ -10512,13 +10801,14 @@ $router->add('POST', '/api/seat-requests/:id/payment/start', function (Request $
                             $seatRequest = $context['seat_request'] ?? $seatRequest;
                             $paymentOptions = $context['payment_options'] ?? $paymentOptions;
                             $seatRequest['payment_summary'] = build_seat_request_payment_summary($seatRequest, $paymentOptions, 'paypal_orders');
-                            $pdo->rollBack();
-                            return Response::error('This request has already been paid and is pending staff confirmation.', 409, [
+                            $pdo->commit();
+                            Response::error('This request has already been paid and is pending staff confirmation.', 409, [
                                 'code' => 'PAYMENT_ALREADY_COMPLETED',
                                 'provider_type' => 'paypal_orders',
                                 'seat_request_id' => $seatRequestId,
                                 'payment_summary' => $seatRequest['payment_summary'],
                             ]);
+                            return;
                         }
                         if (!empty($existingOrder['approve_url'])) {
                             $pdo->commit();
@@ -10528,6 +10818,7 @@ $router->add('POST', '/api/seat-requests/:id/payment/start', function (Request $
                                 'checkout_url' => $existingOrder['approve_url'],
                                 'launch_target' => 'same_tab',
                                 'payment_resumed' => true,
+                                'payment_access_token' => $paymentAccessToken,
                                 'payment_summary' => $seatRequest['payment_summary'] ?? null,
                             ]);
                             return;
@@ -10583,7 +10874,7 @@ $router->add('POST', '/api/seat-requests/:id/payment/start', function (Request $
             }
 
             try {
-                $paymentLink = square_create_payment_link($seatRequest, $paymentOption);
+                $paymentLink = square_create_payment_link($seatRequest, $paymentOption, $paymentAccessToken);
             } catch (Throwable $squareError) {
                 $pdo->rollBack();
                 return Response::error(
@@ -10614,6 +10905,7 @@ $router->add('POST', '/api/seat-requests/:id/payment/start', function (Request $
                 'seat_request_id' => $seatRequestId,
                 'checkout_url' => $paymentLink['checkout_url'],
                 'launch_target' => 'new_tab',
+                'payment_access_token' => $paymentAccessToken,
                 'payment_summary' => build_seat_request_payment_summary($seatRequest, $paymentOptions, 'square'),
             ]);
             return;
@@ -10630,7 +10922,7 @@ $router->add('POST', '/api/seat-requests/:id/payment/start', function (Request $
                 ]);
             }
             try {
-                $paypalOrder = paypal_create_order($seatRequest);
+                $paypalOrder = paypal_create_order($seatRequest, $paymentAccessToken);
             } catch (Throwable $paypalError) {
                 $pdo->rollBack();
                 return Response::error(
@@ -10660,6 +10952,7 @@ $router->add('POST', '/api/seat-requests/:id/payment/start', function (Request $
                 'seat_request_id' => $seatRequestId,
                 'checkout_url' => $paypalOrder['approve_url'],
                 'launch_target' => 'same_tab',
+                'payment_access_token' => $paymentAccessToken,
                 'payment_summary' => build_seat_request_payment_summary($seatRequest, $paymentOptions, 'paypal_orders'),
             ]);
             return;
@@ -10850,6 +11143,10 @@ $router->add('POST', '/api/seat-requests/:id/payment/create-order', function (Re
         if ($seatRequestId <= 0) {
             return Response::error('Invalid seat request id', 422);
         }
+        $rawBody = trim($request->raw());
+        $payload = $rawBody !== '' ? json_decode($rawBody, true) : [];
+        $payload = is_array($payload) ? $payload : [];
+        $paymentAccessToken = payment_access_token_from_request($request, $payload);
         $pdo->beginTransaction();
         $context = load_seat_request_payment_context($pdo, $seatRequestId, true);
         if (!$context) {
@@ -10857,6 +11154,11 @@ $router->add('POST', '/api/seat-requests/:id/payment/create-order', function (Re
             return Response::error('Seat request not found', 404);
         }
         $seatRequest = $context['seat_request'];
+        if (!payment_access_token_is_valid($seatRequest, $paymentAccessToken)) {
+            $pdo->rollBack();
+            payment_access_denied_response($seatRequestId, 'paypal_orders');
+            return;
+        }
         $paymentOptions = $context['payment_options'] ?? [];
         $paymentOption = find_payment_option_by_provider_type($paymentOptions, 'paypal_orders');
         $seatRequest['payment_summary'] = build_seat_request_payment_summary($seatRequest, $paymentOptions, 'paypal_orders');
@@ -10879,7 +11181,7 @@ $router->add('POST', '/api/seat-requests/:id/payment/create-order', function (Re
                 'payment_summary' => $seatRequest['payment_summary'],
             ]);
         }
-        $paypalOrder = paypal_create_order($seatRequest);
+        $paypalOrder = paypal_create_order($seatRequest, $paymentAccessToken);
         apply_seat_request_payment_update($pdo, $seatRequestId, [
             'payment_provider' => 'paypal_orders',
             'payment_status' => 'pending',
@@ -10899,6 +11201,7 @@ $router->add('POST', '/api/seat-requests/:id/payment/create-order', function (Re
             'checkout_url' => $paypalOrder['approve_url'],
             'approve_url' => $paypalOrder['approve_url'],
             'launch_target' => 'same_tab',
+            'payment_access_token' => $paymentAccessToken,
         ]);
     } catch (Throwable $error) {
         if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
@@ -10921,6 +11224,7 @@ $router->add('POST', '/api/seat-requests/:id/payment/capture', function (Request
         $rawBody = trim($request->raw());
         $payload = $rawBody !== '' ? json_decode($rawBody, true) : [];
         $payload = is_array($payload) ? $payload : [];
+        $paymentAccessToken = payment_access_token_from_request($request, $payload);
         $pdo->beginTransaction();
         $context = load_seat_request_payment_context($pdo, $seatRequestId, true);
         if (!$context) {
@@ -10928,6 +11232,11 @@ $router->add('POST', '/api/seat-requests/:id/payment/capture', function (Request
             return Response::error('Seat request not found', 404);
         }
         $seatRequest = $context['seat_request'];
+        if (!payment_access_token_is_valid($seatRequest, $paymentAccessToken)) {
+            $pdo->rollBack();
+            payment_access_denied_response($seatRequestId, 'paypal_orders');
+            return;
+        }
         $paymentOptions = $context['payment_options'] ?? [];
         $paymentOption = find_payment_option_by_provider_type($paymentOptions, 'paypal_orders');
         $seatRequest['payment_summary'] = build_seat_request_payment_summary($seatRequest, $paymentOptions, 'paypal_orders');

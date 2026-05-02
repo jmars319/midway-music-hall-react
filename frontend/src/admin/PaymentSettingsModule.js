@@ -130,6 +130,8 @@ export default function PaymentSettingsModule() {
   const [categories, setCategories] = useState([]);
   const [capabilities, setCapabilities] = useState({});
   const [savingKey, setSavingKey] = useState('');
+  const [validatingProvider, setValidatingProvider] = useState('');
+  const [providerValidation, setProviderValidation] = useState({});
   const [statusMessage, setStatusMessage] = useState('');
 
   const fetchSettings = async () => {
@@ -195,6 +197,7 @@ export default function PaymentSettingsModule() {
 
       setHasTable(true);
       setCapabilities(data.capabilities || {});
+      setProviderValidation({});
       setCategories(categoryList);
       setFormState(mapped);
     } catch (err) {
@@ -291,6 +294,41 @@ export default function PaymentSettingsModule() {
     }
   };
 
+  const handleValidateProvider = async (providerType) => {
+    const normalized = normalizeProviderType(providerType);
+    if (!['square', 'paypal_orders'].includes(normalized) || validatingProvider) {
+      return;
+    }
+    setError('');
+    setStatusMessage('');
+    setValidatingProvider(normalized);
+    try {
+      const res = await fetch(`${API_BASE}/admin/payment-settings/validate-provider`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider_type: normalized }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || `Unable to validate ${providerDisplayName(normalized)} credentials.`);
+      }
+      setProviderValidation((prev) => ({ ...prev, [normalized]: data.validation || {} }));
+      setStatusMessage(data?.validation?.message || `${providerDisplayName(normalized)} validation complete.`);
+    } catch (err) {
+      console.error('Failed to validate payment provider', err);
+      setProviderValidation((prev) => ({
+        ...prev,
+        [normalized]: {
+          ok: false,
+          message: err instanceof Error ? err.message : `Unable to validate ${providerDisplayName(normalized)} credentials.`,
+        },
+      }));
+      setError(err instanceof Error ? err.message : `Unable to validate ${providerDisplayName(normalized)} credentials.`);
+    } finally {
+      setValidatingProvider('');
+    }
+  };
+
   const squareStatus = capabilities.square_status || {};
   const paypalStatus = capabilities.paypal_status || {};
   const squareMissingItems = missingKeysFromChecklist(squareStatus, [
@@ -298,6 +336,7 @@ export default function PaymentSettingsModule() {
     { key: 'location_id_configured', label: 'Location ID' },
     { key: 'webhook_signature_key_configured', label: 'Webhook signature key' },
     { key: 'webhook_notification_url_configured', label: 'Webhook URL' },
+    { key: 'payment_access_secret_configured', label: 'Payment access secret' },
   ]);
   const paypalMissingItems = missingKeysFromChecklist(paypalStatus, [
     { key: 'client_id_configured', label: 'Client ID' },
@@ -306,7 +345,10 @@ export default function PaymentSettingsModule() {
     { key: 'cancel_url_configured', label: 'Cancel URL' },
     { key: 'webhook_id_configured', label: 'Webhook ID' },
     { key: 'webhook_notification_url_configured', label: 'Webhook URL' },
+    { key: 'payment_access_secret_configured', label: 'Payment access secret' },
   ]);
+  const squareValidation = providerValidation.square || null;
+  const paypalValidation = providerValidation.paypal_orders || null;
 
   const configGroups = useMemo(() => {
     const groups = [{ key: 'global', scope: 'global', categoryId: null, categoryName: 'Global default' }];
@@ -403,12 +445,22 @@ export default function PaymentSettingsModule() {
                     Square is the primary hosted-checkout flow. Secrets stay in backend environment settings, not in this admin form.
                   </p>
                 </div>
-                <div className={`rounded-md border px-3 py-2 text-sm font-semibold ${
-                  squareStatus.ready_to_enable
-                    ? 'border-emerald-400/40 bg-emerald-500/20 text-emerald-100'
-                    : 'border-amber-400/40 bg-amber-500/15 text-amber-100'
-                }`}>
-                  {squareStatus.ready_to_enable ? 'Ready to enable' : 'Not ready to enable'}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleValidateProvider('square')}
+                    disabled={validatingProvider !== '' || !squareStatus.payment_start_ready}
+                    className="rounded-md border border-emerald-400/40 px-3 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:border-gray-600 disabled:text-gray-400"
+                  >
+                    {validatingProvider === 'square' ? 'Validating...' : 'Validate credentials'}
+                  </button>
+                  <div className={`rounded-md border px-3 py-2 text-sm font-semibold ${
+                    squareStatus.ready_to_enable
+                      ? 'border-emerald-400/40 bg-emerald-500/20 text-emerald-100'
+                      : 'border-amber-400/40 bg-amber-500/15 text-amber-100'
+                  }`}>
+                    {squareStatus.ready_to_enable ? 'Config ready' : 'Config incomplete'}
+                  </div>
                 </div>
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -427,8 +479,17 @@ export default function PaymentSettingsModule() {
                 </ul>
               ) : (
                 <p className="mt-4 text-sm text-emerald-100">
-                  Square can be enabled. Customers can also see Cash App Pay inside Square checkout when the Square provider card below turns it on and the buyer/device are eligible.
+                  Square configuration is complete. Use Validate credentials before enabling it for a live category.
                 </p>
+              )}
+              {squareValidation && (
+                <div className={`mt-4 rounded-lg border px-3 py-2 text-sm ${
+                  squareValidation.ok
+                    ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100'
+                    : 'border-rose-400/40 bg-rose-500/15 text-rose-100'
+                }`}>
+                  {squareValidation.message || (squareValidation.ok ? 'Square validation passed.' : 'Square validation failed.')}
+                </div>
               )}
             </div>
 
@@ -440,12 +501,22 @@ export default function PaymentSettingsModule() {
                     PayPal uses the Orders API and the same backend-authoritative seat request totals as Square.
                   </p>
                 </div>
-                <div className={`rounded-md border px-3 py-2 text-sm font-semibold ${
-                  paypalStatus.ready_to_enable
-                    ? 'border-emerald-400/40 bg-emerald-500/20 text-emerald-100'
-                    : 'border-amber-400/40 bg-amber-500/15 text-amber-100'
-                }`}>
-                  {paypalStatus.ready_to_enable ? 'Ready to enable' : 'Not ready to enable'}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleValidateProvider('paypal_orders')}
+                    disabled={validatingProvider !== '' || !paypalStatus.payment_start_ready}
+                    className="rounded-md border border-blue-400/40 px-3 py-2 text-sm font-semibold text-blue-100 hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:border-gray-600 disabled:text-gray-400"
+                  >
+                    {validatingProvider === 'paypal_orders' ? 'Validating...' : 'Validate credentials'}
+                  </button>
+                  <div className={`rounded-md border px-3 py-2 text-sm font-semibold ${
+                    paypalStatus.ready_to_enable
+                      ? 'border-emerald-400/40 bg-emerald-500/20 text-emerald-100'
+                      : 'border-amber-400/40 bg-amber-500/15 text-amber-100'
+                  }`}>
+                    {paypalStatus.ready_to_enable ? 'Config ready' : 'Config incomplete'}
+                  </div>
                 </div>
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -464,8 +535,17 @@ export default function PaymentSettingsModule() {
                 </ul>
               ) : (
                 <p className="mt-4 text-sm text-emerald-100">
-                  PayPal can be enabled. Guests will be sent to PayPal for approval and returned to Midway Music Hall for final payment finalization.
+                  PayPal configuration is complete. Use Validate credentials before enabling it for a live category.
                 </p>
+              )}
+              {paypalValidation && (
+                <div className={`mt-4 rounded-lg border px-3 py-2 text-sm ${
+                  paypalValidation.ok
+                    ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100'
+                    : 'border-rose-400/40 bg-rose-500/15 text-rose-100'
+                }`}>
+                  {paypalValidation.message || (paypalValidation.ok ? 'PayPal validation passed.' : 'PayPal validation failed.')}
+                </div>
               )}
             </div>
           </div>

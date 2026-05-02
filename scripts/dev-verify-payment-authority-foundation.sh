@@ -214,6 +214,20 @@ public_post_with_status() {
   rm -f "$body_file"
 }
 
+payment_start_payload() {
+  local access_token="$1"
+  python3 - "$access_token" <<'PY'
+import json
+import sys
+print(json.dumps({"payment_access_token": sys.argv[1]}))
+PY
+}
+
+payment_access_token_from_request_json() {
+  local request_json="$1"
+  json_field "$request_json" "seat_request.payment_access_token"
+}
+
 restore_backend_env() {
   if [ ! -f "$BACKEND_ENV_BACKUP" ]; then
     return
@@ -341,6 +355,7 @@ configure_square_verify_env() {
     printf 'SQUARE_WEBHOOK_SIGNATURE_KEY=%s\n' "$square_verify_signature_key"
     printf 'SQUARE_WEBHOOK_NOTIFICATION_URL=%s\n' "$square_verify_notification_url"
     printf 'SQUARE_API_BASE_URL=http://127.0.0.1:%s\n' "$square_stub_port"
+    printf 'PAYMENT_ACCESS_SECRET=verify-payment-access-secret-000000000000\n'
   } > "$BACKEND_ENV_FILE"
 }
 
@@ -505,7 +520,7 @@ if [ "$(json_field "$schema_json" "has_payment_provider_type_square")" != "true"
   exit 1
 fi
 
-log_step "[payment-authority-foundation] selecting active category and enabling dynamic payment scaffold"
+log_step "[payment-authority-foundation] selecting active category and enabling dynamic Square payment"
 category_json="$(admin_get_json "/event-categories")"
 target_category_id="$(CATEGORY_JSON="$category_json" python3 - <<'PY'
 import json
@@ -583,8 +598,13 @@ unpriced_event_id="$(create_event "Verify Payment Authority Unpriced ${auto_now}
 log_step "[payment-authority-foundation] verifying request creation stores authoritative totals and valid payment summary"
 priced_request_json="$(submit_request "$priced_event_id" "payment-authority-priced@example.com" '["Verify-19-1"]')"
 priced_request_id="$(json_field "$priced_request_json" "seat_request.id")"
+priced_payment_access_token="$(payment_access_token_from_request_json "$priced_request_json")"
 if [ -z "$priced_request_id" ] || [ "$priced_request_id" = "null" ]; then
   log_error "failed to create priced seat request: $priced_request_json"
+  exit 1
+fi
+if [ -z "$priced_payment_access_token" ] || [ "$priced_payment_access_token" = "null" ]; then
+  log_error "priced request did not include a payment access token"
   exit 1
 fi
 if [ "$(json_field "$priced_request_json" "seat_request.total_amount")" != "15.00" ]; then
@@ -601,6 +621,11 @@ if [ "$(json_field "$priced_request_json" "seat_request.payment_summary.can_offe
 fi
 
 public_post_with_status "/seat-requests/${priced_request_id}/payment/start"
+if [ "$LAST_STATUS" != "403" ] || [ "$(json_field "$LAST_BODY" "code")" != "PAYMENT_ACCESS_DENIED" ]; then
+  log_error "payment/start did not reject a missing payment access token: ${LAST_BODY}"
+  exit 1
+fi
+public_post_with_status "/seat-requests/${priced_request_id}/payment/start" "$(payment_start_payload "$priced_payment_access_token")"
 if [ "$LAST_STATUS" != "200" ]; then
   log_error "expected payment/start to succeed for valid Square-backed request, got ${LAST_STATUS}: ${LAST_BODY}"
   exit 1
@@ -640,7 +665,7 @@ for field in payment_provider payment_order_id payment_capture_id; do
     exit 1
   fi
 done
-public_post_with_status "/seat-requests/${priced_request_id}/payment/start"
+public_post_with_status "/seat-requests/${priced_request_id}/payment/start" "$(payment_start_payload "$priced_payment_access_token")"
 if [ "$LAST_STATUS" != "200" ] \
   || [ "$(json_field "$LAST_BODY" "provider_type")" != "square" ] \
   || [ "$(json_field "$LAST_BODY" "checkout_url")" = "null" ]; then
@@ -651,6 +676,7 @@ fi
 log_step "[payment-authority-foundation] verifying invalid amount blocks payment start"
 unpriced_request_json="$(submit_request "$unpriced_event_id" "payment-authority-unpriced@example.com" '["Verify-19-1"]')"
 unpriced_request_id="$(json_field "$unpriced_request_json" "seat_request.id")"
+unpriced_payment_access_token="$(payment_access_token_from_request_json "$unpriced_request_json")"
 if [ -z "$unpriced_request_id" ] || [ "$unpriced_request_id" = "null" ]; then
   log_error "failed to create unpriced seat request: $unpriced_request_json"
   exit 1
@@ -659,7 +685,7 @@ if [ "$(json_field "$unpriced_request_json" "seat_request.total_amount")" != "nu
   log_error "expected unpriced request total_amount to remain null"
   exit 1
 fi
-public_post_with_status "/seat-requests/${unpriced_request_id}/payment/start"
+public_post_with_status "/seat-requests/${unpriced_request_id}/payment/start" "$(payment_start_payload "$unpriced_payment_access_token")"
 if [ "$LAST_STATUS" != "422" ] || [ "$(json_field "$LAST_BODY" "code")" != "PAYMENT_AMOUNT_INVALID" ]; then
   log_error "invalid amount was not blocked by payment/start: ${LAST_BODY}"
   exit 1
@@ -668,12 +694,13 @@ fi
 log_step "[payment-authority-foundation] verifying invalid currency blocks payment start"
 currency_request_json="$(submit_request "$priced_event_id" "payment-authority-currency@example.com" '["Verify-20-1"]')"
 currency_request_id="$(json_field "$currency_request_json" "seat_request.id")"
+currency_payment_access_token="$(payment_access_token_from_request_json "$currency_request_json")"
 if [ -z "$currency_request_id" ] || [ "$currency_request_id" = "null" ]; then
   log_error "failed to create currency verification seat request: $currency_request_json"
   exit 1
 fi
 set_request_currency_invalid "$currency_request_id"
-public_post_with_status "/seat-requests/${currency_request_id}/payment/start"
+public_post_with_status "/seat-requests/${currency_request_id}/payment/start" "$(payment_start_payload "$currency_payment_access_token")"
 if [ "$LAST_STATUS" != "422" ] || [ "$(json_field "$LAST_BODY" "code")" != "PAYMENT_CURRENCY_INVALID" ]; then
   log_error "invalid currency was not blocked by payment/start: ${LAST_BODY}"
   exit 1
@@ -682,11 +709,12 @@ fi
 log_step "[payment-authority-foundation] reconciling a Square-backed paid request and preparing unpaid-expired comparison"
 paid_request_json="$(submit_request "$priced_event_id" "payment-authority-paid@example.com" '["Verify-20-2"]')"
 paid_request_id="$(json_field "$paid_request_json" "seat_request.id")"
+paid_payment_access_token="$(payment_access_token_from_request_json "$paid_request_json")"
 if [ -z "$paid_request_id" ] || [ "$paid_request_id" = "null" ]; then
   log_error "failed to create paid-pending seat request: $paid_request_json"
   exit 1
 fi
-public_post_with_status "/seat-requests/${paid_request_id}/payment/start"
+public_post_with_status "/seat-requests/${paid_request_id}/payment/start" "$(payment_start_payload "$paid_payment_access_token")"
 if [ "$LAST_STATUS" != "200" ] \
   || [ "$(json_field "$LAST_BODY" "provider_type")" != "square" ] \
   || [ "$(json_field "$LAST_BODY" "checkout_url")" = "null" ]; then
@@ -751,7 +779,7 @@ if [ "$(json_field "$expired_request_after_seed" "status")" != "expired" ]; then
   exit 1
 fi
 
-public_post_with_status "/seat-requests/${paid_request_id}/payment/start"
+public_post_with_status "/seat-requests/${paid_request_id}/payment/start" "$(payment_start_payload "$paid_payment_access_token")"
 if [ "$LAST_STATUS" != "409" ] || [ "$(json_field "$LAST_BODY" "code")" != "PAYMENT_ALREADY_COMPLETED" ]; then
   log_error "paid request was not blocked from re-starting payment: ${LAST_BODY}"
   exit 1

@@ -95,6 +95,7 @@ const resolvePaymentStatusState = (code, fallback = 'help') => {
     case 'PAYMENT_NOT_CONFIGURED':
     case 'PAYMENT_AMOUNT_INVALID':
     case 'PAYMENT_CURRENCY_INVALID':
+    case 'PAYMENT_ACCESS_DENIED':
       return 'unavailable';
     default:
       return fallback;
@@ -126,10 +127,11 @@ export default function EventSeatingModal({ event, onClose }) {
     return event?.payment_option && typeof event.payment_option === 'object' ? [event.payment_option] : [];
   }, [event?.payment_option, event?.payment_options]);
   const [paymentPanelDismissed, setPaymentPanelDismissed] = useState(false);
-  const [postSubmitPaymentReady, setPostSubmitPaymentReady] = useState(false); // Phase 3 scaffold: post-submit payment gate
+  const [postSubmitPaymentReady, setPostSubmitPaymentReady] = useState(false);
   const [submittedTotalAmount, setSubmittedTotalAmount] = useState(null);
   const [submittedCurrency, setSubmittedCurrency] = useState('USD');
   const [submittedSeatRequestId, setSubmittedSeatRequestId] = useState(null);
+  const [submittedPaymentAccessToken, setSubmittedPaymentAccessToken] = useState('');
   const [submittedPaymentSummary, setSubmittedPaymentSummary] = useState(null);
   const [paymentLaunchState, setPaymentLaunchState] = useState({ providerType: '', starting: false });
   const [paymentLaunchError, setPaymentLaunchError] = useState('');
@@ -337,7 +339,9 @@ export default function EventSeatingModal({ event, onClose }) {
     setPostSubmitPaymentReady(false);
     setSubmittedTotalAmount(null);
     setSubmittedCurrency('USD');
+    setSubmittedSeatRequestId(null);
     setSubmittedPaymentSummary(null);
+    setSubmittedPaymentAccessToken('');
     setSuccessMessage('');
     setErrorMessage('');
     setShowLargeMap(false);
@@ -894,6 +898,7 @@ export default function EventSeatingModal({ event, onClose }) {
     setSubmittedTotalAmount(null);
     setSubmittedCurrency('USD');
     setSubmittedSeatRequestId(null);
+    setSubmittedPaymentAccessToken('');
     setSubmittedPaymentSummary(null);
     setPaymentLaunchState({ providerType: '', starting: false });
     setPaymentLaunchError('');
@@ -907,6 +912,7 @@ export default function EventSeatingModal({ event, onClose }) {
     setSubmittedTotalAmount(null);
     setSubmittedCurrency('USD');
     setSubmittedSeatRequestId(null);
+    setSubmittedPaymentAccessToken('');
     setSubmittedPaymentSummary(null);
     setPaymentLaunchState({ providerType: '', starting: false });
     setPaymentLaunchError('');
@@ -972,6 +978,11 @@ export default function EventSeatingModal({ event, onClose }) {
             : 'USD'
         );
         setSubmittedSeatRequestId(Number.isFinite(apiSeatRequestId) && apiSeatRequestId > 0 ? apiSeatRequestId : null);
+        setSubmittedPaymentAccessToken(
+          typeof apiSeatRequest.payment_access_token === 'string'
+            ? apiSeatRequest.payment_access_token
+            : ''
+        );
         setSubmittedPaymentSummary(apiSeatRequest.payment_summary && typeof apiSeatRequest.payment_summary === 'object'
           ? apiSeatRequest.payment_summary
           : null);
@@ -1059,7 +1070,7 @@ export default function EventSeatingModal({ event, onClose }) {
   });
 
   const handleStartPayment = async (providerType) => {
-    if (!submittedSeatRequestId || paymentLaunchState.starting) {
+    if (!submittedSeatRequestId || !submittedPaymentAccessToken || paymentLaunchState.starting) {
       return;
     }
     const providerLabel = visiblePaymentOptions.find((option) => option?.provider_type === providerType)?.provider_label
@@ -1073,7 +1084,10 @@ export default function EventSeatingModal({ event, onClose }) {
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify({ provider_type: providerType }),
+        body: JSON.stringify({
+          provider_type: providerType,
+          payment_access_token: submittedPaymentAccessToken,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.success) {
@@ -1095,6 +1109,9 @@ export default function EventSeatingModal({ event, onClose }) {
       }
       if (data?.payment_summary && typeof data.payment_summary === 'object') {
         setSubmittedPaymentSummary(data.payment_summary);
+      }
+      if (typeof data?.payment_access_token === 'string' && data.payment_access_token.trim()) {
+        setSubmittedPaymentAccessToken(data.payment_access_token.trim());
       }
       if (data?.payment_completed) {
         if (typeof window !== 'undefined') {
@@ -1822,7 +1839,7 @@ export default function EventSeatingModal({ event, onClose }) {
                                   <button
                                     type="button"
                                     onClick={() => handleStartPayment(providerType)}
-                                    disabled={paymentLaunchState.starting || !submittedSeatRequestId}
+                                    disabled={paymentLaunchState.starting || !submittedSeatRequestId || !submittedPaymentAccessToken}
                                     className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 font-semibold text-white focus:outline-none focus:ring-2 disabled:cursor-not-allowed ${
                                       providerType === 'square'
                                         ? 'bg-emerald-600 hover:bg-emerald-500 focus:ring-emerald-300 disabled:bg-emerald-900/60 disabled:text-emerald-200/80'
