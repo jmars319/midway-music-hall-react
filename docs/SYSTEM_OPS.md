@@ -32,7 +32,7 @@ This document covers deployment, hosting, data model rationale, and operational 
 
 ## Deployment workflows
 - **Canonical guide:** `docs/DEPLOYMENT_GUIDE.md`.
-- **Packages:** `scripts/make-deploy-zips.sh` and `scripts/check-deploy-zips.sh` enforce bundle correctness.
+- **Packages:** `scripts/make-deploy-zips.sh` and `scripts/check-deploy-zips.sh` enforce the current two-zip deployment. `scripts/make-deploy-site-zip.sh` and `scripts/check-deploy-site-zip.sh` prepare a future single-zip flow that preserves `api/.env` and `api/uploads/`.
 - **Database migrations:** Canonical SQL files in `database/` are applied manually via phpMyAdmin.
 
 ## Monitoring and troubleshooting

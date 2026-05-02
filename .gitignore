@@ -42,6 +42,8 @@ deploy-frontend-*.zip
 deploy-backend-*.zip
 deploy-frontend.zip
 deploy-backend.zip
+deploy-site.zip
+deploy-site-*.zip
 # PID files and logs for local dev runner scripts
 .dev/
 # Local dev configuration

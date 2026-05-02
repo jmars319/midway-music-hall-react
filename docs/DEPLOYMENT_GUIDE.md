@@ -37,11 +37,23 @@ bash scripts/check-deploy-zips.sh
 ```
 Note: `scripts/make-deploy-zips.sh` runs the frontend build automatically before creating the zips.
 
+Future single-archive packaging:
+```bash
+bash scripts/make-deploy-site-zip.sh
+bash scripts/check-deploy-site-zip.sh
+```
+`deploy-site.zip` is structured to extract directly into `public_html/midwaymusichall.net/`. It places backend files under `api/` and intentionally excludes `api/.env*` and `api/uploads/`.
+
 ## Upload steps (cPanel)
 1. Upload and extract the contents of `frontend/build/` into `public_html/midwaymusichall.net/`.
 2. Upload the repo root `.htaccess` into the same folder.
 3. Upload the repo `backend/` folder and rename it to `api/`.
 4. Set permissions: directories 755, files 644, and `api/uploads/` to 775.
+
+Single-archive upload option:
+1. Upload `deploy-site.zip` into `public_html/midwaymusichall.net/`.
+2. Extract it over the existing site folder.
+3. Do not delete the existing `api/` directory before extraction; the archive omits `api/.env` and `api/uploads/`, so extraction should preserve those existing production files.
 
 ## Production environment variables
 File: `public_html/midwaymusichall.net/api/.env`
