@@ -1,4 +1,6 @@
-// SeatingModule: admin layout editor and seating management UI
+// Deprecated legacy seating editor.
+// Active seating template management lives in LayoutsModule.js.
+// Keep this file unmounted unless the legacy /api/seating workflow is deliberately restored.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, Edit } from 'lucide-react';
 import TableComponent from '../components/TableComponent';

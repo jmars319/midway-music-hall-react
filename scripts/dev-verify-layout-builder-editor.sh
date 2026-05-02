@@ -36,6 +36,26 @@ if ! rg -n "updateSeatLabel\\(row\\.id, seatNumber, e\\.target\\.value\\)" "$ROO
   log_error "[layout-builder] Seat Labels are not bound to updateSeatLabel"
   exit 1
 fi
+if ! rg -n "startPointerDrag" "$ROOT_DIR/frontend/src/admin/LayoutsModule.js" >/dev/null; then
+  log_error "[layout-builder] pointer drag helper is missing from LayoutsModule"
+  exit 1
+fi
+if ! rg -n "handleRowPointerDown" "$ROOT_DIR/frontend/src/admin/LayoutsModule.js" >/dev/null; then
+  log_error "[layout-builder] seating objects are not wired to pointer drag"
+  exit 1
+fi
+if ! rg -n "handleStagePointerDown" "$ROOT_DIR/frontend/src/admin/LayoutsModule.js" >/dev/null; then
+  log_error "[layout-builder] stage is not wired to pointer drag"
+  exit 1
+fi
+if rg -n "onDragStart|draggable|onDrop|onDragOver" "$ROOT_DIR/frontend/src/admin/LayoutsModule.js" >/dev/null; then
+  log_error "[layout-builder] native HTML drag/drop handlers should not be used for editor movement"
+  exit 1
+fi
+if rg -n "SeatingModule" "$ROOT_DIR/frontend/src/admin/index.js" "$ROOT_DIR/frontend/src/admin/AdminPanel.js" >/dev/null; then
+  log_error "[layout-builder] legacy SeatingModule should not be exported from the admin barrel or mounted in AdminPanel"
+  exit 1
+fi
 
 log_step "[layout-builder] verifying rotated labels are rendered upright"
 if ! rg -n "textRotation = 0" "$ROOT_DIR/frontend/src/components/TableComponent.js" >/dev/null; then
@@ -48,10 +68,6 @@ if ! rg -n -F 'textRotationStyle = textRotation ? { transform: `rotate(${textRot
 fi
 if ! rg -n "textRotationStyle \\|\\| undefined" "$ROOT_DIR/frontend/src/components/TableComponent.js" >/dev/null; then
   log_error "[layout-builder] TableComponent is not applying counter-rotation to seat status badges"
-  exit 1
-fi
-if ! rg -n "textRotation=\\{-\\(draggingRow\\.rotation \\|\\| 0\\)\\}" "$ROOT_DIR/frontend/src/admin/LayoutsModule.js" >/dev/null; then
-  log_error "[layout-builder] ghost table preview is not counter-rotating text"
   exit 1
 fi
 if ! rg -n "textRotation=\\{-\\(row\\.rotation \\|\\| 0\\)\\}" "$ROOT_DIR/frontend/src/admin/LayoutsModule.js" "$ROOT_DIR/frontend/src/components/SeatingChart.js" "$ROOT_DIR/frontend/src/components/EventSeatingModal.js" "$ROOT_DIR/frontend/src/admin/SeatRequestsModule.js" >/dev/null; then

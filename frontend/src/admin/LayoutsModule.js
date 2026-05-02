@@ -97,6 +97,11 @@ const canPreviewSeatObject = (row = {}) => {
     || normalizedShape === 'chair'
     || /^(table-|high-top-|round-|bar-|booth-|standing-)/.test(normalizedShape);
 };
+const readPercentValue = (value, fallback = 0) => {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+const roundPercent = (value) => Number.parseFloat(value.toFixed(2));
 
 export default function LayoutsModule() {
   const [layouts, setLayouts] = useState([]);
@@ -125,14 +130,11 @@ export default function LayoutsModule() {
   const containerRef = useRef(null);
   const canvasInnerRef = useRef(null);
   const editorShellRef = useRef(null);
-  const [draggingRow, setDraggingRow] = useState(null);
+  const activeDragRef = useRef(null);
   const [showGrid, setShowGrid] = useState(true);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [gridSize, setGridSize] = useState(5); // percentage
-  const [ghostPosition, setGhostPosition] = useState(null);
   const [stagePosition, setStagePosition] = useState({ x: 50, y: 10 });
-  const [draggingStage, setDraggingStage] = useState(false);
-  const [stageGhostPosition, setStageGhostPosition] = useState(null);
   const [stageSize, setStageSize] = useState({ width: 200, height: 80 });
   const [, setResizingStage] = useState(false);
   const [canvasSettings, setCanvasSettings] = useState({
@@ -172,6 +174,8 @@ export default function LayoutsModule() {
   useEffect(() => { fetchLayouts(); }, []);
   useEffect(() => {
     if (!showEditor) {
+      activeDragRef.current?.cleanup?.();
+      activeDragRef.current = null;
       setPanMode(false);
       setMapInteractionEnabled(false);
       setZoom(1);
@@ -482,12 +486,6 @@ export default function LayoutsModule() {
     }));
   };
 
-  const handleRowDragStart = (e, row) => {
-    setDraggingRow(row);
-    setSelectedRowId(row.id);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
   const snapToGridValue = (value) => {
     if (!snapToGrid) return value;
     return Math.round(value / gridSize) * gridSize;
@@ -502,11 +500,13 @@ export default function LayoutsModule() {
     return canvasInnerRef.current.getBoundingClientRect();
   };
 
-  const calculatePositionFromEvent = (e) => {
+  const calculateDragPosition = (dragState, clientX, clientY) => {
     const rect = getCanvasRect();
-    if (!rect) return { x: 0, y: 0 };
-    let x = ((e.clientX - rect.left) / rect.width) * 100;
-    let y = ((e.clientY - rect.top) / rect.height) * 100;
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      return dragState.lastPosition || dragState.startPosition;
+    }
+    let x = dragState.startPosition.x + ((clientX - dragState.startClientX) / rect.width) * 100;
+    let y = dragState.startPosition.y + ((clientY - dragState.startClientY) / rect.height) * 100;
     if (snapToGrid) {
       x = snapToGridValue(x);
       y = snapToGridValue(y);
@@ -524,6 +524,110 @@ export default function LayoutsModule() {
     });
   };
 
+  const startPointerDrag = (event, { startPosition, applyPosition }) => {
+    if (!canvasInnerRef.current) return;
+    if (typeof event.button === 'number' && event.button !== 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    activeDragRef.current?.cleanup?.();
+
+    const target = event.currentTarget;
+    const dragState = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startPosition,
+      lastPosition: startPosition,
+      moved: false,
+      cleanup: null,
+    };
+
+    const cleanup = () => {
+      try {
+        target.releasePointerCapture?.(dragState.pointerId);
+      } catch (captureErr) {
+        // Pointer capture may already be released by the browser.
+      }
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+      if (activeDragRef.current === dragState) {
+        activeDragRef.current = null;
+      }
+    };
+
+    const handlePointerMove = (moveEvent) => {
+      if (moveEvent.pointerId !== dragState.pointerId) return;
+      moveEvent.preventDefault();
+      const distance = Math.hypot(
+        moveEvent.clientX - dragState.startClientX,
+        moveEvent.clientY - dragState.startClientY
+      );
+      if (!dragState.moved && distance < 2) return;
+      dragState.moved = true;
+      const coords = calculateDragPosition(dragState, moveEvent.clientX, moveEvent.clientY);
+      dragState.lastPosition = coords;
+      updateDebugOverlay(coords, moveEvent.clientX, moveEvent.clientY);
+      applyPosition(coords);
+    };
+
+    const handlePointerUp = (upEvent) => {
+      if (upEvent.pointerId !== dragState.pointerId) return;
+      if (dragState.moved) {
+        const coords = typeof upEvent.clientX === 'number'
+          ? calculateDragPosition(dragState, upEvent.clientX, upEvent.clientY)
+          : dragState.lastPosition;
+        dragState.lastPosition = coords;
+        applyPosition(coords);
+      }
+      cleanup();
+    };
+
+    dragState.cleanup = cleanup;
+    activeDragRef.current = dragState;
+    setMapInteractionEnabled(true);
+    target.setPointerCapture?.(event.pointerId);
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+  };
+
+  const shouldIgnoreObjectPointerDown = (target) => (
+    Boolean(target?.closest?.('button, input, textarea, select, [data-layout-control="true"], [data-layout-resize="true"]'))
+  );
+
+  const handleRowPointerDown = (event, row) => {
+    if (shouldIgnoreObjectPointerDown(event.target)) return;
+    setSelectedRowId(row.id);
+    setHoveredRowId(row.id);
+    startPointerDrag(event, {
+      startPosition: {
+        x: readPercentValue(row.pos_x, 50),
+        y: readPercentValue(row.pos_y, 50),
+      },
+      applyPosition: (coords) => {
+        const nextPosition = { pos_x: roundPercent(coords.x), pos_y: roundPercent(coords.y) };
+        setLayoutRows((prev) => prev.map((currentRow) => (
+          currentRow.id === row.id ? { ...currentRow, ...nextPosition } : currentRow
+        )));
+      },
+    });
+  };
+
+  const handleStagePointerDown = (event) => {
+    if (shouldIgnoreObjectPointerDown(event.target)) return;
+    startPointerDrag(event, {
+      startPosition: {
+        x: readPercentValue(stagePosition.x, DEFAULT_STAGE_POSITION.x),
+        y: readPercentValue(stagePosition.y, DEFAULT_STAGE_POSITION.y),
+      },
+      applyPosition: (coords) => {
+        setStagePosition({ x: roundPercent(coords.x), y: roundPercent(coords.y) });
+      },
+    });
+  };
+
   const handleCanvasPresetChange = (presetKey) => {
     const preset = canvasPresets.find(p => p.key === presetKey);
     if (!preset) return;
@@ -532,42 +636,6 @@ export default function LayoutsModule() {
       width: preset.width,
       height: preset.height
     });
-  };
-
-  const handleCanvasDragOver = (e) => {
-    e.preventDefault();
-    if (!canvasInnerRef.current) return;
-    const coords = calculatePositionFromEvent(e);
-    updateDebugOverlay(coords, e.clientX, e.clientY);
-
-    if (draggingStage) {
-      setStageGhostPosition(coords);
-      return;
-    }
-    
-    if (draggingRow) {
-      setGhostPosition(coords);
-    }
-  };
-
-  const handleCanvasDrop = (e) => {
-    e.preventDefault();
-    
-    if (draggingStage) {
-      handleStageDrop(e);
-      return;
-    }
-    
-    if (!draggingRow || !canvasInnerRef.current) return;
-
-    const { x, y } = calculatePositionFromEvent(e);
-    setLayoutRows(layoutRows.map(r => 
-      r.id === draggingRow.id 
-        ? { ...r, pos_x: clampPercent(x), pos_y: clampPercent(y) }
-        : r
-    ));
-    setDraggingRow(null);
-    setGhostPosition(null);
   };
 
   const handleWheel = (e) => {
@@ -583,7 +651,7 @@ export default function LayoutsModule() {
   };
 
   const handlePanMouseDown = (e) => {
-    if (!mapInteractionEnabled || !panMode || draggingRow || draggingStage) return;
+    if (!mapInteractionEnabled || !panMode || activeDragRef.current) return;
     e.preventDefault();
     setIsPanning(true);
     panRef.current = {
@@ -647,21 +715,6 @@ export default function LayoutsModule() {
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const handleStageDragStart = (e) => {
-    setDraggingStage(true);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  const handleStageDrop = (e) => {
-    e.preventDefault();
-    if (!draggingStage) return;
-
-    const { x, y } = calculatePositionFromEvent(e);
-    setStagePosition({ x: clampPercent(x), y: clampPercent(y) });
-    setDraggingStage(false);
-    setStageGhostPosition(null);
   };
 
   const handleStageResize = (e, direction) => {
@@ -1155,8 +1208,6 @@ export default function LayoutsModule() {
               <div 
                 ref={containerRef}
                 className={`flex-1 bg-gray-100 dark:bg-gray-900 relative overflow-hidden ${mapInteractionEnabled && panMode ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
-                onDrop={handleCanvasDrop}
-                onDragOver={handleCanvasDragOver}
                 onWheel={handleWheel}
                 onMouseDown={handlePanMouseDown}
                 onMouseMove={handlePanMouseMove}
@@ -1188,6 +1239,7 @@ export default function LayoutsModule() {
                 )}
                 <div
                   ref={canvasInnerRef}
+                  data-layout-canvas="true"
                   className="relative"
                   style={{
                     width: `${canvasSettings.width}px`,
@@ -1202,33 +1254,20 @@ export default function LayoutsModule() {
                     style={{ boxShadow: 'inset 0 0 50px rgba(0,0,0,0.6)' }}
                     aria-hidden="true"
                   />
-                  {/* Stage Ghost Preview */}
-                  {stageGhostPosition && draggingStage && (
-                    <div
-                      className="absolute pointer-events-none border-4 border-dashed border-amber-500 bg-amber-200/30 dark:bg-amber-900/30 rounded-lg z-10"
-                      style={{
-                        left: `${stageGhostPosition.x}%`,
-                        top: `${stageGhostPosition.y}%`,
-                        transform: 'translate(-50%, -50%)',
-                        width: `${stageSize.width}px`,
-                        height: `${stageSize.height}px`,
-                        opacity: 0.6
-                      }}
-                    />
-                  )}
 
                   {/* Stage */}
                   <div 
                     data-layout-stage="true"
-                    draggable
-                    onDragStart={handleStageDragStart}
-                    className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg cursor-move hover:ring-2 hover:ring-amber-500 z-10 flex items-center justify-center"
+                    onPointerDown={handleStagePointerDown}
+                    className="absolute bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 rounded-lg font-bold shadow-lg cursor-move hover:ring-2 hover:ring-amber-500 z-10 flex items-center justify-center select-none"
                     style={{
                       left: `${stagePosition.x}%`,
                       top: `${stagePosition.y}%`,
                       transform: 'translate(-50%, -50%)',
                       width: `${stageSize.width}px`,
-                      height: `${stageSize.height}px`
+                      height: `${stageSize.height}px`,
+                      touchAction: 'none',
+                      userSelect: 'none'
                     }}
                     title="Drag to reposition stage"
                   >
@@ -1236,65 +1275,30 @@ export default function LayoutsModule() {
                     
                     {/* Resize Handles */}
                     <div
+                      data-layout-resize="true"
                       className="absolute -right-1 -bottom-1 w-4 h-4 bg-amber-600 rounded-full cursor-se-resize hover:scale-125 transition-transform"
                       onMouseDown={(e) => handleStageResize(e, 'right-bottom')}
                       title="Resize stage"
                     />
                     <div
+                      data-layout-resize="true"
                       className="absolute -left-1 -bottom-1 w-4 h-4 bg-amber-600 rounded-full cursor-sw-resize hover:scale-125 transition-transform"
                       onMouseDown={(e) => handleStageResize(e, 'left-bottom')}
                       title="Resize stage"
                     />
                     <div
+                      data-layout-resize="true"
                       className="absolute -right-1 -top-1 w-4 h-4 bg-amber-600 rounded-full cursor-ne-resize hover:scale-125 transition-transform"
                       onMouseDown={(e) => handleStageResize(e, 'right-top')}
                       title="Resize stage"
                     />
                     <div
+                      data-layout-resize="true"
                       className="absolute -left-1 -top-1 w-4 h-4 bg-amber-600 rounded-full cursor-nw-resize hover:scale-125 transition-transform"
                       onMouseDown={(e) => handleStageResize(e, 'left-top')}
                       title="Resize stage"
                     />
                   </div>
-
-                  {/* Table Ghost Preview */}
-                  {ghostPosition && draggingRow && (
-                    <div
-                      className="absolute pointer-events-none"
-                      style={{
-                        left: `${ghostPosition.x}%`,
-                        top: `${ghostPosition.y}%`,
-                        transform: `translate(-50%, -50%)`,
-                        opacity: 0.5
-                      }}
-                    >
-                      <div className="mb-1 text-xs font-medium text-purple-600 dark:text-purple-400 text-center flex flex-col gap-0.5">
-                        {(() => {
-                          const ghostLabels = resolveRowHeaderLabels(draggingRow);
-                          return (
-                            <>
-                              {ghostLabels.sectionLabel && <span>{ghostLabels.sectionLabel}</span>}
-                              {ghostLabels.rowLabel && <span className="font-semibold text-purple-700 dark:text-purple-100">{ghostLabels.rowLabel}</span>}
-                            </>
-                          );
-                        })()}
-                      </div>
-                      <div 
-                        className="border-4 border-dashed border-purple-500 rounded-lg bg-purple-200 dark:bg-purple-900/30"
-                        style={{ transform: `rotate(${draggingRow.rotation || 0}deg)` }}
-                      >
-                        <TableComponent
-                          row={draggingRow}
-                          tableShape={resolveTableShapeForRow(draggingRow)}
-                          selectedSeats={[]}
-                          pendingSeats={[]}
-                          onToggleSeat={() => {}}
-                          interactive={false}
-                          textRotation={-(draggingRow.rotation || 0)}
-                        />
-                      </div>
-                    </div>
-                  )}
 
                   {/* Tables & Objects */}
                   {layoutRows.map((row) => {
@@ -1315,13 +1319,12 @@ export default function LayoutsModule() {
                         <div
                           key={row.id}
                           data-layout-row="true"
-                          draggable
-                          onDragStart={(e) => handleRowDragStart(e, row)}
+                          onPointerDown={(e) => handleRowPointerDown(e, row)}
                           onClick={() => setSelectedRowId(row.id)}
                           onMouseEnter={() => setHoveredRowId(row.id)}
                           onMouseLeave={() => setHoveredRowId((prev) => (prev === row.id ? null : prev))}
-                          className={`absolute cursor-move ${isSelected ? 'ring-2 ring-purple-400' : 'hover:ring-2 hover:ring-purple-500'} rounded-lg`}
-                          style={{ ...baseStyle, transform: `translate(-50%, -50%) rotate(${rotation}deg)` }}
+                          className={`absolute cursor-move select-none ${isSelected ? 'ring-2 ring-purple-400' : 'hover:ring-2 hover:ring-purple-500'} rounded-lg`}
+                          style={{ ...baseStyle, transform: `translate(-50%, -50%) rotate(${rotation}deg)`, touchAction: 'none', userSelect: 'none' }}
                         >
                           <div
                             className="rounded-lg shadow-lg flex items-center justify-center text-xs font-semibold text-gray-900 dark:text-white"
@@ -1335,6 +1338,7 @@ export default function LayoutsModule() {
                           >
                             <span style={rotation ? { transform: `rotate(${-rotation}deg)` } : undefined}>{row.label || row.section_name || 'Marker'}</span>
                             <div
+                              data-layout-resize="true"
                               onMouseDown={(e) => handleMarkerResizeStart(e, row.id)}
                               className="absolute -bottom-2 -right-2 w-4 h-4 bg-white dark:bg-gray-900 border border-gray-400 rounded-full cursor-se-resize"
                               title="Resize"
@@ -1343,6 +1347,7 @@ export default function LayoutsModule() {
                           {showRowControls && (
                             <div className="mt-1 flex justify-center gap-1">
                               <button
+                                data-layout-control="true"
                                 onClick={() => handleRotateRow(row.id, -15)}
                                 className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
                                 title="Rotate -15°"
@@ -1351,6 +1356,7 @@ export default function LayoutsModule() {
                                 ↶
                               </button>
                               <button
+                                data-layout-control="true"
                                 onClick={() => handleRotateRow(row.id, 15)}
                                 className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
                                 title="Rotate +15°"
@@ -1359,6 +1365,7 @@ export default function LayoutsModule() {
                                 ↷
                               </button>
                               <button
+                                data-layout-control="true"
                                 onClick={() => handleDeleteRow(row.id)}
                                 className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
                                 type="button"
@@ -1378,17 +1385,18 @@ export default function LayoutsModule() {
                       <div
                         key={row.id}
                         data-layout-row="true"
-                        draggable
-                        onDragStart={(e) => handleRowDragStart(e, row)}
+                        onPointerDown={(e) => handleRowPointerDown(e, row)}
                         onClick={() => setSelectedRowId(row.id)}
                         onMouseEnter={() => setHoveredRowId(row.id)}
                         onMouseLeave={() => setHoveredRowId((prev) => (prev === row.id ? null : prev))}
-                        className={`absolute cursor-move rounded ${isSelected ? 'ring-2 ring-purple-400' : 'hover:ring-2 hover:ring-purple-500'}`}
+                        className={`absolute cursor-move select-none rounded ${isSelected ? 'ring-2 ring-purple-400' : 'hover:ring-2 hover:ring-purple-500'}`}
                         style={{
                           ...baseStyle,
                           transform: 'translate(-50%, -50%)',
                           width: `${containerWidth}px`,
                           height: `${containerHeight}px`,
+                          touchAction: 'none',
+                          userSelect: 'none',
                         }}
                       >
                         {showRowControls && (() => {
@@ -1427,6 +1435,7 @@ export default function LayoutsModule() {
                         {showRowControls && (
                           <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1 z-20">
                             <button
+                              data-layout-control="true"
                               onClick={() => handleRotateRow(row.id, -45)}
                               className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
                               type="button"
@@ -1434,6 +1443,7 @@ export default function LayoutsModule() {
                               ↶
                             </button>
                             <button
+                              data-layout-control="true"
                               onClick={() => handleRotateRow(row.id, 45)}
                               className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
                               type="button"
@@ -1441,6 +1451,7 @@ export default function LayoutsModule() {
                               ↷
                             </button>
                             <button
+                              data-layout-control="true"
                               onClick={() => handleDeleteRow(row.id)}
                               className="px-2 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
                               type="button"

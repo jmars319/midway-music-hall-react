@@ -27,10 +27,10 @@ This document covers admin-facing features, their implementation, and why they e
 - **How:** `LayoutsModule.js` and `/api/seating-layouts*`; backend snapshots versions into `seating_layout_versions` when applied to events.
 - **Why:** Events must have stable seating maps even if templates change later.
 
-## Seating editor (legacy/editor)
-- **What:** Direct row-by-row seating editor.
-- **How:** `SeatingModule.js` and `/api/seating` endpoints.
-- **Why:** Provides low-level control and quick fixes.
+## Seating editor (legacy)
+- **What:** Retired direct row-by-row seating editor.
+- **How:** `SeatingModule.js` is intentionally not mounted in the admin console; active template editing is handled by `LayoutsModule.js`.
+- **Why:** Keeps older low-level `/api/seating` workflow from being accidentally reintroduced.
 
 ## Seat requests workflow
 - **What:** Review, approve, deny, and restore reservations.
