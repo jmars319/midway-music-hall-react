@@ -171,7 +171,7 @@ export default function Footer({ onAdminClick, onNavigate }){
             rel="noopener noreferrer"
             className="group relative inline-flex items-center gap-2 text-[15px] text-gray-400 opacity-70 transition hover:opacity-90 focus-visible:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-400"
           >
-            <span>Powered by</span>
+            <span>Website by</span>
             <span className="h-[22px] w-[22px] rounded-full overflow-hidden border border-white/10 transition group-hover:drop-shadow-[0_0_6px_rgba(45,212,191,0.6)] group-focus-visible:drop-shadow-[0_0_6px_rgba(45,212,191,0.6)]">
               <img
                 src="/iconslogos/jamarq-q.png"
@@ -181,12 +181,12 @@ export default function Footer({ onAdminClick, onNavigate }){
                 decoding="async"
               />
             </span>
+            <span>JAMARQ Digital</span>
             <span
               role="tooltip"
               className="pointer-events-none absolute bottom-full left-1/2 mb-2 w-max max-w-[240px] -translate-x-1/2 rounded-md border border-teal-300/30 bg-gray-900/95 px-3 py-2 text-[11px] leading-snug text-gray-200 opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-visible:opacity-100"
             >
-              <span className="block">JAMARQ builds and maintains reliable websites and systems.</span>
-              <span className="block">Design, infrastructure, and long-term support.</span>
+              <span className="block">JAMARQ built and maintains this website, including design, infrastructure, reservations, and admin systems.</span>
             </span>
           </a>
         </div>
